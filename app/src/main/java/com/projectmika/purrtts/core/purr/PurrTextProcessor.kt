@@ -138,11 +138,21 @@ object PurrTextProcessor {
         "UFO", "HUD", "OS", "TTS", "NPU", "GPU", "CPU", "PCM", "DSP", "VIP", "SSR"
     )
 
+    private val STUTTER_DIGRAPHS = setOf("th", "sh", "ch", "ph", "wh", "qu")
+    private val HONORIFIC_SUFFIXES = setOf("san", "chan", "kun", "sama", "senpai", "sensei")
+
     private val REPLY_PREFIX_REGEX = Regex("\\[Replying to.*?]", RegexOption.IGNORE_CASE)
     private val EMOJI_VAPORIZER_REGEX = Regex("[\\x{1F300}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\u200B-\\u200D\\uFE0E\\uFE0F]")
-    private val ROLE_SPLIT_REGEX = Regex("(\\*[^*]+\\*|\"[^\"]+\"|“[^”]+”)")
+    private val ROLE_SPLIT_ACTION_ONLY_REGEX = Regex("(\\*[^*]+\\*)")
+    private val ROLE_SPLIT_ACTION_AND_QUOTE_REGEX = Regex("(\\*[^*]+\\*|\"[^\"]+\"|“[^”]+”)")
     private val EXPLICIT_PAUSE_REGEX = Regex("\\[\\s*pause\\s*:\\s*(\\d{1,4})\\s*(?:ms)?\\s*]", RegexOption.IGNORE_CASE)
-    private val ORGANIC_STUTTER_REGEX = Regex("\\b([a-z]{1,2})-(?=[a-z])", RegexOption.IGNORE_CASE)
+    private val COMPOUND_HYPHEN_REGEX = Regex("\\b([a-zA-Z]{2,})-([a-zA-Z]{2,})\\b")
+    private val ORGANIC_STUTTER_REGEX = Regex("\\b([a-z]{1,2})-(?=\\1[a-z])", RegexOption.IGNORE_CASE)
+    private val ABBREVIATION_DOT_REGEX = Regex("\\b(Mr|Mrs|Ms|Mx|Dr|Prof|St|Mt|Jr|Sr|vs|etc|Fig|Vol|Ch|No)\\.", RegexOption.IGNORE_CASE)
+    private val LATIN_ABBR_DOT_REGEX = Regex("\\b([ei])\\.([eg])\\.", RegexOption.IGNORE_CASE)
+    private val INITIAL_DOT_REGEX = Regex("\\b([A-Z])\\.(?=\\s+[A-Z])")
+    private val DECIMAL_DOT_REGEX = Regex("(?<=\\d)\\.(?=\\d)")
+    private val WORD_TOKEN_REGEX = Regex("[a-zA-Z0-9']+")
     private val ELLIPSIS_REGEX = Regex("(?:\\.\\s*){2,}|…+")
     private val EM_DASH_TILDE_REGEX = Regex("[—–~]+|--+")
     private val SENTENCE_END_REGEX = Regex("([.!?]+)(\\s|$)")
@@ -151,6 +161,8 @@ object PurrTextProcessor {
     private val BARE_MIKASTOP_REGEX = Regex("(?<!\\[\\[)\\bmikastop\\b(?!:)", RegexOption.IGNORE_CASE)
     private val SIGH_REGEX = Regex("(?<!-)\\b(ah+|mm+|ugh+)\\b(?!-)|(?<!-)\\boh\\b(?=[.!?,;:]|$)(?!-)", RegexOption.IGNORE_CASE)
     private val XML_TAG_REGEX = Regex("</?[^>]+(?:>|$)")
+    private val QUOTES_AND_LONE_APOSTROPHES_REGEX = Regex("[\"“”„«»‹›]|(?<![a-zA-Z])['’‘]|['’‘](?![a-zA-Z])")
+    private val BRACKETS_AND_MARKDOWN_REGEX = Regex("[\\[\\]{}()<>\\\\/*_#~|`^]")
     private val WEIRD_ASCII_REGEX = Regex("[\\[\\]{}()<>^|\\\\/=*%#$@+\"“”]")
     private val ACRONYM_RUN_REGEX = Regex("\\b[A-Z]{2,}\\b")
     private val COLLISION_SPACE_REGEX = Regex("\\s+([.?!,])")
@@ -161,40 +173,76 @@ object PurrTextProcessor {
     private val LEADING_GARBAGE_REGEX = Regex("^[^a-zA-Z0-9(¿¡]+")
     private val DANGLING_QUOTE_REGEX = Regex("([.!?,;:])([^a-zA-Z0-9]+)$")
 
+    fun normalizeTypography(text: String): String {
+        return text
+            .replace(Regex("[\u2018\u2019\u02BC\uFF07]"), "'")
+            .replace(Regex("[\u00A0\u2007\u202F]"), " ")
+    }
+
     fun process(
         rawText: String,
         profile: PurrProfile,
         customRules: List<PhoneticRule> = emptyList(),
-        rng: Random = Random(rawText.hashCode())
+        rng: Random = Random(rawText.hashCode()),
+        purrModuleActive: Boolean = true,
+        symbolShieldModuleActive: Boolean = true
     ): List<PurrChunk> {
-        val strippedReply = REPLY_PREFIX_REGEX.replace(rawText, "").trim()
+        val strippedReply = normalizeTypography(REPLY_PREFIX_REGEX.replace(rawText, "")).trim()
         if (strippedReply.isEmpty()) return emptyList()
 
-        // 1. Split text into *action*, "dialogue", and plain narration segments BEFORE stripping quotes/asterisks.
-        val roleSegments = splitIntoRoleSegments(strippedReply, profile.actionHandlingMode)
+        // Effective profile honors Tool Cartridge slotting (Ejecting TOOL-01 disables PURR rewriting;
+        // Ejecting TOOL-03 disables Symbol & Punctuation Shield).
+        val effectiveProfile = profile.copy(
+            enableSlangAndHonorifics = purrModuleActive && profile.enableSlangAndHonorifics,
+            enableMikaStopPauses = purrModuleActive && profile.enableMikaStopPauses,
+            enableSymbolShield = symbolShieldModuleActive && profile.enableSymbolShield,
+            sentimentConfig = if (purrModuleActive) {
+                profile.sentimentConfig
+            } else {
+                profile.sentimentConfig.copy(
+                    enabled = false,
+                    toneOverride = ArchetypeTone.NORMAL,
+                    stutterIntensity = 0f,
+                    vowelStretchIntensity = 0f
+                )
+            }
+        )
+        val effectiveRules = if (purrModuleActive) customRules else emptyList()
+
+        // 1. Split text into *action* (and "dialogue" only when Dual-Voice Split is enabled) BEFORE symbol stripping.
+        val roleSegments = splitIntoRoleSegments(
+            text = strippedReply,
+            actionMode = if (purrModuleActive) effectiveProfile.actionHandlingMode else ActionHandlingMode.DUAL_VOICE_ROUTING,
+            splitDialogueQuotes = effectiveProfile.enableDualVoiceSplit
+        )
         val output = mutableListOf<PurrChunk>()
 
         for (segment in roleSegments) {
-            val sentiment = PurrSentimentScorer.score(
-                text = segment.text,
-                toneOverride = profile.sentimentConfig.toneOverride
-            )
+            val sentiment = if (purrModuleActive) {
+                PurrSentimentScorer.score(
+                    text = segment.text,
+                    toneOverride = effectiveProfile.sentimentConfig.toneOverride
+                )
+            } else {
+                SentimentResult()
+            }
 
             // If STRIP_ACTIONS converted `*action*` into an explicit MIKASTOP pause
-            val processedWithRules = if (segment.role == SegmentRole.ACTION &&
-                profile.actionHandlingMode == ActionHandlingMode.STRIP_ACTIONS
+            val processedWithRules = if (purrModuleActive &&
+                segment.role == SegmentRole.ACTION &&
+                effectiveProfile.actionHandlingMode == ActionHandlingMode.STRIP_ACTIONS
             ) {
-                if (profile.enableMikaStopPauses) {
-                    "[[MIKASTOP:${profile.mikaStopConfig.actionStripPauseMs}:ACTION_STRIP]]"
+                if (effectiveProfile.enableMikaStopPauses) {
+                    "[[MIKASTOP:${effectiveProfile.mikaStopConfig.actionStripPauseMs}:ACTION_STRIP]]"
                 } else {
                     ""
                 }
             } else {
                 applyPhoneticAndSlangPipeline(
                     text = segment.text,
-                    profile = profile,
+                    profile = effectiveProfile,
                     sentiment = sentiment,
-                    customRules = customRules,
+                    customRules = effectiveRules,
                     rng = rng
                 )
             }
@@ -202,20 +250,23 @@ object PurrTextProcessor {
             if (processedWithRules.isBlank()) continue
 
             // 2. Tokenize punctuation & explicit pauses into deterministic MIKASTOP boundaries.
-            val tokenized = if (profile.enableMikaStopPauses) {
-                tokenizeWithMikaStop(processedWithRules, profile.mikaStopConfig)
+            val tokenized = if (effectiveProfile.enableMikaStopPauses) {
+                tokenizeWithMikaStop(processedWithRules, effectiveProfile.mikaStopConfig, effectiveProfile)
+            } else if (effectiveProfile.enableSymbolShield &&
+                effectiveProfile.symbolShieldConfig.commaHandling != CommaHandlingMode.KEEP_RAW
+            ) {
+                CLAUSE_PAUSE_REGEX.replace(processedWithRules, " ")
             } else {
-                // Even when punctuation slicing is turned off, preserve explicit [pause:Nms] tags
                 processedWithRules
             }
 
             // 3. Emit alternating Speech and Silence chunks.
             val prosody = PurrSentimentScorer.computeProsodyModulation(
                 sentiment = sentiment,
-                profile = profile,
+                profile = effectiveProfile,
                 role = segment.role
             )
-            val targetVoiceId = resolveTargetVoiceId(segment.role, profile)
+            val targetVoiceId = resolveTargetVoiceId(segment.role, effectiveProfile)
 
             var cursor = 0
             for (match in MIKASTOP_TOKEN_REGEX.findAll(tokenized)) {
@@ -226,6 +277,7 @@ object PurrTextProcessor {
                     targetVoiceId = targetVoiceId,
                     prosody = prosody,
                     sentiment = sentiment,
+                    profile = effectiveProfile,
                     out = output
                 )
 
@@ -243,6 +295,7 @@ object PurrTextProcessor {
                     targetVoiceId = targetVoiceId,
                     prosody = prosody,
                     sentiment = sentiment,
+                    profile = effectiveProfile,
                     out = output
                 )
             }
@@ -251,17 +304,130 @@ object PurrTextProcessor {
         while (output.lastOrNull() is PurrChunk.Silence) {
             output.removeAt(output.lastIndex)
         }
-        return output
+        return if (symbolShieldModuleActive && effectiveProfile.mikaStopConfig.targetChunkChars >= 40) {
+            coalesceSentenceChunks(output, effectiveProfile.mikaStopConfig.targetChunkChars)
+        } else {
+            output
+        }
+    }
+
+    /**
+     * Multi-page & long-text audiobook export chunker for `TOOL-05: AUDIO_MEDIA_EXPORTER`.
+     * Preserves paragraph pauses while merging complete sentences into smooth blocks
+     * (never splitting mid-sentence) and honoring active P.U.R.R. / Symbol Shield settings.
+     */
+    fun buildExportChunks(
+        rawText: String,
+        profile: PurrProfile,
+        customRules: List<PhoneticRule> = emptyList(),
+        purrModuleActive: Boolean = true,
+        symbolShieldModuleActive: Boolean = true,
+        targetChunkCharsOverride: Int = 240,
+        paragraphPauseMs: Int = 550
+    ): List<PurrChunk> {
+        val normalized = normalizeTypography(rawText).trim()
+        if (normalized.isEmpty()) return emptyList()
+
+        val paragraphs = normalized
+            .split(Regex("\\r?\\n\\s*\\r?\\n+"))
+            .map { it.replace(Regex("\\r?\\n+"), " ").trim() }
+            .filter { it.isNotEmpty() }
+
+        val effectiveTarget = if (targetChunkCharsOverride >= 60) {
+            targetChunkCharsOverride
+        } else {
+            maxOf(profile.mikaStopConfig.targetChunkChars, 220)
+        }
+
+        val exportProfile = profile.copy(
+            mikaStopConfig = profile.mikaStopConfig.copy(targetChunkChars = effectiveTarget)
+        )
+
+        val combined = mutableListOf<PurrChunk>()
+        for (para in paragraphs) {
+            val rawParaChunks = process(
+                rawText = para,
+                profile = exportProfile,
+                customRules = customRules,
+                purrModuleActive = purrModuleActive,
+                symbolShieldModuleActive = symbolShieldModuleActive
+            )
+            // Always coalesce complete sentences for smooth long-form exports even if Symbol Shield is off.
+            val coalesced = coalesceSentenceChunks(rawParaChunks, effectiveTarget)
+            if (coalesced.isNotEmpty()) {
+                if (combined.isNotEmpty() && paragraphPauseMs > 0) {
+                    appendSilenceMerged(combined, paragraphPauseMs.coerceIn(150, 2500), "PARAGRAPH")
+                }
+                combined.addAll(coalesced)
+            }
+        }
+        while (combined.lastOrNull() is PurrChunk.Silence) {
+            combined.removeAt(combined.lastIndex)
+        }
+        return combined
+    }
+
+    /**
+     * Loose sentence-boundary coalescer for Audiobooks / Light Novels:
+     * Merges complete adjacent sentences until reaching `targetChunkChars` while stopping at
+     * newlines, explicit pauses, ellipses, or role switches — never ending mid-sentence.
+     */
+    fun coalesceSentenceChunks(
+        chunks: List<PurrChunk>,
+        targetChunkChars: Int
+    ): List<PurrChunk> {
+        if (targetChunkChars < 40 || chunks.size <= 1) return chunks
+        val result = mutableListOf<PurrChunk>()
+        var i = 0
+        while (i < chunks.size) {
+            val current = chunks[i]
+            if (current is PurrChunk.Speech) {
+                var acc = current
+                var j = i + 1
+                while (j < chunks.size) {
+                    val nextItem = chunks[j]
+                    val nextAfterPause = chunks.getOrNull(j + 1) as? PurrChunk.Speech
+                    val isMergeablePause = nextItem is PurrChunk.Silence &&
+                        (nextItem.reason == "SENTENCE" || nextItem.reason == "CLAUSE")
+                    if (isMergeablePause &&
+                        nextAfterPause != null &&
+                        acc.role == nextAfterPause.role &&
+                        acc.targetVoiceId == nextAfterPause.targetVoiceId &&
+                        acc.text.length < targetChunkChars
+                    ) {
+                        acc = acc.copy(text = "${acc.text} ${nextAfterPause.text}".trim())
+                        j += 2
+                    } else if (nextItem is PurrChunk.Speech &&
+                        acc.role == nextItem.role &&
+                        acc.targetVoiceId == nextItem.targetVoiceId &&
+                        acc.text.length < targetChunkChars
+                    ) {
+                        acc = acc.copy(text = "${acc.text} ${nextItem.text}".trim())
+                        j += 1
+                    } else {
+                        break
+                    }
+                }
+                result += acc
+                i = j
+            } else {
+                result += current
+                i += 1
+            }
+        }
+        return result
     }
 
     private fun splitIntoRoleSegments(
         text: String,
-        actionMode: ActionHandlingMode
+        actionMode: ActionHandlingMode,
+        splitDialogueQuotes: Boolean
     ): List<RawRoleSegment> {
         val segments = mutableListOf<RawRoleSegment>()
+        val splitRegex = if (splitDialogueQuotes) ROLE_SPLIT_ACTION_AND_QUOTE_REGEX else ROLE_SPLIT_ACTION_ONLY_REGEX
         var lastIndex = 0
 
-        for (match in ROLE_SPLIT_REGEX.findAll(text)) {
+        for (match in splitRegex.findAll(text)) {
             if (match.range.first > lastIndex) {
                 val plain = text.substring(lastIndex, match.range.first).trim()
                 if (plain.isNotEmpty()) {
@@ -325,11 +491,28 @@ object PurrTextProcessor {
             clean = regex.replace(clean) { rule.replacement }
         }
 
+        // Normalize compound non-stutter hyphenated words (`co-worker` -> `co worker`, `twenty-five` -> `twenty five`)
+        if (profile.enableSymbolShield) {
+            clean = COMPOUND_HYPHEN_REGEX.replace(clean) { m ->
+                val left = m.groupValues[1]
+                val right = m.groupValues[2]
+                val leftLow = left.lowercase()
+                val rightLow = right.lowercase()
+                val isHonorific = rightLow in HONORIFIC_SUFFIXES || (leftLow == "ara" && rightLow == "ara")
+                val isDigraphStutter = leftLow in STUTTER_DIGRAPHS && rightLow.startsWith(leftLow)
+                if (isHonorific || isDigraphStutter) m.value else "$left $right"
+            }
+        }
+
         if (profile.enableSlangAndHonorifics) {
-            // Organic Stutter Translator: `w-what` -> `wuh-what`, `th-that` -> `thuh-that`
+            // Organic Stutter Translator: strictly repeated-letter stutters (`w-what` -> `wuh-what`, `th-that` -> `thuh-that`)
             clean = ORGANIC_STUTTER_REGEX.replace(clean) { m ->
                 val prefix = m.groupValues[1].lowercase()
-                val sound = PHONETIC_STUTTER_MAP[prefix] ?: PHONETIC_STUTTER_MAP[prefix.take(1)]
+                val sound = if (prefix.length == 1 || prefix in STUTTER_DIGRAPHS) {
+                    PHONETIC_STUTTER_MAP[prefix]
+                } else {
+                    null
+                }
                 if (sound != null) "$sound-" else m.value
             }
 
@@ -406,8 +589,13 @@ object PurrTextProcessor {
         }
     }
 
-    fun tokenizeWithMikaStop(input: String, config: MikaStopConfig): String {
+    fun tokenizeWithMikaStop(
+        input: String,
+        config: MikaStopConfig,
+        profile: PurrProfile? = null
+    ): String {
         var out = input
+        val abbrSentinel = "@@ABBR_DOT@@"
 
         // Normalize bare MIKASTOP keywords without touching [[MIKASTOP:...]]
         out = BARE_MIKASTOP_REGEX.replace(out, " [[MIKASTOP:${config.sentencePauseMs}:MIKASTOP]] ")
@@ -415,6 +603,12 @@ object PurrTextProcessor {
         // Protect ellipses with a temporary sentinel so sentence-end matching does not double-count pauses
         val ellipsisSentinel = "@@ELLIPSIS_MIKASTOP@@"
         out = ELLIPSIS_REGEX.replace(out, "$ellipsisSentinel ")
+
+        // Protect common audiobook titles, abbreviations, initials, and decimals from premature sentence breaks
+        out = ABBREVIATION_DOT_REGEX.replace(out) { m -> "${m.groupValues[1]}$abbrSentinel" }
+        out = LATIN_ABBR_DOT_REGEX.replace(out) { m -> "${m.groupValues[1]}$abbrSentinel${m.groupValues[2]}$abbrSentinel" }
+        out = INITIAL_DOT_REGEX.replace(out) { m -> "${m.groupValues[1]}$abbrSentinel" }
+        out = DECIMAL_DOT_REGEX.replace(out, abbrSentinel)
 
         // Em-dashes, en-dashes, double hyphens, and stray tildes
         out = EM_DASH_TILDE_REGEX.replace(out, " [[MIKASTOP:${config.emDashPauseMs}:EM_DASH]] ")
@@ -427,11 +621,56 @@ object PurrTextProcessor {
             "${m.groupValues[1]} [[MIKASTOP:${config.sentencePauseMs}:SENTENCE]] "
         }
 
-        // Optional comma/clause slicing for natural neural breath pauses
-        if (config.sliceAtCommas) {
-            out = CLAUSE_PAUSE_REGEX.replace(out) { m ->
-                "${m.groupValues[1]} [[MIKASTOP:${config.commaPauseMs}:CLAUSE]] "
+        // Restore protected abbreviation & decimal periods
+        out = out.replace(abbrSentinel, ".")
+
+        // Comma / clause handling (respects Symbol Shield, min-word guard & loose multi-sentence chunking)
+        val shieldOn = profile?.enableSymbolShield ?: false
+        val commaMode = profile?.symbolShieldConfig?.commaHandling ?: CommaHandlingMode.MIKA_PAUSE_AND_STRIP
+        val keepWholeSentences = config.targetChunkChars >= 40
+
+        if (keepWholeSentences) {
+            if (shieldOn && commaMode != CommaHandlingMode.KEEP_RAW) {
+                out = CLAUSE_PAUSE_REGEX.replace(out, " ")
             }
+        } else if (shieldOn && commaMode == CommaHandlingMode.STRIP_NO_PAUSE) {
+            out = CLAUSE_PAUSE_REGEX.replace(out, " ")
+        } else if (config.sliceAtCommas) {
+            val minWords = config.minWordsForCommaPause.coerceAtLeast(1)
+            val sb = StringBuilder(out.length + 32)
+            var cursor = 0
+            var lastEmittedPauseInOut = 0
+            for (match in CLAUSE_PAUSE_REGEX.findAll(out)) {
+                val tokenIdx = out.lastIndexOf("[[MIKASTOP:", match.range.first)
+                val tokenEnd = if (tokenIdx >= 0) {
+                    val closeIdx = out.indexOf("]]", tokenIdx)
+                    if (closeIdx in 0 until match.range.first) closeIdx + 2 else 0
+                } else {
+                    0
+                }
+                val segStart = maxOf(tokenEnd, lastEmittedPauseInOut)
+                val sliceBeforeComma = out.substring(segStart, match.range.first)
+                val wordCount = WORD_TOKEN_REGEX.findAll(sliceBeforeComma).count()
+                sb.append(out.substring(cursor, match.range.first))
+                if (wordCount >= minWords) {
+                    val punct = if (shieldOn && commaMode != CommaHandlingMode.KEEP_RAW) "" else match.groupValues[1]
+                    sb.append(punct).append(" [[MIKASTOP:${config.commaPauseMs}:CLAUSE]] ")
+                    lastEmittedPauseInOut = match.range.last + 1
+                } else {
+                    if (shieldOn && commaMode != CommaHandlingMode.KEEP_RAW) {
+                        sb.append(' ')
+                    } else {
+                        sb.append(match.value)
+                    }
+                }
+                cursor = match.range.last + 1
+            }
+            if (cursor < out.length) {
+                sb.append(out.substring(cursor))
+            }
+            out = sb.toString()
+        } else if (shieldOn && commaMode != CommaHandlingMode.KEEP_RAW) {
+            out = CLAUSE_PAUSE_REGEX.replace(out, " ")
         }
 
         // Expand protected ellipsis sentinels into exact MIKASTOP silence boundaries
@@ -440,16 +679,55 @@ object PurrTextProcessor {
         return out
     }
 
-    fun sanitizeSpeechChunk(rawChunk: String): String {
-        var chunk = rawChunk.trim()
+    fun sanitizeSpeechChunk(
+        rawChunk: String,
+        profile: PurrProfile = PurrProfile(id = "default", name = "Default")
+    ): String {
+        var chunk = normalizeTypography(rawChunk).trim()
         if (chunk.isEmpty()) return ""
 
         // Ensure phonetic sighs trigger breath artifacts
         chunk = SIGH_REGEX.replace(chunk) { m -> "${m.groupValues[1]}. " }
 
-        // Shred stray HTML/XML tags and weird ASCII
+        // Shred stray HTML/XML tags
         chunk = XML_TAG_REGEX.replace(chunk, " ")
-        chunk = WEIRD_ASCII_REGEX.replace(chunk, "")
+
+        if (profile.enableSymbolShield) {
+            val shield = profile.symbolShieldConfig
+            if (shield.expandCommonSymbols) {
+                chunk = chunk
+                    .replace("@", " at ")
+                    .replace("+", " plus ")
+                    .replace("=", " equals ")
+            }
+            if (shield.stripBracketsAndMarkdown) {
+                chunk = BRACKETS_AND_MARKDOWN_REGEX.replace(chunk, " ")
+            }
+            if (shield.stripQuotationMarks) {
+                chunk = QUOTES_AND_LONE_APOSTROPHES_REGEX.replace(chunk, "")
+            }
+            if (shield.customSkippedChars.isNotEmpty()) {
+                val skipSet = shield.customSkippedChars.toSet()
+                val sb = StringBuilder(chunk.length)
+                for (i in chunk.indices) {
+                    val c = chunk[i]
+                    val isInnerContraction = c == '\'' &&
+                        i > 0 && i < chunk.lastIndex &&
+                        chunk[i - 1].isLetter() && chunk[i + 1].isLetter()
+                    if (c !in skipSet || isInnerContraction || c in ".?! ") {
+                        sb.append(c)
+                    } else {
+                        sb.append(' ')
+                    }
+                }
+                chunk = sb.toString()
+            }
+            if (shield.commaHandling != CommaHandlingMode.KEEP_RAW) {
+                chunk = chunk.replace(Regex("[,;:]"), " ")
+            }
+        } else {
+            chunk = WEIRD_ASCII_REGEX.replace(chunk, "")
+        }
 
         // Acronym Assassin: lowercase 2+ uppercase runs unless whitelisted
         chunk = ACRONYM_RUN_REGEX.replace(chunk) { m ->
@@ -475,8 +753,15 @@ object PurrTextProcessor {
 
         if (chunk.isEmpty()) return ""
 
-        // Guarantee terminal punctuation (commas preserved as breath marks)
-        if (!Regex("[.!?,;:]$").containsMatchIn(chunk)) {
+        // Guarantee terminal punctuation (commas preserved only if KEEP_RAW)
+        val terminalRegex = if (!profile.enableSymbolShield ||
+            profile.symbolShieldConfig.commaHandling == CommaHandlingMode.KEEP_RAW
+        ) {
+            Regex("[.!?,;:]$")
+        } else {
+            Regex("[.!?]$")
+        }
+        if (!terminalRegex.containsMatchIn(chunk)) {
             chunk = chunk.replace(Regex("[^a-zA-Z0-9]$"), "") + "."
         }
 
@@ -490,9 +775,10 @@ object PurrTextProcessor {
         targetVoiceId: String?,
         prosody: PurrSentimentScorer.ProsodyModulation,
         sentiment: SentimentResult,
+        profile: PurrProfile,
         out: MutableList<PurrChunk>
     ) {
-        val sanitized = sanitizeSpeechChunk(rawChunk)
+        val sanitized = sanitizeSpeechChunk(rawChunk, profile)
         if (sanitized.isNotEmpty()) {
             out += PurrChunk.Speech(
                 text = sanitized,

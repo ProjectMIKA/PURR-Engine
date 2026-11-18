@@ -28,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
@@ -54,6 +55,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -1114,6 +1122,317 @@ fun MikaVoiceDropdownSelector(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+enum class OsModuleIconType {
+    PURR_CORE,
+    DSP_RACK,
+    SYMBOL_SHIELD,
+    CLONE_STUDIO,
+    AUDIO_EXPORTER
+}
+
+/**
+ * Custom Cyberdeck OS Vector SVG-Style Module Icon drawn via Compose Canvas.
+ */
+@Composable
+fun MikaOsModuleIcon(
+    type: OsModuleIconType,
+    accentColor: Color,
+    isOnline: Boolean = true,
+    modifier: Modifier = Modifier
+) {
+    val activeAlpha = if (isOnline) 1f else 0.35f
+    Box(
+        modifier = modifier
+            .size(58.dp)
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                Brush.radialGradient(
+                    colors = listOf(
+                        accentColor.copy(alpha = 0.22f * activeAlpha),
+                        Color(0xFF07050D)
+                    )
+                )
+            )
+            .border(1.2.dp, accentColor.copy(alpha = 0.65f * activeAlpha), RoundedCornerShape(10.dp)),
+        contentAlignment = Alignment.Center
+    ) {
+        Canvas(modifier = Modifier.fillMaxSize().padding(9.dp)) {
+            val w = size.width
+            val h = size.height
+            val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            val thinStroke = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round)
+            val drawColor = accentColor.copy(alpha = activeAlpha)
+
+            // HUD Corner framing ticks
+            val tick = w * 0.18f
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(0f, 0f), Offset(tick, 0f), strokeWidth = 1.4.dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(0f, 0f), Offset(0f, tick), strokeWidth = 1.4.dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(w, h), Offset(w - tick, h), strokeWidth = 1.4.dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(w, h), Offset(w, h - tick), strokeWidth = 1.4.dp.toPx())
+
+            when (type) {
+                OsModuleIconType.PURR_CORE -> {
+                    // Neural Pulse Core + Harmonic Sine Wave + Circuit Nodes
+                    drawCircle(
+                        color = drawColor.copy(alpha = 0.35f),
+                        radius = w * 0.42f,
+                        center = Offset(w * 0.5f, h * 0.5f),
+                        style = thinStroke
+                    )
+                    val wave = Path().apply {
+                        moveTo(w * 0.12f, h * 0.55f)
+                        lineTo(w * 0.28f, h * 0.55f)
+                        lineTo(w * 0.38f, h * 0.25f)
+                        lineTo(w * 0.50f, h * 0.78f)
+                        lineTo(w * 0.62f, h * 0.32f)
+                        lineTo(w * 0.72f, h * 0.55f)
+                        lineTo(w * 0.88f, h * 0.55f)
+                    }
+                    drawPath(wave, color = drawColor, style = stroke)
+                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = 2.6.dp.toPx(), center = Offset(w * 0.12f, h * 0.55f))
+                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = 2.6.dp.toPx(), center = Offset(w * 0.88f, h * 0.55f))
+                }
+
+                OsModuleIconType.DSP_RACK -> {
+                    // 3-Band Parametric Equalizer Faders + Neon Caps
+                    val xs = listOf(w * 0.24f, w * 0.50f, w * 0.76f)
+                    val knobYs = listOf(h * 0.34f, h * 0.68f, h * 0.28f)
+                    xs.forEachIndexed { idx, x ->
+                        drawLine(drawColor.copy(alpha = 0.35f), Offset(x, h * 0.14f), Offset(x, h * 0.86f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(drawColor, Offset(x, knobYs[idx]), Offset(x, h * 0.86f), strokeWidth = 2.4.dp.toPx(), cap = StrokeCap.Round)
+                        drawRoundRect(
+                            color = drawColor,
+                            topLeft = Offset(x - 5.dp.toPx(), knobYs[idx] - 3.dp.toPx()),
+                            size = Size(10.dp.toPx(), 6.dp.toPx()),
+                            cornerRadius = CornerRadius(2.dp.toPx())
+                        )
+                    }
+                }
+
+                OsModuleIconType.SYMBOL_SHIELD -> {
+                    // Hexagonal Cyber Shield with Filter Brackets </>
+                    val shield = Path().apply {
+                        moveTo(w * 0.50f, h * 0.10f)
+                        lineTo(w * 0.84f, h * 0.24f)
+                        lineTo(w * 0.80f, h * 0.62f)
+                        lineTo(w * 0.50f, h * 0.88f)
+                        lineTo(w * 0.20f, h * 0.62f)
+                        lineTo(w * 0.16f, h * 0.24f)
+                        close()
+                    }
+                    drawPath(shield, color = drawColor, style = stroke)
+                    // Inner filter slash / node dots
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.36f, h * 0.60f), Offset(w * 0.64f, h * 0.34f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawCircle(drawColor, radius = 2.4.dp.toPx(), center = Offset(w * 0.38f, h * 0.38f))
+                    drawCircle(drawColor, radius = 2.4.dp.toPx(), center = Offset(w * 0.62f, h * 0.56f))
+                }
+
+                OsModuleIconType.CLONE_STUDIO -> {
+                    // Studio Condenser Mic Capsule + Dual Helix Waves
+                    drawRoundRect(
+                        color = drawColor,
+                        topLeft = Offset(w * 0.36f, h * 0.14f),
+                        size = Size(w * 0.28f, h * 0.44f),
+                        cornerRadius = CornerRadius(6.dp.toPx()),
+                        style = stroke
+                    )
+                    // Helix Orbit Arcs
+                    val steps = 12
+                    val strand1 = Path()
+                    val strand2 = Path()
+                    for (i in 0..steps) {
+                        val t = i.toFloat() / steps.toFloat()
+                        val yPos = h * 0.18f + t * h * 0.64f
+                        val x1 = w * 0.50f + sin(t * PI * 2.0).toFloat() * w * 0.30f
+                        val x2 = w * 0.50f - sin(t * PI * 2.0).toFloat() * w * 0.30f
+                        if (i == 0) {
+                            strand1.moveTo(x1, yPos)
+                            strand2.moveTo(x2, yPos)
+                        } else {
+                            strand1.lineTo(x1, yPos)
+                            strand2.lineTo(x2, yPos)
+                        }
+                    }
+                    drawPath(strand1, color = MikaColors.NeonCyan.copy(alpha = 0.65f * activeAlpha), style = thinStroke)
+                    drawPath(strand2, color = drawColor.copy(alpha = 0.65f), style = thinStroke)
+                    drawLine(drawColor, Offset(w * 0.50f, h * 0.66f), Offset(w * 0.50f, h * 0.84f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(drawColor, Offset(w * 0.34f, h * 0.84f), Offset(w * 0.66f, h * 0.84f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                }
+
+                OsModuleIconType.AUDIO_EXPORTER -> {
+                    // Soundwave bars at top + download arrow into glowing media tray
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.20f, h * 0.22f), Offset(w * 0.20f, h * 0.42f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.32f, h * 0.14f), Offset(w * 0.32f, h * 0.46f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.68f, h * 0.14f), Offset(w * 0.68f, h * 0.46f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.80f, h * 0.22f), Offset(w * 0.80f, h * 0.42f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+
+                    // Center download arrow shaft + chevron
+                    drawLine(drawColor, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.50f, h * 0.62f), strokeWidth = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                    val arrowHead = Path().apply {
+                        moveTo(w * 0.34f, h * 0.48f)
+                        lineTo(w * 0.50f, h * 0.65f)
+                        lineTo(w * 0.66f, h * 0.48f)
+                    }
+                    drawPath(arrowHead, color = drawColor, style = stroke)
+
+                    // Bottom media storage tray
+                    val tray = Path().apply {
+                        moveTo(w * 0.16f, h * 0.66f)
+                        lineTo(w * 0.16f, h * 0.84f)
+                        lineTo(w * 0.84f, h * 0.84f)
+                        lineTo(w * 0.84f, h * 0.66f)
+                    }
+                    drawPath(tray, color = drawColor, style = stroke)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Anchored Cyberdeck HUD Navigation Bar along the bottom of the screen:
+ * VOICE | MODULES | CARTRIDGE BAY
+ */
+@Composable
+fun MikaBottomHudBar(
+    activeTab: Int,
+    activeToolCount: Int,
+    slottedTtsCount: Int,
+    onSelectTab: (Int) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    data class HudItem(
+        val index: Int,
+        val title: String,
+        val badgeText: String,
+        val accent: Color
+    )
+
+    val items = listOf(
+        HudItem(0, "VOICE", "01", MikaColors.NeonCyan),
+        HudItem(
+            1,
+            "MODULES",
+            if (activeToolCount > 0) "$activeToolCount ON" else "OFF",
+            if (activeToolCount > 0) MikaColors.NeonPink else MikaColors.DimText
+        ),
+        HudItem(2, "CARTRIDGE BAY", "$slottedTtsCount ROM", MikaColors.TerminalGreen)
+    )
+
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF0A0714).copy(alpha = 0.96f),
+                        Color(0xFF040208)
+                    )
+                )
+            )
+            .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.25f))
+            .navigationBarsPadding()
+    ) {
+        // Hairline HUD scanner accent bar at the top edge
+        Row(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+            items.forEach { item ->
+                val selected = activeTab == item.index
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(2.dp)
+                        .background(if (selected) item.accent else Color.Transparent)
+                )
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items.forEach { item ->
+                val selected = activeTab == item.index
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(
+                            if (selected) item.accent.copy(alpha = 0.16f)
+                            else Color(0xFF080510)
+                        )
+                        .border(
+                            width = if (selected) 1.5.dp else 1.dp,
+                            color = if (selected) item.accent else Color.White.copy(alpha = 0.12f),
+                            shape = RoundedCornerShape(6.dp)
+                        )
+                        .clickable { onSelectTab(item.index) }
+                        .padding(vertical = 7.dp, horizontal = 4.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        // Mini Canvas HUD vector glyph
+                        Canvas(modifier = Modifier.size(13.dp)) {
+                            val w = size.width
+                            val h = size.height
+                            val c = if (selected) item.accent else Color.White.copy(alpha = 0.55f)
+                            val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+                            when (item.index) {
+                                0 -> {
+                                    // Voice waveform glyph
+                                    drawLine(c, Offset(w * 0.15f, h * 0.45f), Offset(w * 0.15f, h * 0.70f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
+                                    drawLine(c, Offset(w * 0.40f, h * 0.15f), Offset(w * 0.40f, h * 0.85f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
+                                    drawLine(c, Offset(w * 0.65f, h * 0.25f), Offset(w * 0.65f, h * 0.78f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
+                                    drawLine(c, Offset(w * 0.88f, h * 0.40f), Offset(w * 0.88f, h * 0.65f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
+                                }
+                                1 -> {
+                                    // OS Modules 2x2 grid glyph
+                                    val box = w * 0.38f
+                                    drawRoundRect(c, Offset(0f, 0f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
+                                    drawRoundRect(c, Offset(w * 0.58f, 0f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
+                                    drawRoundRect(c, Offset(0f, h * 0.58f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
+                                    drawRoundRect(c, Offset(w * 0.58f, h * 0.58f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
+                                }
+                                else -> {
+                                    // ROM Cartridge Bay chip glyph
+                                    drawRoundRect(c, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.70f), CornerRadius(2.dp.toPx()), style = stroke)
+                                    drawLine(c, Offset(w * 0.28f, h * 0.88f), Offset(w * 0.28f, h), strokeWidth = 1.5.dp.toPx())
+                                    drawLine(c, Offset(w * 0.50f, h * 0.88f), Offset(w * 0.50f, h), strokeWidth = 1.5.dp.toPx())
+                                    drawLine(c, Offset(w * 0.72f, h * 0.88f), Offset(w * 0.72f, h), strokeWidth = 1.5.dp.toPx())
+                                }
+                            }
+                        }
+
+                        Text(
+                            text = item.title,
+                            color = if (selected) item.accent else Color.White.copy(alpha = 0.72f),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 9.5.sp,
+                            letterSpacing = 0.4.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+
+                    Text(
+                        text = "[${item.badgeText}]",
+                        color = if (selected) item.accent.copy(alpha = 0.9f) else MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.sp
+                    )
                 }
             }
         }

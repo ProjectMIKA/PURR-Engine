@@ -1,5 +1,8 @@
 package com.projectmika.purrtts.core.purr
 
+import kotlin.math.PI
+import kotlin.math.abs
+import kotlin.math.sin
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -108,5 +111,224 @@ class PurrTextProcessorTest {
         )
         val picked = PurrVoiceMatcher.assignVoice(voices, profile, queryName = "Tester")
         assertEquals("af_sky", picked?.id)
+    }
+
+    @Test
+    fun `audiobook abbreviations curly apostrophes and hyphenated compounds stay intact`() {
+        val audiobookProfile = PurrDefaultPresets.builtInProfiles()
+            .first { it.id == "light_novel_reader" }
+            .copy(enableDualVoiceSplit = false)
+        val input = "Mr. Smith wouldn’t visit his co-worker or Dr. Lee after re-reading v1.2."
+        val chunks = PurrTextProcessor.process(input, audiobookProfile)
+        val speechChunks = chunks.filterIsInstance<PurrChunk.Speech>()
+
+        assertEquals(1, speechChunks.size)
+        val rendered = speechChunks.first().text
+        assertTrue(rendered.contains("Mr. Smith"))
+        assertTrue(rendered.contains("wouldn't"))
+        assertTrue(rendered.contains("co worker"))
+        assertTrue(rendered.contains("Dr. Lee"))
+        assertTrue(rendered.contains("re reading"))
+        assertTrue(rendered.contains("1.2"))
+    }
+
+    @Test
+    fun `short comma openers do not isolate into one word chunks`() {
+        val audiobookProfile = PurrDefaultPresets.builtInProfiles()
+            .first { it.id == "light_novel_reader" }
+            .copy(
+                enableDualVoiceSplit = false,
+                mikaStopConfig = MikaStopConfig(sliceAtCommas = true, minWordsForCommaPause = 3)
+            )
+        val input = "Well, I think we should finally open the heavy wooden door right now."
+        val speechChunks = PurrTextProcessor.process(input, audiobookProfile)
+            .filterIsInstance<PurrChunk.Speech>()
+
+        assertEquals(1, speechChunks.size)
+        assertTrue(speechChunks.first().text.startsWith("Well I think", ignoreCase = true))
+    }
+
+    @Test
+    fun `symbol shield strips quotes commas and skipped chars while keeping mikastop`() {
+        val profile = defaultProfile.copy(
+            enableDualVoiceSplit = false,
+            enableSymbolShield = true,
+            symbolShieldConfig = SymbolShieldConfig(commaHandling = CommaHandlingMode.MIKA_PAUSE_AND_STRIP),
+            mikaStopConfig = MikaStopConfig(
+                ellipsisPauseMs = 450,
+                emDashPauseMs = 320,
+                sentencePauseMs = 280,
+                commaPauseMs = 140,
+                actionStripPauseMs = 200,
+                sliceAtCommas = true,
+                minWordsForCommaPause = 1
+            )
+        )
+        val input = "\"Hello there, [Master]!\" he whispered — #chapter_1"
+        val chunks = PurrTextProcessor.process(input, profile)
+        val silences = chunks.filterIsInstance<PurrChunk.Silence>()
+        val speechText = chunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+
+        assertTrue(silences.isNotEmpty())
+        assertFalse(speechText.contains('"'))
+        assertFalse(speechText.contains(','))
+        assertFalse(speechText.contains('['))
+        assertFalse(speechText.contains(']'))
+        assertFalse(speechText.contains('#'))
+        assertFalse(speechText.contains('_'))
+        assertTrue(speechText.contains("Hello there", ignoreCase = true))
+    }
+
+    @Test
+    fun `dsp processor applies gachaswipe anti pop fade in and 120ms sentence tail taper`() {
+        val sampleRate = 24000
+        val input = FloatArray(sampleRate / 2) { i ->
+            0.4f * sin(2.0 * PI * 440.0 * i / sampleRate).toFloat()
+        }
+        val config = DspConfig(
+            effectPreset = AcousticEffectPreset.NONE,
+            enableSentenceTaper = true,
+            sentenceTaperMs = 120,
+            antiPopFadeInMs = 25,
+            warmthEqDb = 2.0f,
+            presenceEqDb = -4.0f,
+            reverbWetMix = 0.0f
+        )
+
+        val processed = PurrDspProcessor.process(input, sampleRate, config, volumeGain = 1.0f, dspEnabled = true)
+        assertEquals(input.size, processed.size)
+
+        val midPeak = processed.slice(sampleRate / 6 until sampleRate / 4).maxOf { abs(it) }
+        val tailPeak = processed.takeLast(sampleRate / 200).maxOf { abs(it) }
+        assertTrue(midPeak > 0.15f)
+        assertTrue(tailPeak < 0.03f)
+        assertTrue(abs(processed.first()) < 0.02f)
+    }
+
+    @Test
+    fun `loose targetChunkChars coalesces complete sentences without mid sentence splits`() {
+        val audiobookProfile = PurrDefaultPresets.builtInProfiles()
+            .first { it.id == "light_novel_reader" }
+            .copy(
+                enableDualVoiceSplit = false,
+                mikaStopConfig = MikaStopConfig(
+                    sentencePauseMs = 300,
+                    sliceAtCommas = false,
+                    targetChunkChars = 120
+                )
+            )
+        val s1 = "The evening wind blew softly across the quiet harbor."
+        val s2 = "Captain Elara adjusted her brass compass and watched the horizon ahead."
+        val s3 = "Tomorrow the real journey across the sea would finally begin."
+        val input = "$s1 $s2 $s3"
+
+        val chunks = PurrTextProcessor.process(input, audiobookProfile)
+        val speechChunks = chunks.filterIsInstance<PurrChunk.Speech>()
+
+        assertEquals(2, speechChunks.size)
+        assertTrue(speechChunks[0].text.contains(s1))
+        assertTrue(speechChunks[0].text.contains(s2))
+        assertTrue(speechChunks[0].text.endsWith("."))
+        assertEquals(s3, speechChunks[1].text)
+    }
+
+    @Test
+    fun `ejecting purr or symbol shield tool modules bypasses their pipelines cleanly`() {
+        val input = "Wait, omg... \"Are you sure?\" fr"
+
+        val bypassedPurr = PurrTextProcessor.process(
+            rawText = input,
+            profile = defaultProfile,
+            purrModuleActive = false,
+            symbolShieldModuleActive = true
+        )
+        val bypassedPurrSpeech = bypassedPurr.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        val bypassedPurrSilences = bypassedPurr.filterIsInstance<PurrChunk.Silence>()
+        assertEquals(0, bypassedPurrSilences.size)
+        assertFalse(bypassedPurrSpeech.contains("oh my god", ignoreCase = true))
+        assertFalse(bypassedPurrSpeech.contains('"'))
+
+        val bypassedShield = PurrTextProcessor.process(
+            rawText = "Hello there, friend. Wait, next sentence.",
+            profile = defaultProfile.copy(
+                mikaStopConfig = defaultProfile.mikaStopConfig.copy(targetChunkChars = 180)
+            ),
+            purrModuleActive = true,
+            symbolShieldModuleActive = false
+        )
+        val shieldedSpeech = bypassedShield.filterIsInstance<PurrChunk.Speech>()
+        assertTrue(shieldedSpeech.size >= 2)
+    }
+
+    @Test
+    fun `catalog includes kittentts 6 piper expansion packs and 5 default-on tool cartridges`() {
+        val catalog = PurrDefaultPresets.modelCatalog()
+        val voices = PurrDefaultPresets.builtInVoices()
+        val defaultState = PurrForgeState()
+
+        assertTrue(catalog.any { it.id == "rom_kitten_tts" && it.sherpaFamily == SherpaModelFamily.KITTEN_TTS && it.category == CartridgeCategory.TTS })
+        assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" })
+
+        val piperSubs = catalog.filter { it.parentCartridgeId == "rom_piper" && it.isSubCartridge }
+        assertEquals(6, piperSubs.size)
+        assertEquals(6, voices.count { it.requiredSubCartridgeId?.startsWith("sub_piper_") == true })
+
+        val expectedTools = setOf(
+            "tool_purr_engine",
+            "tool_dsp_rack",
+            "tool_symbol_shield",
+            "tool_clone_studio",
+            "tool_audio_exporter"
+        )
+        val tools = catalog.filter { it.category == CartridgeCategory.TOOLS }
+        assertEquals(expectedTools, tools.map { it.id }.toSet())
+        assertTrue(expectedTools.all { it in defaultState.slottedCartridges })
+    }
+
+    @Test
+    fun `audiobook media exporter chunks paragraphs cleanly and stitches smoothly without clipping`() {
+        val bookText = """
+            Chapter One. The lanterns glowed along the harbor wall.
+
+            Captain Elara opened her logbook. "Set sail at dawn!" she commanded.
+        """.trimIndent()
+
+        val exportChunks = PurrTextProcessor.buildExportChunks(
+            rawText = bookText,
+            profile = defaultProfile.copy(enableDualVoiceSplit = false),
+            purrModuleActive = true,
+            symbolShieldModuleActive = true,
+            targetChunkCharsOverride = 220,
+            paragraphPauseMs = 550
+        )
+        val silences = exportChunks.filterIsInstance<PurrChunk.Silence>()
+        val speeches = exportChunks.filterIsInstance<PurrChunk.Speech>()
+        assertTrue(speeches.size >= 2)
+        assertTrue(silences.any { it.reason.contains("PARAGRAPH") && it.durationMs == 550 })
+
+        val sampleRate = 24000
+        val seg1 = PurrDspProcessor.ExportAudioSegment(
+            pcmFloat24k = FloatArray(sampleRate / 4) { i -> 0.55f * sin(2.0 * PI * 330.0 * i / sampleRate).toFloat() },
+            isSilence = false
+        )
+        val gap = PurrDspProcessor.ExportAudioSegment(pcmFloat24k = FloatArray(sampleRate / 10), isSilence = true)
+        val seg2 = PurrDspProcessor.ExportAudioSegment(
+            pcmFloat24k = FloatArray(sampleRate / 4) { i -> 0.25f * sin(2.0 * PI * 440.0 * i / sampleRate).toFloat() },
+            isSilence = false
+        )
+        val seg3 = PurrDspProcessor.ExportAudioSegment(
+            pcmFloat24k = FloatArray(sampleRate / 4) { i -> 0.50f * sin(2.0 * PI * 520.0 * i / sampleRate).toFloat() },
+            isSilence = false
+        )
+
+        val stitched = PurrDspProcessor.stitchAndMasterAudiobook(
+            segments = listOf(seg1, gap, seg2, seg3),
+            sampleRate = sampleRate,
+            normalizeLoudness = true,
+            smoothTransitions = true
+        )
+        val overlapSamples = (sampleRate * 0.018f).toInt()
+        assertEquals(seg1.pcmFloat24k.size + gap.pcmFloat24k.size + seg2.pcmFloat24k.size + seg3.pcmFloat24k.size - overlapSamples, stitched.size)
+        assertTrue(stitched.all { abs(it) <= 0.90f })
     }
 }

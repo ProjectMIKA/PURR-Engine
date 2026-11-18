@@ -64,7 +64,7 @@ class ModelCatalogManager(
                     specId = spec.id,
                     state = DownloadState.INSTALLED,
                     sha256Verified = true,
-                    localPath = "android://system_tts"
+                    localPath = spec.downloadUrl
                 )
             )
             return
@@ -120,7 +120,7 @@ class ModelCatalogManager(
                     specId = spec.id,
                     state = DownloadState.INSTALLED,
                     sha256Verified = true,
-                    localPath = "android://system_tts"
+                    localPath = spec.downloadUrl
                 )
             )
             repository.setCartridgeSlotted(spec.id, false)
@@ -130,7 +130,7 @@ class ModelCatalogManager(
         runCatching { File(downloadsTempDir, "${spec.fileName}.part").delete() }
         runCatching { resolveDestinationFile(spec).delete() }
         if (spec.isArchiveTarBz2 && spec.sherpaFamily != null) {
-            runCatching { resolveSherpaExtractDir(spec.sherpaFamily).deleteRecursively() }
+            runCatching { resolveSherpaExtractDir(spec).deleteRecursively() }
         }
         repository.updateModelState(spec.id, ModelBundleState(specId = spec.id, state = DownloadState.NOT_INSTALLED))
     }
@@ -232,7 +232,7 @@ class ModelCatalogManager(
                         sha256Verified = true
                     )
                 )
-                extractTarBz2(finalFile, resolveSherpaExtractDir(spec.sherpaFamily))
+                extractTarBz2(finalFile, resolveSherpaExtractDir(spec))
             }
 
             repository.updateModelState(
@@ -311,11 +311,17 @@ class ModelCatalogManager(
         BackendType.EXTERNAL_PROXY -> File(context.filesDir, "models/proxy/${spec.fileName}")
     }
 
-    private fun resolveSherpaExtractDir(family: SherpaModelFamily): File = when (family) {
+    private fun resolveSherpaExtractDir(spec: ModelBundleSpec): File = when (spec.sherpaFamily) {
         SherpaModelFamily.KOKORO -> File(context.filesDir, "models/sherpa/kokoro")
+        SherpaModelFamily.KITTEN_TTS -> File(context.filesDir, "models/sherpa/kitten")
         SherpaModelFamily.SUPERTONIC_3 -> File(context.filesDir, "models/sherpa/supertonic3")
         SherpaModelFamily.POCKET_TTS -> File(context.filesDir, "models/sherpa/pocket_tts")
         SherpaModelFamily.ZIPVOICE -> File(context.filesDir, "models/sherpa/zipvoice")
-        SherpaModelFamily.PIPER -> File(context.filesDir, "models/sherpa/piper")
+        SherpaModelFamily.PIPER -> if (spec.isSubCartridge) {
+            File(context.filesDir, "models/sherpa/piper_${spec.id}")
+        } else {
+            File(context.filesDir, "models/sherpa/piper")
+        }
+        null -> File(context.filesDir, "models/sherpa/other")
     }
 }

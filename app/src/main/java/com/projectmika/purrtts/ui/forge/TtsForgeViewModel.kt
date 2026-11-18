@@ -2,16 +2,22 @@ package com.projectmika.purrtts.ui.forge
 
 import android.annotation.SuppressLint
 import android.app.Application
+import android.content.ContentValues
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.projectmika.purrtts.PurrApplication
+import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.DownloadState
+import com.projectmika.purrtts.core.purr.ExportedAudioFile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.MikaStopConfig
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
@@ -27,9 +33,13 @@ import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.engine.TtsBackendRouter
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import kotlin.math.abs
 import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +74,15 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val telemetry: StateFlow<TtsBackendRouter.LiveTelemetry> = backendRouter.telemetry
     val vramRemainingSeconds: StateFlow<Int> = backendRouter.liteRtEngine.vramRemainingSeconds
     val modelCatalog: List<ModelBundleSpec> = catalogManager.catalog
+    val mainCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
+        !it.isSubCartridge && it.category == CartridgeCategory.TTS
+    }
+    val toolCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
+        !it.isSubCartridge && it.category == CartridgeCategory.TOOLS
+    }
+
+    fun subCartridgesFor(parentId: String): List<ModelBundleSpec> =
+        modelCatalog.filter { it.isSubCartridge && it.parentCartridgeId == parentId }
 
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
@@ -88,7 +107,17 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     private val _lastRecordedWavPath = MutableStateFlow<String?>(null)
     val lastRecordedWavPath: StateFlow<String?> = _lastRecordedWavPath.asStateFlow()
 
+    private val _isExportingAudio = MutableStateFlow(false)
+    val isExportingAudio: StateFlow<Boolean> = _isExportingAudio.asStateFlow()
+
+    private val _exportProgressFraction = MutableStateFlow(0f)
+    val exportProgressFraction: StateFlow<Float> = _exportProgressFraction.asStateFlow()
+
+    private val _exportStatusLabel = MutableStateFlow("IDLE // READY TO RENDER")
+    val exportStatusLabel: StateFlow<String> = _exportStatusLabel.asStateFlow()
+
     private var activePlaybackJob: Job? = null
+    private var activeExportJob: Job? = null
     private var activeToastJob: Job? = null
     private var activeAnimJob: Job? = null
 
@@ -126,7 +155,13 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     fun allAvailableVoices(): List<VoiceDescriptor> = repository.allAvailableVoices()
 
     fun previewChunks(text: String, profile: PurrProfile, rules: List<PhoneticRule>): List<PurrChunk> {
-        return PurrTextProcessor.process(text, profile, rules)
+        return PurrTextProcessor.process(
+            rawText = text,
+            profile = profile,
+            customRules = rules,
+            purrModuleActive = repository.isPurrEngineModuleActive(),
+            symbolShieldModuleActive = repository.isSymbolShieldModuleActive()
+        )
     }
 
     fun selectProfile(profileId: String) {
@@ -176,14 +211,18 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun toggleCartridgeSlotted(spec: ModelBundleSpec, slotIn: Boolean) {
         val modelState = repository.state.value.modelStates[spec.id]
-        if (slotIn && modelState?.state != DownloadState.INSTALLED) {
+        val isPiperSubReady = spec.id == "rom_piper" && subCartridgesFor("rom_piper").any {
+            repository.state.value.modelStates[it.id]?.state == DownloadState.INSTALLED
+        }
+        val isReady = spec.isBuiltInOsCartridge || modelState?.state == DownloadState.INSTALLED || isPiperSubReady
+        if (slotIn && !isReady) {
             showToast("Download ${spec.romCode} first before slotting!")
             return
         }
         repository.setCartridgeSlotted(spec.id, slotIn)
-        if (!slotIn) {
+        if (!slotIn && spec.category == CartridgeCategory.TTS) {
             viewModelScope.launch { backendRouter.evictAllVram() }
-        } else {
+        } else if (slotIn && spec.category == CartridgeCategory.TTS) {
             repository.selectEngineCartridge(spec.id)
         }
 
@@ -194,6 +233,19 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             _cartridgeAnim.value = null
         }
         showToast(if (slotIn) "💾 Slotted [${spec.romCode}: ${spec.name}]" else "⏏️ Ejected [${spec.romCode}: ${spec.name}]")
+    }
+
+    fun toggleSubCartridgeEnabled(spec: ModelBundleSpec, enabled: Boolean) {
+        val modelState = repository.state.value.modelStates[spec.id]
+        if (enabled && modelState?.state != DownloadState.INSTALLED) {
+            showToast("Download ${spec.romCode} first before enabling!")
+            return
+        }
+        repository.setSubCartridgeEnabled(spec.id, enabled)
+        if (!enabled) {
+            viewModelScope.launch { backendRouter.evictAllVram() }
+        }
+        showToast(if (enabled) "⚡ Activated [${spec.romCode}: ${spec.name}]" else "⏸ Bypassed [${spec.romCode}: ${spec.name}]")
     }
 
     fun addPhoneticRule(pattern: String, replacement: String, isRegex: Boolean, category: RuleCategory) {
@@ -245,7 +297,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 val chunks = PurrTextProcessor.process(
                     rawText = text,
                     profile = effectiveProfile,
-                    customRules = repository.state.value.customPhoneticRules
+                    customRules = repository.state.value.customPhoneticRules,
+                    purrModuleActive = repository.isPurrEngineModuleActive(),
+                    symbolShieldModuleActive = repository.isSymbolShieldModuleActive()
                 )
                 if (chunks.isEmpty()) {
                     showToast("Nothing speakable after PURR filter!")
@@ -458,6 +512,290 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         )
         repository.registerClonedVoice(cloned)
         showToast("Registered Cloned Voice [$cleanName]")
+    }
+
+    fun removeClonedVoice(voiceId: String) {
+        repository.removeClonedVoice(voiceId)
+        showToast("Removed cloned voice")
+    }
+
+    /**
+     * Synthesizes a short message or multi-page audiobook chapter chunk-by-chunk, blends chunks
+     * smoothly with raised-cosine crossfading & RMS loudness leveling, writes a mastered
+     * 24kHz mono `.wav` file, and saves a copy to `Downloads/PURR-TTS/`.
+     */
+    fun renderAndExportMediaFile(
+        title: String,
+        rawText: String,
+        targetChunkChars: Int = 240,
+        paragraphPauseMs: Int = 550,
+        normalizeLoudness: Boolean = true,
+        smoothTransitions: Boolean = true
+    ) {
+        val cleanText = rawText.trim()
+        if (cleanText.isEmpty()) {
+            showToast("Enter some text or paste audiobook pages first!")
+            return
+        }
+        if (_isExportingAudio.value) {
+            showToast("Render already in progress...")
+            return
+        }
+
+        activeExportJob?.cancel()
+        activeExportJob = viewModelScope.launch(Dispatchers.IO) {
+            _isExportingAudio.value = true
+            _exportProgressFraction.value = 0.02f
+            _exportStatusLabel.value = "CHUNKING TEXT BOUNDARIES..."
+
+            try {
+                val activeProfile = repository.currentProfile
+                val purrOn = repository.isPurrEngineModuleActive()
+                val shieldOn = repository.isSymbolShieldModuleActive()
+                val chunks = PurrTextProcessor.buildExportChunks(
+                    rawText = cleanText,
+                    profile = activeProfile,
+                    customRules = repository.state.value.customPhoneticRules,
+                    purrModuleActive = purrOn,
+                    symbolShieldModuleActive = shieldOn,
+                    targetChunkCharsOverride = targetChunkChars,
+                    paragraphPauseMs = paragraphPauseMs
+                )
+
+                val speechCount = chunks.count { it is PurrChunk.Speech }.coerceAtLeast(1)
+                if (chunks.none { it is PurrChunk.Speech }) {
+                    _exportStatusLabel.value = "NOTHING SPEAKABLE AFTER FILTER"
+                    showToast("No speakable words found in input text!")
+                    return@launch
+                }
+
+                val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+                val segments = ArrayList<PurrDspProcessor.ExportAudioSegment>(chunks.size)
+                var speechDone = 0
+                var renderedSpeechChunks = 0
+
+                for (chunk in chunks) {
+                    if (!isActive) return@launch
+                    when (chunk) {
+                        is PurrChunk.Silence -> {
+                            val silenceCount = ((chunk.durationMs * sampleRate) / 1000).coerceAtLeast(1)
+                            segments += PurrDspProcessor.ExportAudioSegment(
+                                pcmFloat24k = FloatArray(silenceCount),
+                                isSilence = true
+                            )
+                        }
+                        is PurrChunk.Speech -> {
+                            speechDone++
+                            _exportProgressFraction.value = (speechDone.toFloat() / (speechCount + 1).toFloat()).coerceIn(0.05f, 0.90f)
+                            _exportStatusLabel.value = "SYNTHESIZING CHUNK $speechDone / $speechCount..."
+                            val outcome = backendRouter.synthesizeSpeechChunk(chunk, activeProfile)
+                            if (outcome.pcmFloat24k.isNotEmpty()) {
+                                segments += PurrDspProcessor.ExportAudioSegment(
+                                    pcmFloat24k = outcome.pcmFloat24k,
+                                    isSilence = false
+                                )
+                                renderedSpeechChunks++
+                            }
+                        }
+                    }
+                }
+
+                if (renderedSpeechChunks == 0) {
+                    _exportStatusLabel.value = "FAILED // NO AUDIO GENERATED"
+                    showToast("No TTS cartridge or system synthesizer produced audio!")
+                    return@launch
+                }
+
+                _exportProgressFraction.value = 0.94f
+                _exportStatusLabel.value = "BLENDING & MASTERING 24KHZ TRACK..."
+                val masteredFloat = PurrDspProcessor.stitchAndMasterAudiobook(
+                    segments = segments,
+                    sampleRate = sampleRate,
+                    normalizeLoudness = normalizeLoudness,
+                    smoothTransitions = smoothTransitions
+                )
+
+                val pcm16Bytes = PurrDspProcessor.float32ToPcm16Le(masteredFloat)
+                val safeTitle = title.trim()
+                    .ifEmpty { "PURR_Audiobook" }
+                    .replace(Regex("[^a-zA-Z0-9._-]+"), "_")
+                    .trim('_')
+                    .ifEmpty { "PURR_Audio" }
+                    .take(36)
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val fileName = "${safeTitle}_$timestamp.wav"
+
+                val exportDir = File(app.filesDir, "exported_audio").apply { mkdirs() }
+                val localWavFile = File(exportDir, fileName)
+                writePcm16MonoWav(localWavFile, pcm16Bytes, pcm16Bytes.size, sampleRate)
+
+                val publicDownloadLabel = copyWavToPublicDownloads(localWavFile, fileName)
+                val durationSec = masteredFloat.size.toFloat() / sampleRate.toFloat()
+                val voiceLabel = allAvailableVoices()
+                    .firstOrNull { it.id == activeProfile.primaryVoiceId }
+                    ?.displayName ?: activeProfile.primaryVoiceId
+
+                val record = ExportedAudioFile(
+                    id = "exp_${System.currentTimeMillis()}",
+                    title = title.trim().ifEmpty { safeTitle },
+                    fileName = fileName,
+                    localPath = localWavFile.absolutePath,
+                    publicDownloadPath = publicDownloadLabel,
+                    durationSec = durationSec,
+                    sizeBytes = localWavFile.length(),
+                    chunkCount = renderedSpeechChunks,
+                    voiceLabel = voiceLabel,
+                    createdAtEpochMs = System.currentTimeMillis()
+                )
+                repository.registerExportedAudio(record)
+
+                _exportProgressFraction.value = 1.0f
+                _exportStatusLabel.value = "READY // ${"%.1f".format(durationSec)}s (${renderedSpeechChunks} CHUNKS)"
+                showToast(
+                    if (publicDownloadLabel.isNotBlank()) "⬇ Saved $publicDownloadLabel!"
+                    else "⬇ Exported $fileName (${"%.1f".format(durationSec)}s)!"
+                )
+            } catch (err: Exception) {
+                _exportStatusLabel.value = "ERROR // ${err.message ?: "Export failed"}"
+                showToast("Export failed: ${err.message}")
+            } finally {
+                _isExportingAudio.value = false
+                backendRouter.markIdle()
+            }
+        }
+    }
+
+    fun cancelAudioExport() {
+        activeExportJob?.cancel()
+        activeExportJob = null
+        _isExportingAudio.value = false
+        _exportProgressFraction.value = 0f
+        _exportStatusLabel.value = "CANCELLED // READY TO RENDER"
+        showToast("Cancelled audio export")
+    }
+
+    fun playExportedAudioFile(entry: ExportedAudioFile) {
+        val wavFile = File(entry.localPath)
+        if (!wavFile.exists() || wavFile.length() <= 44L) {
+            showToast("Audio file not found on disk!")
+            return
+        }
+        activePlaybackJob?.cancel()
+        activePlaybackJob = viewModelScope.launch(Dispatchers.IO) {
+            _isPlayingPreview.value = true
+            var audioTrack: AudioTrack? = null
+            try {
+                val allBytes = FileInputStream(wavFile).use { it.readBytes() }
+                if (allBytes.size <= 44) return@launch
+                val pcmData = allBytes.copyOfRange(44, allBytes.size)
+                val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+                val minBuf = AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                ).coerceAtLeast(4096)
+
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setSampleRate(sampleRate)
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(minBuf * 2)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                audioTrack.play()
+
+                val stepSize = 4096
+                var offset = 0
+                while (offset < pcmData.size && isActive) {
+                    val count = minOf(stepSize, pcmData.size - offset)
+                    val written = audioTrack.write(pcmData, offset, count)
+                    if (written <= 0) break
+                    val sliceFloat = PurrDspProcessor.pcm16LeToFloat32(pcmData.copyOfRange(offset, offset + count))
+                    backendRouter.emitSpeechTelemetry(
+                        label = "[MEDIA] ${entry.title}",
+                        badge = HardwareStatusBadge.CPU_NEON,
+                        summary = "${entry.fileName} (${"%.1f".format(entry.durationSec)}s)",
+                        sentiment = "PLAYBACK",
+                        bins = PurrDspProcessor.computeWaveformBins(sliceFloat, 32)
+                    )
+                    offset += count
+                }
+            } catch (err: Exception) {
+                showToast("Playback error: ${err.message}")
+            } finally {
+                runCatching {
+                    audioTrack?.stop()
+                    audioTrack?.release()
+                }
+                backendRouter.markIdle()
+                _isPlayingPreview.value = false
+            }
+        }
+    }
+
+    fun saveExportedFileToDownloads(entry: ExportedAudioFile) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val wavFile = File(entry.localPath)
+            if (!wavFile.exists()) {
+                showToast("Source WAV file missing!")
+                return@launch
+            }
+            val pathLabel = copyWavToPublicDownloads(wavFile, entry.fileName)
+            if (pathLabel.isNotBlank()) {
+                repository.registerExportedAudio(entry.copy(publicDownloadPath = pathLabel))
+                showToast("⬇ Downloaded -> $pathLabel")
+            } else {
+                showToast("Saved in app storage: ${wavFile.name}")
+            }
+        }
+    }
+
+    fun deleteExportedAudioFile(entry: ExportedAudioFile) {
+        runCatching { File(entry.localPath).delete() }
+        repository.removeExportedAudio(entry.id)
+        showToast("Deleted [${entry.fileName}]")
+    }
+
+    private fun copyWavToPublicDownloads(wavFile: File, fileName: String): String {
+        return runCatching {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                    put(MediaStore.Downloads.MIME_TYPE, "audio/wav")
+                    put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/PURR-TTS")
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val resolver = app.contentResolver
+                val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                if (uri != null) {
+                    resolver.openOutputStream(uri)?.use { out ->
+                        FileInputStream(wavFile).use { input -> input.copyTo(out) }
+                    }
+                    values.clear()
+                    values.put(MediaStore.Downloads.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    return@runCatching "Downloads/PURR-TTS/$fileName"
+                }
+            }
+            @Suppress("DEPRECATION")
+            val downloadsDir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
+                "PURR-TTS"
+            ).apply { mkdirs() }
+            val dest = File(downloadsDir, fileName)
+            wavFile.copyTo(dest, overwrite = true)
+            "Downloads/PURR-TTS/$fileName"
+        }.getOrElse { "" }
     }
 
     private fun createSyntheticPlaceholderRefWav(label: String): String {

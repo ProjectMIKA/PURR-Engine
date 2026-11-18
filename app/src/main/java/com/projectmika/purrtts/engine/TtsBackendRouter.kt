@@ -1,7 +1,9 @@
 package com.projectmika.purrtts.engine
 
 import android.content.Context
+import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.BackendType
+import com.projectmika.purrtts.core.purr.DspConfig
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
@@ -57,45 +59,62 @@ class TtsBackendRouter(
     ): SynthesisOutcome = synthMutex.withLock {
         val voiceId = chunk.targetVoiceId ?: profile.primaryVoiceId
         val effectiveRate = (chunk.speakingRate * osRateMultiplier).coerceIn(0.6f, 1.8f)
-        val effectivePitch = (chunk.pitch * osPitchMultiplier).coerceIn(0.7f, 1.5f)
+        val effectivePitch = (chunk.pitch * osPitchMultiplier).coerceIn(0.88f, 1.12f)
 
         val selectedBackend = resolveBackendForVoice(voiceId, profile)
 
         var rawOutcome = when (selectedBackend) {
-            BackendType.LITERT_NPU_GPU -> {
-                var litertOut = liteRtEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
-                if (litertOut.pcmFloat24k.isEmpty() && sherpaEngine.isFamilyInstalled(SherpaModelFamily.KOKORO)) {
-                    val npuAwareOut = sherpaEngine.synthesizeChunk(
+            BackendType.LITERT_NPU_GPU,
+            BackendType.SHERPA_ONNX -> {
+                val cleanVoiceId = voiceId.substringAfter(':')
+                val isKokoroVoice = cleanVoiceId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) ||
+                    profile.selectedCartridgeId == "rom_kokoro_sherpa"
+                val npuChipOn = isKokoroVoice &&
+                    repository.isSubCartridgeEnabled("rom_kokoro_npu_g2p") &&
+                    liteRtEngine.isNpuG2pReady
+                val gpuChipOn = isKokoroVoice &&
+                    repository.isSubCartridgeEnabled("rom_kokoro_litert")
+
+                var litertOut: SynthesisOutcome? = null
+                if (npuChipOn || gpuChipOn) {
+                    litertOut = liteRtEngine.synthesizeChunk(
                         text = chunk.text,
-                        voiceId = voiceId.substringAfter(':'),
+                        voiceId = cleanVoiceId,
                         speakingRate = effectiveRate,
                         pitch = effectivePitch,
-                        profile = profile.copy(
-                            preferredBackend = BackendType.SHERPA_ONNX,
-                            sherpaFamily = SherpaModelFamily.KOKORO
-                        )
+                        profile = profile
                     )
-                    if (npuAwareOut.pcmFloat24k.isNotEmpty()) {
-                        val badge = if (liteRtEngine.isNpuG2pReady) {
+                }
+
+                if (litertOut != null && litertOut.pcmFloat24k.isNotEmpty()) {
+                    litertOut
+                } else {
+                    val baseOut = sherpaEngine.synthesizeChunk(
+                        text = chunk.text,
+                        voiceId = cleanVoiceId,
+                        speakingRate = effectiveRate,
+                        pitch = effectivePitch,
+                        profile = profile
+                    )
+                    if (baseOut.pcmFloat24k.isNotEmpty() && (npuChipOn || gpuChipOn)) {
+                        val badge = if (npuChipOn) {
                             HardwareStatusBadge.NPU_ACTIVE
                         } else {
                             HardwareStatusBadge.GPU_FP16
                         }
-                        val summary = if (liteRtEngine.isNpuG2pReady) {
-                            "Hexagon NPU G2P + Kokoro-82M Neural"
-                        } else {
-                            "LiteRT Kokoro-82M Neural"
+                        val summary = when {
+                            npuChipOn && gpuChipOn -> "ROM-02 Kokoro-82M + NPU G2P & GPU FP16"
+                            npuChipOn -> "ROM-02 Kokoro-82M + SUB-02A Hexagon NPU G2P"
+                            else -> "ROM-02 Kokoro-82M + SUB-02B Adreno GPU FP16"
                         }
-                        litertOut = npuAwareOut.copy(
+                        baseOut.copy(
                             hardwareBadge = badge,
                             engineSummary = summary
                         )
+                    } else {
+                        baseOut
                     }
                 }
-                litertOut
-            }
-            BackendType.SHERPA_ONNX -> {
-                sherpaEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
             }
             BackendType.CORE_OS -> {
                 if (!repository.isCartridgeSlotted("rom_core_os")) {
@@ -129,12 +148,27 @@ class TtsBackendRouter(
             )
         }
 
+        val dspModuleOn = repository.isDspModuleActive()
+        val effectiveDspConfig = if (dspModuleOn) {
+            profile.dspConfig
+        } else {
+            DspConfig(
+                warmthEqDb = 0f,
+                presenceEqDb = 0f,
+                reverbWetMix = 0f,
+                effectPreset = AcousticEffectPreset.NONE,
+                enableSentenceTaper = false,
+                antiPopFadeInMs = 0,
+                normalizePeak = false
+            )
+        }
+
         val processedPcm = PurrDspProcessor.process(
             input = rawOutcome.pcmFloat24k,
             sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ,
-            config = profile.dspConfig,
+            config = effectiveDspConfig,
             volumeGain = chunk.volumeGain,
-            dspEnabled = profile.enableDsp
+            dspEnabled = dspModuleOn && profile.enableDsp
         )
 
         val bins = PurrDspProcessor.computeWaveformBins(processedPcm, 32)

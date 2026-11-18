@@ -9,6 +9,7 @@ import com.google.mediapipe.tasks.core.Delegate
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrDefaultPresets
+import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.engine.PurrSynthesizer
 import com.projectmika.purrtts.engine.SynthesisOutcome
@@ -119,24 +120,26 @@ class LiteRtKokoroEngine(
         engineMutex.withLock {
             ensureInitializedLocked()
 
+            val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
+            val compensatedSpeed = (speakingRate / clampedPitch).coerceIn(0.6f, 1.8f)
             val cleanVoiceId = voiceId.substringAfter(':')
             val speakerIndex = PurrDefaultPresets.kokoroVoices("rom_kokoro_litert", BackendType.LITERT_NPU_GPU)
                 .firstOrNull { it.id == cleanVoiceId }?.speakerIndex ?: 0
 
             val phonemeTokens = runG2pPhonemizer(text)
 
-            val mpSamples = trySynthesizeViaMediaPipeTasks(text, cleanVoiceId, speakingRate)
+            val mpSamples = trySynthesizeViaMediaPipeTasks(text, cleanVoiceId, compensatedSpeed)
             if (mpSamples != null && mpSamples.isNotEmpty()) {
                 _statusFlow.value = HardwareStatusBadge.GPU_FP16
                 return@withContext SynthesisOutcome(
-                    pcmFloat24k = applyPitchShiftResample(mpSamples, pitch),
+                    pcmFloat24k = PurrDspProcessor.shiftPitchCubic(mpSamples, clampedPitch),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.GPU_FP16,
                     engineSummary = "MediaPipe Tasks TTS • Kokoro-82M GPU FP16"
                 )
             }
 
-            val lmSamples = trySynthesizeViaLiteRtLm(phonemeTokens, speakerIndex, speakingRate)
+            val lmSamples = trySynthesizeViaLiteRtLm(phonemeTokens, speakerIndex, compensatedSpeed)
             if (lmSamples != null && lmSamples.isNotEmpty()) {
                 val activeBadge = if (g2pCompiledModel != null) {
                     HardwareStatusBadge.NPU_ACTIVE
@@ -145,7 +148,7 @@ class LiteRtKokoroEngine(
                 }
                 _statusFlow.value = activeBadge
                 return@withContext SynthesisOutcome(
-                    pcmFloat24k = applyPitchShiftResample(lmSamples, pitch),
+                    pcmFloat24k = PurrDspProcessor.shiftPitchCubic(lmSamples, clampedPitch),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = activeBadge,
                     engineSummary = "LiteRT-LM Kokoro-82M ($activeBadge)"
@@ -371,19 +374,5 @@ class LiteRtKokoroEngine(
                 evictResources()
             }
         }
-    }
-
-    private fun applyPitchShiftResample(samples: FloatArray, pitch: Float): FloatArray {
-        if (pitch in 0.985f..1.015f || samples.isEmpty()) return samples
-        val targetLen = (samples.size / pitch).toInt().coerceAtLeast(1)
-        val out = FloatArray(targetLen)
-        for (i in 0 until targetLen) {
-            val pos = i * pitch
-            val i0 = pos.toInt().coerceIn(0, samples.lastIndex)
-            val i1 = (i0 + 1).coerceAtMost(samples.lastIndex)
-            val frac = pos - i0
-            out[i] = samples[i0] + (samples[i1] - samples[i0]) * frac
-        }
-        return out
     }
 }

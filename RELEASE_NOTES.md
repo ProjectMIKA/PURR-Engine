@@ -1,3 +1,33 @@
+# 🌌 PURR-TTS v1.3.0 // All-in-One Cyberdeck OS: KittenTTS, 6 Piper Packs, Bottom HUD & Audio Media Exporter
+
+### ✨ What's New since v1.2.0
+
+Master wanted PURR-TTS to level up into an **All-in-One Cyberdeck Neural TTS Suite** with more engines & voices, a slick bottom HUD layout, a full OS Module launcher with custom vector icons, dual-category Cartridge Bay (`TTS` vs `TOOLS`), and a brand-new **Audio Media Exporter** to turn short messages or multi-page audiobook chapters into downloadable `.WAV` files! 🐾
+
+* **🎙️ NEW `AUDIO_MEDIA_EXPORTER` OS MODULE (`TOOL-05`)**:
+  * Paste a short message or multi-page audiobook chapters, pick loose sentence chunk sizing (`SHORT ~160c`, `BOOK ~240c`, `LONG ~360c`) & paragraph pause timings, and export a mastered **24kHz mono `.WAV`** file straight to Android **`Downloads/PURR-TTS/`**.
+  * Automatically applies **P.U.R.R. Engine** text rules, **Acoustic DSP** effects & **Symbol Shield** when slotted, plus seamless **18ms raised-cosine crossfade blending**, DC offset removal, and **-18 dBFS RMS loudness leveling** across chunks!
+* **🐱 NEW `KITTEN_TTS_NANO` (`ROM-03`, 30MB) & 6 NEW PIPER VITS VOICE PACKS (`SUB-05A..F`)**:
+  * **KittenTTS Nano v0.8 INT8**: 8 expressive English voices (`F1..F4`, `M1..M4`) in a tiny 30 MB cartridge via `sherpa-onnx`.
+  * **6 Expandable Piper Voice Packs**: Independently downloadable sub-cartridges under `ROM-05` — **Amy (US Warm)**, **Ryan (US Deep Male)**, **Cori (UK Elegant)**, **Alba (Scottish/UK)**, **GLaDOS (Cybernetic AI)**, and **Kristin (US Storyteller)**.
+  * **Unified `ROM-02` Kokoro Hub**: `KOKORO_82M_NEURAL` (54 voices Base) now nests optional **Hexagon NPU (`SUB-02A`)** and **Adreno GPU FP16 (`SUB-02B`)** accelerator sub-chips.
+* **🧭 BOTTOM CYBERDECK HUD BAR (`VOICE | MODULES | CARTRIDGE BAY`)**:
+  * Keeps `> PURR_TTS // SYSTEM ENGINE  [IDLE]  [SET_OS_TTS]` pinned at the top and anchors the slick neon HUD bar along the bottom.
+  * **`VOICE`**: Purely dedicated to engine selection, searchable `MikaVoiceDropdownSelector`, subtle `0.88x..1.12x` cubic-Hermite pitch & pacing controls, and optional Dual Narrator/`"Dialogue"` split.
+  * **`MODULES`**: Cyberdeck OS Desktop featuring custom Canvas vector icons (`P.U.R.R. ENGINE`, `ACOUSTIC DSP RACK`, `SYMBOL & CHUNK SHIELD`, `VOICE CLONE STUDIO`, `AUDIO MEDIA EXPORTER`) that boot into animated terminal windows.
+  * **`CARTRIDGE BAY`**: Split cleanly into **`🎤 TTS (7)`** and **`🛠️ TOOLS (5)`** categories — all 5 built-in Tool Modules start slotted **ON** by default and can be ejected anytime to hide their OS icons and bypass their processing!
+* **🎧 GACHASWIPE DSP & AUDIOBOOK REFINEMENTS**:
+  * Added GachaSwipe's **120ms Exponential Sentence Tail Taper**, **250Hz Chest Warmth**, **8.5kHz De-Esser**, **Glue Compressor**, and all **10 Character Voice Effects**, plus **loose multi-sentence chunking** & the **Symbol & Punctuation Shield**.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.3.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `4`) with KittenTTS Nano, 6 Piper expansion voices, Bottom HUD navigation, 5 Cyberdeck OS Tool Modules, and the Audio Media Exporter.
+2. **`PURR-TTS_V1.3.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.2.0 // Stylized Voice Dropdown, Ejectable System Cartridge & NPU Models
 
 ### ✨ What's New since v1.1.0

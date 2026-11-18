@@ -95,13 +95,20 @@ class PurrProfileRepository(context: Context) {
     fun setCartridgeSlotted(cartridgeId: String, slotted: Boolean) {
         updateState { s ->
             val nextSlotted = if (slotted) s.slottedCartridges + cartridgeId else s.slottedCartridges - cartridgeId
-            val fallbackCart = nextSlotted.firstOrNull()
+            val ttsCatalogIds = PurrDefaultPresets.modelCatalog()
+                .filter { it.category == CartridgeCategory.TTS && !it.isSubCartridge }
+                .map { it.id }
+                .toSet()
+            val fallbackCart = nextSlotted.firstOrNull { it in ttsCatalogIds }
             val fallbackSpec = fallbackCart?.let { id ->
                 PurrDefaultPresets.modelCatalog().firstOrNull { it.id == id }
             }
             val availableVoices = PurrDefaultPresets.builtInVoices() + _discoveredSystemVoices.value
             val fallbackVoice = if (fallbackCart != null) {
-                availableVoices.firstOrNull { it.cartridgeId == fallbackCart }
+                availableVoices.firstOrNull {
+                    it.cartridgeId == fallbackCart &&
+                        (it.requiredSubCartridgeId == null || isSubCartridgeEnabled(it.requiredSubCartridgeId))
+                }
             } else {
                 null
             }
@@ -123,6 +130,16 @@ class PurrProfileRepository(context: Context) {
 
     fun isCartridgeSlotted(cartridgeId: String): Boolean =
         cartridgeId == "proxy_lan" || cartridgeId in _state.value.slottedCartridges
+
+    fun isPurrEngineModuleActive(): Boolean = isCartridgeSlotted("tool_purr_engine")
+
+    fun isDspModuleActive(): Boolean = isCartridgeSlotted("tool_dsp_rack")
+
+    fun isSymbolShieldModuleActive(): Boolean = isCartridgeSlotted("tool_symbol_shield")
+
+    fun isCloneStudioModuleActive(): Boolean = isCartridgeSlotted("tool_clone_studio")
+
+    fun isAudioExporterModuleActive(): Boolean = isCartridgeSlotted("tool_audio_exporter")
 
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
@@ -245,21 +262,73 @@ class PurrProfileRepository(context: Context) {
         }
     }
 
+    fun registerExportedAudio(entry: ExportedAudioFile) {
+        updateState { s ->
+            val filtered = s.exportedAudioFiles.filterNot { it.id == entry.id }
+            s.copy(exportedAudioFiles = (listOf(entry) + filtered).take(40))
+        }
+    }
+
+    fun removeExportedAudio(entryId: String) {
+        updateState { s ->
+            s.copy(exportedAudioFiles = s.exportedAudioFiles.filterNot { it.id == entryId })
+        }
+    }
+
+    fun setSubCartridgeEnabled(subSpecId: String, enabled: Boolean) {
+        updateState { s ->
+            val nextEnabled = if (enabled) s.enabledSubCartridges + subSpecId else s.enabledSubCartridges - subSpecId
+            s.copy(enabledSubCartridges = nextEnabled)
+        }
+    }
+
+    fun isSubCartridgeEnabled(subSpecId: String): Boolean =
+        subSpecId in _state.value.enabledSubCartridges &&
+            _state.value.modelStates[subSpecId]?.state == DownloadState.INSTALLED
+
     fun updateModelState(specId: String, bundleState: ModelBundleState) {
+        val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == specId }
+        val isSub = spec?.isSubCartridge == true
         updateState { s ->
             val nextMap = s.modelStates.toMutableMap()
             nextMap[specId] = bundleState
-            val nextSlotted = if (bundleState.state == DownloadState.INSTALLED) {
-                s.slottedCartridges + specId
-            } else {
-                s.slottedCartridges
+            var nextSlotted = s.slottedCartridges
+            var nextEnabledSubs = s.enabledSubCartridges
+
+            when (bundleState.state) {
+                DownloadState.INSTALLED -> {
+                    if (isSub) {
+                        nextEnabledSubs = nextEnabledSubs + specId
+                        nextSlotted = nextSlotted - specId
+                        if (spec?.parentCartridgeId == "rom_piper") {
+                            nextSlotted = nextSlotted + "rom_piper"
+                        }
+                    } else {
+                        nextSlotted = nextSlotted + specId
+                    }
+                }
+                DownloadState.NOT_INSTALLED -> {
+                    nextSlotted = nextSlotted - specId
+                    nextEnabledSubs = nextEnabledSubs - specId
+                }
+                else -> Unit
             }
-            s.copy(modelStates = nextMap, slottedCartridges = nextSlotted)
+
+            s.copy(
+                modelStates = nextMap,
+                slottedCartridges = nextSlotted,
+                enabledSubCartridges = nextEnabledSubs
+            )
         }
     }
 
     fun allAvailableVoices(): List<VoiceDescriptor> {
-        val base = PurrDefaultPresets.builtInVoices()
+        val piperBaseInstalled = _state.value.modelStates["rom_piper"]?.state == DownloadState.INSTALLED
+        val base = PurrDefaultPresets.builtInVoices().filter { v ->
+            val subOk = v.requiredSubCartridgeId == null || isSubCartridgeEnabled(v.requiredSubCartridgeId)
+            val basePiperOk = !(v.cartridgeId == "rom_piper" && v.requiredSubCartridgeId == null && !piperBaseInstalled)
+            subOk && basePiperOk
+        }
         val sysVoices = _discoveredSystemVoices.value
         val cloned = _state.value.clonedVoices.map { c ->
             val cartId = if (c.family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
@@ -290,34 +359,20 @@ class PurrProfileRepository(context: Context) {
         return runCatching {
             val decoded = json.decodeFromString<PurrForgeState>(stateFile.readText())
             if (decoded.profiles.isEmpty()) return@runCatching PurrForgeState()
-            val normalizedProfiles = decoded.profiles.map { p ->
-                if (p.selectedCartridgeId == "core_os") {
-                    p.copy(selectedCartridgeId = "rom_core_os")
-                } else {
-                    p
+            val normalizedModelStates = decoded.modelStates.toMutableMap().apply {
+                for (spec in PurrDefaultPresets.modelCatalog().filter { it.isBuiltInOsCartridge }) {
+                    put(
+                        spec.id,
+                        ModelBundleState(
+                            specId = spec.id,
+                            state = DownloadState.INSTALLED,
+                            sha256Verified = true,
+                            localPath = spec.downloadUrl
+                        )
+                    )
                 }
             }
-            val coreOsState = ModelBundleState(
-                specId = "rom_core_os",
-                state = DownloadState.INSTALLED,
-                sha256Verified = true,
-                localPath = "android://system_tts"
-            )
-            val isLegacyState = !decoded.hasMigratedCoreOsCartridge || "rom_core_os" !in decoded.modelStates
-            val normalizedModelStates = decoded.modelStates.toMutableMap().apply {
-                put("rom_core_os", coreOsState)
-            }
-            val normalizedSlotted = if (isLegacyState) {
-                decoded.slottedCartridges + "rom_core_os"
-            } else {
-                decoded.slottedCartridges
-            }
-            decoded.copy(
-                profiles = normalizedProfiles,
-                modelStates = normalizedModelStates,
-                slottedCartridges = normalizedSlotted,
-                hasMigratedCoreOsCartridge = true
-            )
+            decoded.copy(modelStates = normalizedModelStates)
         }.getOrElse {
             PurrForgeState()
         }
