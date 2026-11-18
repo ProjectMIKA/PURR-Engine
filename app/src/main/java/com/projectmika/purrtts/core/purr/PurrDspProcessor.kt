@@ -23,64 +23,67 @@ object PurrDspProcessor {
         input: FloatArray,
         sampleRate: Int = SAMPLE_RATE_HZ,
         config: DspConfig,
-        volumeGain: Float = 1.0f
+        volumeGain: Float = 1.0f,
+        dspEnabled: Boolean = true
     ): FloatArray {
         if (input.isEmpty()) return input
 
         var buffer = input.copyOf()
 
-        // 1. Acoustic preset tweaks on top of base sliders
-        var warmthDb = config.warmthEqDb
-        var presenceDb = config.presenceEqDb
-        var reverbWet = config.reverbWetMix
-        var applyRadioBandpass = false
+        if (dspEnabled) {
+            // 1. Acoustic preset tweaks on top of base sliders
+            var warmthDb = config.warmthEqDb
+            var presenceDb = config.presenceEqDb
+            var reverbWet = config.reverbWetMix
+            var applyRadioBandpass = false
 
-        when (config.effectPreset) {
-            AcousticEffectPreset.NONE -> Unit
-            AcousticEffectPreset.WARM_STUDIO -> {
-                warmthDb = max(warmthDb, 3.0f)
+            when (config.effectPreset) {
+                AcousticEffectPreset.NONE -> Unit
+                AcousticEffectPreset.WARM_STUDIO -> {
+                    warmthDb = max(warmthDb, 3.0f)
+                }
+                AcousticEffectPreset.ETHEREAL -> {
+                    reverbWet = max(reverbWet, 0.28f)
+                    warmthDb += 1.5f
+                }
+                AcousticEffectPreset.ANGELIC -> {
+                    presenceDb += 3.5f
+                    reverbWet = max(reverbWet, 0.22f)
+                }
+                AcousticEffectPreset.RADIO -> {
+                    applyRadioBandpass = true
+                    reverbWet = 0.02f
+                }
+                AcousticEffectPreset.IDOL -> {
+                    presenceDb += 2.5f
+                    reverbWet = max(reverbWet, 0.16f)
+                }
             }
-            AcousticEffectPreset.ETHEREAL -> {
-                reverbWet = max(reverbWet, 0.28f)
-                warmthDb += 1.5f
-            }
-            AcousticEffectPreset.ANGELIC -> {
-                presenceDb += 3.5f
-                reverbWet = max(reverbWet, 0.22f)
-            }
-            AcousticEffectPreset.RADIO -> {
-                applyRadioBandpass = true
-                reverbWet = 0.02f
-            }
-            AcousticEffectPreset.IDOL -> {
-                presenceDb += 2.5f
-                reverbWet = max(reverbWet, 0.16f)
-            }
-        }
 
-        // 2. Warmth Low-Shelf EQ (220 Hz) + Presence High-Shelf EQ (3800 Hz)
-        if (abs(warmthDb) > 0.05f) {
-            buffer = applyBiquadFilter(
-                samples = buffer,
-                coeffs = BiquadCoeffs.lowShelf(sampleRate.toDouble(), 220.0, 0.707, warmthDb.toDouble())
-            )
-        }
-        if (abs(presenceDb) > 0.05f) {
-            buffer = applyBiquadFilter(
-                samples = buffer,
-                coeffs = BiquadCoeffs.highShelf(sampleRate.toDouble(), 3800.0, 0.707, presenceDb.toDouble())
-            )
-        }
-        if (applyRadioBandpass) {
-            buffer = applyBiquadFilter(
-                samples = buffer,
-                coeffs = BiquadCoeffs.bandPass(sampleRate.toDouble(), 1450.0, 1.35)
-            )
-        }
+            // 2. Warmth Low-Shelf EQ (220 Hz) + Presence High-Shelf EQ (3800 Hz)
+            if (abs(warmthDb) > 0.05f) {
+                buffer = applyBiquadFilter(
+                    samples = buffer,
+                    coeffs = BiquadCoeffs.lowShelf(sampleRate.toDouble(), 220.0, 0.707, warmthDb.toDouble())
+                )
+            }
+            if (abs(presenceDb) > 0.05f) {
+                buffer = applyBiquadFilter(
+                    samples = buffer,
+                    coeffs = BiquadCoeffs.highShelf(sampleRate.toDouble(), 3800.0, 0.707, presenceDb.toDouble())
+                )
+            }
+            if (applyRadioBandpass) {
+                buffer = applyBiquadFilter(
+                    samples = buffer,
+                    coeffs = BiquadCoeffs.bandPass(sampleRate.toDouble(), 1450.0, 1.35)
+                )
+            }
 
-        // 3. Subtle Schroeder Room Reverb
-        if (reverbWet > 0.01f) {
-            buffer = applySchroederReverb(buffer, sampleRate, reverbWet.coerceIn(0f, 0.65f))
+            // 3. Subtle Schroeder Room Reverb
+            if (reverbWet > 0.01f) {
+                buffer = applySchroederReverb(buffer, sampleRate, reverbWet.coerceIn(0f, 0.65f))
+            }
         }
 
         // 4. Gain + Soft-knee saturation + Peak normalization

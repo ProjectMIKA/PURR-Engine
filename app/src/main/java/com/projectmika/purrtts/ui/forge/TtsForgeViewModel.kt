@@ -10,9 +10,9 @@ import android.media.MediaRecorder
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.projectmika.purrtts.PurrApplication
-import com.projectmika.purrtts.core.purr.ActionHandlingMode
-import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
+import com.projectmika.purrtts.core.purr.DownloadState
+import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.MikaStopConfig
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.PhoneticRule
@@ -30,6 +30,8 @@ import java.io.File
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import kotlin.math.abs
+import kotlin.math.sin
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,15 +40,19 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
- * ✨ MIKA'S TTS FORGE VIEWMODEL ✨
- * Connects the Forge UI tabs, real-time 24kHz AudioTrack auditioning player (with MIKASTOP
- * silence injection & live oscilloscope bins), model catalog downloader, and 5-second WAV
- * recorder for Pocket TTS / ZipVoice zero-shot cloning.
+ * ✨ MIKA'S PURR-TTS VIEWMODEL ✨
+ * Connects the streamlined 3-tab UI (`> VOICE & ENGINE`, `> PURR ENGINE`, `> CARTRIDGE BAY`),
+ * real-time 24kHz coherent speech auditioning (with direct device TTS fallback when no offline
+ * cartridge is slotted), ROM cartridge insert/eject animations, and 5-second WAV cloning.
  */
 class TtsForgeViewModel(application: Application) : AndroidViewModel(application) {
+
+    data class CartridgeAnimEvent(
+        val spec: ModelBundleSpec,
+        val isInsert: Boolean
+    )
 
     private val app = application as PurrApplication
     val repository = app.repository
@@ -54,6 +60,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val catalogManager = app.modelCatalogManager
 
     val forgeState: StateFlow<PurrForgeState> = repository.state
+    val discoveredSystemVoices: StateFlow<List<VoiceDescriptor>> = repository.discoveredSystemVoices
     val telemetry: StateFlow<TtsBackendRouter.LiveTelemetry> = backendRouter.telemetry
     val vramRemainingSeconds: StateFlow<Int> = backendRouter.liteRtEngine.vramRemainingSeconds
     val modelCatalog: List<ModelBundleSpec> = catalogManager.catalog
@@ -61,8 +68,11 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     private val _toastMessage = MutableStateFlow<String?>(null)
     val toastMessage: StateFlow<String?> = _toastMessage.asStateFlow()
 
+    private val _cartridgeAnim = MutableStateFlow<CartridgeAnimEvent?>(null)
+    val cartridgeAnim: StateFlow<CartridgeAnimEvent?> = _cartridgeAnim.asStateFlow()
+
     private val _testInputText = MutableStateFlow(
-        "O-oh! Wait... [pause:500ms] *blushes deeply* \"Are you serious right now, Master?!\" omg fr nya~"
+        "O-oh! Wait... *blushes deeply* \"Are you serious right now, Master?!\" omg fr nya~"
     )
     val testInputText: StateFlow<String> = _testInputText.asStateFlow()
 
@@ -80,14 +90,33 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     private var activePlaybackJob: Job? = null
     private var activeToastJob: Job? = null
+    private var activeAnimJob: Job? = null
+
+    init {
+        refreshSystemVoices()
+    }
+
+    fun refreshSystemVoices() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val sysVoices = backendRouter.proxyEngine.discoverSystemVoices(
+                repository.currentProfile.proxyConfig.fallbackSystemEnginePackage
+            )
+            repository.updateDiscoveredSystemVoices(sysVoices)
+        }
+    }
 
     fun showToast(msg: String) {
         activeToastJob?.cancel()
         _toastMessage.value = msg
         activeToastJob = viewModelScope.launch {
-            delay(3200L)
+            delay(3000L)
             _toastMessage.value = null
         }
+    }
+
+    fun dismissCartridgeAnim() {
+        activeAnimJob?.cancel()
+        _cartridgeAnim.value = null
     }
 
     fun updateTestInputText(text: String) {
@@ -102,12 +131,12 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun selectProfile(profileId: String) {
         repository.selectProfile(profileId)
-        showToast("Loaded profile [${repository.currentProfile.name}]")
+        showToast("Preset [${repository.currentProfile.name}] active!")
     }
 
     fun saveAsNewProfile(name: String) {
         repository.saveAsNewProfile(name)
-        showToast("Saved profile [$name]")
+        showToast("Saved preset [$name]")
     }
 
     fun updateActiveProfile(transform: (PurrProfile) -> PurrProfile) {
@@ -118,43 +147,53 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         repository.updateActiveProfile { p -> p.copy(mikaStopConfig = transform(p.mikaStopConfig)) }
     }
 
-    fun toggleWhitelist(voiceId: String, checked: Boolean) {
-        repository.toggleVoiceWhitelist(voiceId, checked)
-        showToast(if (checked) "Whitelisted [$voiceId]" else "Removed [$voiceId] from whitelist")
+    fun selectEngineCartridge(cartridgeId: String) {
+        repository.selectEngineCartridge(cartridgeId)
+        showToast("Engine -> ${cartridgeId.uppercase()}")
     }
 
-    fun toggleBlacklist(voiceId: String, blacklisted: Boolean) {
-        repository.toggleVoiceBlacklist(voiceId, blacklisted)
-        showToast(if (blacklisted) "Blacklisted [$voiceId]" else "Unblacklisted [$voiceId]")
-    }
-
-    fun bulkSetWhitelist(voiceIds: Collection<String>, whitelisted: Boolean) {
-        repository.bulkSetWhitelist(voiceIds, whitelisted)
-        showToast(
-            if (whitelisted) "Whitelisted ${voiceIds.size} visible voices"
-            else "Blacklisted ${voiceIds.size} visible voices"
-        )
-    }
-
-    fun toggleCustomTag(voiceId: String, tag: String) {
-        repository.toggleCustomVoiceTag(voiceId, tag)
-    }
-
-    fun assignPrimaryVoice(voiceId: String, engine: BackendType) {
-        repository.updateActiveProfile { p ->
-            p.copy(primaryVoiceId = voiceId, preferredBackend = engine)
-        }
-        showToast("Primary voice -> $voiceId")
-    }
-
-    fun assignDialogueVoice(voiceId: String) {
+    fun selectPrimaryVoice(voice: VoiceDescriptor) {
         repository.updateActiveProfile { p ->
             p.copy(
-                dialogueVoiceId = voiceId,
-                actionHandlingMode = ActionHandlingMode.DUAL_VOICE_ROUTING
+                primaryVoiceId = voice.id,
+                preferredBackend = voice.engine,
+                selectedCartridgeId = voice.cartridgeId,
+                sherpaFamily = voice.sherpaFamily ?: p.sherpaFamily
             )
         }
-        showToast("Dialogue voice -> $voiceId")
+        showToast("Voice -> ${voice.displayName}")
+    }
+
+    fun selectDialogueVoice(voice: VoiceDescriptor) {
+        repository.updateActiveProfile { p ->
+            p.copy(
+                dialogueVoiceId = voice.id,
+                enableDualVoiceSplit = true
+            )
+        }
+        showToast("Dialogue Voice -> ${voice.displayName}")
+    }
+
+    fun toggleCartridgeSlotted(spec: ModelBundleSpec, slotIn: Boolean) {
+        val modelState = repository.state.value.modelStates[spec.id]
+        if (slotIn && modelState?.state != DownloadState.INSTALLED) {
+            showToast("Download ${spec.romCode} first before slotting!")
+            return
+        }
+        repository.setCartridgeSlotted(spec.id, slotIn)
+        if (!slotIn) {
+            viewModelScope.launch { backendRouter.evictAllVram() }
+        } else {
+            repository.selectEngineCartridge(spec.id)
+        }
+
+        activeAnimJob?.cancel()
+        _cartridgeAnim.value = CartridgeAnimEvent(spec, slotIn)
+        activeAnimJob = viewModelScope.launch {
+            delay(1750L)
+            _cartridgeAnim.value = null
+        }
+        showToast(if (slotIn) "💾 Slotted [${spec.romCode}: ${spec.name}]" else "⏏️ Ejected [${spec.romCode}: ${spec.name}]")
     }
 
     fun addPhoneticRule(pattern: String, replacement: String, isRegex: Boolean, category: RuleCategory) {
@@ -177,21 +216,27 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun deletePhoneticRule(ruleId: String) {
         repository.deletePhoneticRule(ruleId)
-        showToast("Deleted phonetic rule")
+        showToast("Deleted rule")
     }
 
-    fun auditionText(text: String = _testInputText.value, overrideVoiceId: String? = null) {
+    /**
+     * Auditions text using PURR middleware + active slotted engine (or real Android device
+     * speech fallback so voices NEVER emit musical sine-wave tones).
+     */
+    fun auditionText(text: String = _testInputText.value, overrideVoice: VoiceDescriptor? = null) {
         activePlaybackJob?.cancel()
+        backendRouter.proxyEngine.stopDirectAudition()
         activePlaybackJob = viewModelScope.launch(Dispatchers.IO) {
             _isPlayingPreview.value = true
             var audioTrack: AudioTrack? = null
             try {
                 val baseProfile = repository.currentProfile
-                val effectiveProfile = if (overrideVoiceId != null) {
-                    val vDesc = allAvailableVoices().firstOrNull { it.id == overrideVoiceId }
+                val effectiveProfile = if (overrideVoice != null) {
                     baseProfile.copy(
-                        primaryVoiceId = overrideVoiceId,
-                        preferredBackend = vDesc?.engine ?: baseProfile.preferredBackend
+                        primaryVoiceId = overrideVoice.id,
+                        preferredBackend = overrideVoice.engine,
+                        selectedCartridgeId = overrideVoice.cartridgeId,
+                        sherpaFamily = overrideVoice.sherpaFamily ?: baseProfile.sherpaFamily
                     )
                 } else {
                     baseProfile
@@ -241,21 +286,45 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                             backendRouter.emitSilenceTelemetry(chunk.durationMs, chunk.reason)
                             val silenceBytes = PurrDspProcessor.createSilencePcm16Le(sampleRate, chunk.durationMs)
                             audioTrack.write(silenceBytes, 0, silenceBytes.size)
+                            delay(chunk.durationMs.toLong())
                         }
                         is PurrChunk.Speech -> {
                             val outcome = backendRouter.synthesizeSpeechChunk(chunk, effectiveProfile)
-                            val pcmBytes = PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
-                            var offset = 0
-                            while (offset < pcmBytes.size && isActive) {
-                                val step = minOf(4096, pcmBytes.size - offset)
-                                audioTrack.write(pcmBytes, offset, step)
-                                offset += step
+                            if (outcome.pcmFloat24k.isNotEmpty()) {
+                                val pcmBytes = PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
+                                var offset = 0
+                                while (offset < pcmBytes.size && isActive) {
+                                    val step = minOf(4096, pcmBytes.size - offset)
+                                    audioTrack.write(pcmBytes, offset, step)
+                                    offset += step
+                                }
+                            } else {
+                                // Direct speaker fallback when OEM TTS blocks synthesizeToFile
+                                val pulseBins = FloatArray(32) { i -> 0.25f + 0.55f * abs(sin(i * 0.45f)) }
+                                backendRouter.emitSpeechTelemetry(
+                                    label = "[${chunk.role.name}] ${chunk.text.take(40)}",
+                                    badge = HardwareStatusBadge.CORE_OS,
+                                    summary = "Direct System Speech Audition",
+                                    sentiment = chunk.sentiment.dominantLabel,
+                                    bins = pulseBins
+                                )
+                                val spoken = backendRouter.proxyEngine.speakDirectAudition(
+                                    text = chunk.text,
+                                    voiceId = chunk.targetVoiceId ?: effectiveProfile.primaryVoiceId,
+                                    speed = chunk.speakingRate,
+                                    pitch = chunk.pitch,
+                                    preferredPkg = effectiveProfile.proxyConfig.fallbackSystemEnginePackage
+                                )
+                                if (!spoken) {
+                                    showToast("Install Google Speech Services or a ROM Cartridge in Tab 3!")
+                                    break
+                                }
                             }
                         }
                     }
                 }
             } catch (err: Exception) {
-                showToast("Audition failed: ${err.message}")
+                showToast("Audition error: ${err.message}")
             } finally {
                 runCatching {
                     audioTrack?.stop()
@@ -269,36 +338,38 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun stopAudition() {
         activePlaybackJob?.cancel()
+        backendRouter.proxyEngine.stopDirectAudition()
         backendRouter.markIdle()
         _isPlayingPreview.value = false
     }
 
     fun startModelDownload(spec: ModelBundleSpec) {
         catalogManager.startOrResumeDownload(spec)
-        showToast("Downloading ${spec.name}...")
+        showToast("Downloading ${spec.romCode}: ${spec.name}...")
     }
 
     fun pauseModelDownload(specId: String) {
         catalogManager.pauseDownload(specId)
-        showToast("Paused download [$specId]")
+        showToast("Paused download")
     }
 
     fun verifyModelChecksum(spec: ModelBundleSpec) {
         viewModelScope.launch {
             val ok = catalogManager.verifyInstalledSha256(spec)
-            showToast(if (ok) "SHA-256 VERIFIED: ${spec.fileName}" else "SHA-256 MISMATCH: ${spec.fileName}")
+            showToast(if (ok) "SHA-256 VERIFIED: ${spec.romCode}" else "SHA-256 MISMATCH: ${spec.romCode}")
         }
     }
 
     fun deleteModelBundle(spec: ModelBundleSpec) {
+        repository.setCartridgeSlotted(spec.id, false)
         catalogManager.deleteModelBundle(spec)
-        showToast("Removed ${spec.fileName}")
+        showToast("Deleted ${spec.romCode} bundle")
     }
 
     fun evictAllVramNow() {
         viewModelScope.launch {
             backendRouter.evictAllVram()
-            showToast("Evicted GPU FP16 / NPU / ONNX VRAM")
+            showToast("Evicted native TTS model memory")
         }
     }
 
@@ -390,7 +461,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         val outDir = File(app.filesDir, "cloned_refs").apply { mkdirs() }
         val file = File(outDir, "seed_${label.hashCode()}.wav")
         if (!file.exists()) {
-            val pcm = ByteArray(24000 * 2) // 1s placeholder
+            val pcm = ByteArray(24000 * 2)
             writePcm16MonoWav(file, pcm, pcm.size, 24000)
         }
         return file.absolutePath
@@ -404,8 +475,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             header.put("WAVE".toByteArray(Charsets.US_ASCII))
             header.put("fmt ".toByteArray(Charsets.US_ASCII))
             header.putInt(16)
-            header.putShort(1.toShort()) // PCM
-            header.putShort(1.toShort()) // Mono
+            header.putShort(1.toShort())
+            header.putShort(1.toShort())
             header.putInt(sampleRate)
             header.putInt(sampleRate * 2)
             header.putShort(2.toShort())

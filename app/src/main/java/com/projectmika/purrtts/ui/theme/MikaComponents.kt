@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -48,16 +49,18 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
+import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import kotlinx.coroutines.delay
 
 /**
  * Full-screen GachaSwipe CRT Stage: `#050308` void background, cyan hairline monitor side
- * borders, subtle 3px horizontal scanlines, slow vertical scan band, and vignette overlay.
+ * borders, subtle 3px horizontal scanlines, and slow vertical scan band.
  */
 @Composable
 fun MikaTerminalStage(
@@ -83,7 +86,6 @@ fun MikaTerminalStage(
     ) {
         content()
 
-        // Non-interactive CRT scanlines + radial edge vignette overlay
         Canvas(modifier = Modifier.fillMaxSize()) {
             val stripeStep = 3.dp.toPx().coerceAtLeast(3f)
             var y = 0f
@@ -98,7 +100,6 @@ fun MikaTerminalStage(
                 y += stripeStep
             }
 
-            // Moving soft cyan scan band
             val bandHeight = 60.dp.toPx()
             val bandTop = bandFraction * size.height
             drawRect(
@@ -119,7 +120,7 @@ fun MikaTerminalStage(
 }
 
 /**
- * Single animated hardware accelerator status badge (`[NPU ACTIVE]`, `[GPU FP16]`, `[IDLE]`).
+ * Single animated hardware accelerator status badge (`[CORE_OS]`, `[CPU NEON]`, `[GPU FP16]`, `[IDLE]`).
  */
 @Composable
 fun MikaStatusBadge(
@@ -129,15 +130,16 @@ fun MikaStatusBadge(
 ) {
     val badgeColor = when (badge) {
         HardwareStatusBadge.NPU_ACTIVE -> MikaColors.TerminalGreen
-        HardwareStatusBadge.GPU_FP16 -> MikaColors.NeonCyan
-        HardwareStatusBadge.CPU_NEON -> MikaColors.MikaAmber
+        HardwareStatusBadge.GPU_FP16 -> MikaColors.MikaAmber
+        HardwareStatusBadge.CPU_NEON -> MikaColors.TerminalGreen
+        HardwareStatusBadge.CORE_OS -> MikaColors.NeonCyan
         HardwareStatusBadge.PROXY_LINK -> MikaColors.NeonPurple
         HardwareStatusBadge.IDLE -> MikaColors.DimText
     }
 
     val infinite = rememberInfiniteTransition(label = "statusPulse")
     val pulseAlpha by infinite.animateFloat(
-        initialValue = if (badge == HardwareStatusBadge.IDLE) 0.45f else 0.45f,
+        initialValue = 0.45f,
         targetValue = if (badge == HardwareStatusBadge.IDLE) 0.65f else 1.0f,
         animationSpec = infiniteRepeatable(
             animation = tween(durationMillis = 900, easing = LinearEasing),
@@ -183,7 +185,7 @@ fun MikaStatusBadge(
 }
 
 /**
- * Recipe 1 & 3 Terminal Panel with hairline neon border and optional subtle inset aura.
+ * Recipe 1 & 3 Terminal Panel with hairline neon border.
  */
 @Composable
 fun MikaGlowPanel(
@@ -210,6 +212,64 @@ fun MikaGlowPanel(
             .padding(contentPadding),
         content = content
     )
+}
+
+/**
+ * Collapsible terminal disclosure section for keeping advanced settings tucked cleanly away.
+ */
+@Composable
+fun ExpandableTerminalSection(
+    title: String,
+    subtitle: String? = null,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    accent: Color = MikaColors.NeonCyan,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    MikaGlowPanel(accent = if (expanded) accent else accent.copy(alpha = 0.45f)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onToggle),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "${if (expanded) "▼" else "▸"} $title",
+                    color = accent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp,
+                    letterSpacing = 0.8.sp
+                )
+                if (!subtitle.isNullOrBlank()) {
+                    Text(
+                        text = subtitle,
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp
+                    )
+                }
+            }
+            Text(
+                text = if (expanded) "[ HIDE ]" else "[ EXPAND ]",
+                color = accent.copy(alpha = 0.8f),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp
+            )
+        }
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                content = content
+            )
+        }
+    }
 }
 
 /**
@@ -426,6 +486,197 @@ fun TerminalToastBanner(
 }
 
 /**
+ * Dramatic Cyberdeck ROM Cartridge Slot / Eject overlay inspired by GachaSwipe v2.7.81.
+ */
+@Composable
+fun CartridgeSlamOverlay(
+    spec: ModelBundleSpec?,
+    isInsert: Boolean,
+    onDismiss: () -> Unit
+) {
+    AnimatedVisibility(
+        visible = spec != null,
+        enter = fadeIn(tween(150)) + scaleIn(tween(220), initialScale = 0.92f),
+        exit = fadeOut(tween(250))
+    ) {
+        if (spec != null) {
+            val accent = if (isInsert) Color(spec.accentHex) else MikaColors.DangerRed
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xD805030A))
+                    .clickable(onClick = onDismiss)
+                    .padding(24.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    // Molded Cartridge Graphic
+                    Column(
+                        modifier = Modifier
+                            .width(240.dp)
+                            .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0xFF252038), Color(0xFF141122), Color(0xFF0D0A18))
+                                )
+                            )
+                            .border(2.dp, accent, RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
+                            .padding(start = 12.dp, end = 12.dp, top = 10.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            repeat(3) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(2.dp)
+                                        .background(Color.White.copy(alpha = 0.16f))
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(accent.copy(alpha = 0.16f))
+                                .border(1.dp, accent, RoundedCornerShape(4.dp))
+                                .padding(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(
+                                    text = spec.romCode,
+                                    color = MikaColors.VoidBg,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 9.sp,
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(accent)
+                                        .padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                                Text(
+                                    text = "// ${spec.badge}",
+                                    color = accent,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 8.sp
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = spec.name,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 11.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = spec.hardwareAccelNote,
+                                color = Color.White.copy(alpha = 0.7f),
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 8.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = if (isInsert) "▼ LOCKING BUS PINS ▼" else "▲ RELEASING BUS PINS ▲",
+                            color = accent,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 8.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        // 12 Gold PCB Contact Pins
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF08060E))
+                                .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.35f))
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            repeat(12) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(10.dp)
+                                        .background(MikaColors.SsrGold)
+                                )
+                            }
+                        }
+                    }
+
+                    // Motherboard Socket Mouth
+                    Row(
+                        modifier = Modifier
+                            .width(260.dp)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFF0A0812))
+                            .border(2.dp, accent, RoundedCornerShape(4.dp))
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            text = if (isInsert) "● BUS_LOCKED" else "○ UNMOUNTED",
+                            color = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 8.sp
+                        )
+                        Text(
+                            text = "SLOT // ${spec.romCode}",
+                            color = Color.White.copy(alpha = 0.55f),
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 8.sp
+                        )
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .width(300.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MikaColors.PanelBg.copy(alpha = 0.96f))
+                            .border(1.dp, accent, RoundedCornerShape(6.dp))
+                            .padding(12.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Text(
+                            text = if (isInsert) "⚡ [ ${spec.romCode} SLOTTED // ONLINE ] ⚡"
+                            else "⏏️ [ ${spec.romCode} EJECTED // OFFLINE ]",
+                            color = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.sp
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = if (isInsert) "// Voices mounted into active Cyberdeck bus."
+                            else "// Weights evicted & voices unmounted from active bus.",
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
  * Cassette-bay `#030206` 32-band live VU waveform visualizer (Green -> Gold -> Pink)
  * with live MIKASTOP chunk / silence monitor line.
  */
@@ -478,14 +729,13 @@ fun LiveWaveformMonitor(
         Canvas(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(42.dp)
+                .height(36.dp)
         ) {
             val count = waveformBins.size.coerceAtLeast(1)
             val gap = 3.dp.toPx()
             val barWidth = ((size.width - gap * (count - 1)) / count).coerceAtLeast(2f)
             val midY = size.height / 2f
 
-            // Subtle baseline hair
             drawLine(
                 color = MikaColors.NeonCyan.copy(alpha = 0.18f),
                 start = Offset(0f, midY),

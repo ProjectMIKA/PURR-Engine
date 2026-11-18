@@ -61,7 +61,13 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.0.0 // The Neural Voice Forge)
+### 🌟 Latest Updates (v1.1.0 // The Cartridge Bay Overhaul)
+
+* **System TTS Crash Fixed (`PurrTtsService`):** Initialized dependencies before `super.onCreate()`, implemented `onLoadVoice()`, guarded ISO3 Locale calls, and returned clean `eng-USA` / `eng-GBR` codes from `CheckVoiceDataActivity`.
+* **Real Speech Only (Bundled `sherpa-onnx` JNI + `CORE_OS` Device Speech):** Removed placeholder sine-wave tones, bundled `sherpa-onnx-2.0.1.aar` for offline Kokoro-82M (54 voices), Supertonic 3, Piper VITS, Pocket TTS, and ZipVoice, and added instant zero-download speech via the device's built-in TTS engine.
+* **Streamlined 3-Tab UI & Cyberdeck Cartridge Bay:** Redesigned into **`> VOICE & ENGINE`** (with optional Narrator/`"Dialogue"` split), **`> PURR ENGINE`** (6 vibe presets + 4 simple toggles + expandable advanced rulebook/DSP), and **`> CARTRIDGE BAY`** (6-bay motherboard rack + physical molded ROM cartridges with download → slam in / eject lifecycle).
+
+### 📦 Prior Releases (v1.0.0 // The Neural Voice Forge)
 
 * **System-Wide `PurrTtsService`:** Registered Android `TextToSpeechService` streaming 24kHz mono PCM16/Float32 audio with `CHECK_VOICE_DATA`, `GET_SAMPLE_TEXT`, `INSTALL_TTS_DATA`, and `MANAGE_VOICES` support.
 * **Dual-Runtime Neural Router (`TtsBackendRouter`):** Added `LiteRtKokoroEngine` (Kokoro-82M 54 voices + G2P with persistent `--cache_dir` and 5-minute idle VRAM eviction), `SherpaOnnxEngine` (Supertonic 3, Pocket TTS 5s zero-shot voice cloning, ZipVoice, Piper), and `ExternalProxyEngine` (LAN OpenAI + OS TTS passthrough).

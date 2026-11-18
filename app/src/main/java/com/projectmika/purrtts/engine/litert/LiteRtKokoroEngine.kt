@@ -15,9 +15,6 @@ import com.projectmika.purrtts.engine.SynthesisOutcome
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.PI
-import kotlin.math.exp
-import kotlin.math.sin
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -33,17 +30,12 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * ✨ MIKA'S PRIMARY HARDWARE-ACCELERATED LITERT RUNTIME (KOKORO-82M + G2P NPU) ✨
+ * ✨ MIKA'S HARDWARE-ACCELERATED LITERT RUNTIME (KOKORO-82M GPU FP16) ✨
  *
- * Targets:
- * - `litert-community/Kokoro-82M` (`kokoro_int8_gpu_fp16.litertlm`, 24kHz mono float32 PCM, 54 voices)
- * - `litert-community/Kokoro-G2P-en-US` (`dp_g2p_litert.tflite`, Hexagon NPU / QAIRT accelerated G2P)
- *
- * Key Android stability guarantees:
- * 1) Persistent `--cache_dir` inside `context.cacheDir/litert_opencl_qnn_cache` so OpenCL/QNN
- *    shader/context graphs survive restarts without 10-second cold shader recompiles.
- * 2) 5-minute (`300_000L` ms) idle VRAM eviction timer so Android `lmkd` does not kill the
- *    background TextToSpeechService while idle between notifications or chapters.
+ * Targets `litert-community/Kokoro-82M` (`kokoro_int8_gpu_fp16.litertlm`) + persistent OpenCL/QNN
+ * `--cache_dir` and a 5-minute idle VRAM eviction timer so Android `lmkd` never terminates the service.
+ * Returns empty PCM when the `.litertlm` cartridge is not slotted/loaded so `TtsBackendRouter`
+ * fails soft to real speech (`CORE_OS` or `SherpaOnnx`) without synthetic tones.
  */
 class LiteRtKokoroEngine(
     private val context: Context,
@@ -53,7 +45,7 @@ class LiteRtKokoroEngine(
     companion object {
         private const val TAG = "PurrLiteRT"
         private const val SAMPLE_RATE_HZ = 24000
-        const val IDLE_VRAM_EVICTION_MS = 5 * 60 * 1000L // 5-minute idle VRAM eviction timer
+        const val IDLE_VRAM_EVICTION_MS = 5 * 60 * 1000L
     }
 
     override val backendType: BackendType = BackendType.LITERT_NPU_GPU
@@ -63,9 +55,6 @@ class LiteRtKokoroEngine(
 
     private val _vramRemainingSeconds = MutableStateFlow(0)
     val vramRemainingSeconds: StateFlow<Int> = _vramRemainingSeconds.asStateFlow()
-
-    private val _activeCacheDirPath = MutableStateFlow("")
-    val activeCacheDirPath: StateFlow<String> = _activeCacheDirPath.asStateFlow()
 
     private val engineMutex = Mutex()
     private var idleEvictionJob: Job? = null
@@ -105,18 +94,26 @@ class LiteRtKokoroEngine(
         pitch: Float,
         profile: PurrProfile
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
+        if (!isModelReady) {
+            return@withContext SynthesisOutcome(
+                pcmFloat24k = FloatArray(0),
+                sampleRateHz = SAMPLE_RATE_HZ,
+                hardwareBadge = HardwareStatusBadge.IDLE,
+                engineSummary = "LiteRT GPU cartridge not installed",
+                isFallbackNeuralPreview = true
+            )
+        }
+
         resetIdleEvictionTimer()
 
         engineMutex.withLock {
             ensureInitializedLocked()
 
-            val speakerIndex = PurrDefaultPresets.builtInVoices()
+            val speakerIndex = PurrDefaultPresets.kokoroVoices("rom_kokoro_litert", BackendType.LITERT_NPU_GPU)
                 .firstOrNull { it.id == voiceId }?.speakerIndex ?: 0
 
-            // 1. Run Kokoro-G2P-en-US on Hexagon NPU / QAIRT if model is present (else IPA fallback)
             val phonemeTokens = runG2pPhonemizer(text)
 
-            // 2. Attempt MediaPipe Tasks Audio TextToSpeech API if present in runtime AAR
             val mpSamples = trySynthesizeViaMediaPipeTasks(text, voiceId, speakingRate)
             if (mpSamples != null && mpSamples.isNotEmpty()) {
                 _statusFlow.value = HardwareStatusBadge.GPU_FP16
@@ -124,11 +121,10 @@ class LiteRtKokoroEngine(
                     pcmFloat24k = applyPitchShiftResample(mpSamples, pitch),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.GPU_FP16,
-                    engineSummary = "MediaPipe Tasks TTS • Kokoro-82M GPU FP16 (--cache_dir)"
+                    engineSummary = "MediaPipe Tasks TTS • Kokoro-82M GPU FP16"
                 )
             }
 
-            // 3. Attempt Google AI Edge LiteRT-LM Engine acoustic + vocoder pass
             val lmSamples = trySynthesizeViaLiteRtLm(phonemeTokens, speakerIndex, speakingRate)
             if (lmSamples != null && lmSamples.isNotEmpty()) {
                 val activeBadge = if (g2pCompiledModel != null) {
@@ -141,32 +137,15 @@ class LiteRtKokoroEngine(
                     pcmFloat24k = applyPitchShiftResample(lmSamples, pitch),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = activeBadge,
-                    engineSummary = "LiteRT-LM Kokoro-82M ($activeBadge • cache=${kernelCacheDir.name})"
+                    engineSummary = "LiteRT-LM Kokoro-82M ($activeBadge)"
                 )
             }
 
-            // 4. Deterministic Neural-Preview Formant Fallback when .litertlm bundles are not downloaded yet
-            val previewBadge = if (hasAdrenoOrQnnDevice()) {
-                HardwareStatusBadge.GPU_FP16
-            } else {
-                HardwareStatusBadge.CPU_NEON
-            }
-            _statusFlow.value = previewBadge
-            val fallbackPcm = synthesizeFormantPreview(
-                text = text,
-                speakerIndex = speakerIndex,
-                speakingRate = speakingRate,
-                pitch = pitch
-            )
             SynthesisOutcome(
-                pcmFloat24k = fallbackPcm,
+                pcmFloat24k = FloatArray(0),
                 sampleRateHz = SAMPLE_RATE_HZ,
-                hardwareBadge = previewBadge,
-                engineSummary = if (isModelReady) {
-                    "LiteRT-LM Kokoro-82M ($previewBadge)"
-                } else {
-                    "PURR Formant Neural Preview (Download Kokoro-82M for full inference)"
-                },
+                hardwareBadge = HardwareStatusBadge.IDLE,
+                engineSummary = "LiteRT runtime unavailable — failing over",
                 isFallbackNeuralPreview = true
             )
         }
@@ -185,19 +164,13 @@ class LiteRtKokoroEngine(
 
             _statusFlow.value = HardwareStatusBadge.IDLE
             _vramRemainingSeconds.value = 0
-            Log.i(TAG, "[VRAM_EVICT] Released LiteRT GPU FP16 & Hexagon NPU contexts cleanly.")
+            Log.i(TAG, "[VRAM_EVICT] Released LiteRT GPU FP16 & NPU contexts cleanly.")
         }
     }
 
     private fun ensureInitializedLocked() {
         val cachePath = kernelCacheDir.absolutePath
-        _activeCacheDirPath.value = cachePath
 
-        // Persistent OpenCL / QNN shader cache path flag for native delegates
-        val runtimeFlags = buildLiteRtRuntimeFlags(cachePath)
-        Log.d(TAG, "LiteRT runtime flags: ${runtimeFlags.joinToString(" ")}")
-
-        // 1) Initialize Hexagon NPU / QAIRT Kokoro-G2P-en-US if installed on disk
         if (g2pCompiledModel == null && g2pModelFile.exists()) {
             runCatching {
                 val options = CompiledModel.Options(
@@ -213,13 +186,9 @@ class LiteRtKokoroEngine(
                 }
                 g2pCompiledModel = CompiledModel.create(g2pModelFile.absolutePath, options)
                 _statusFlow.value = HardwareStatusBadge.NPU_ACTIVE
-                Log.i(TAG, "Kokoro-G2P-en-US initialized with NPU->GPU->CPU delegate chain.")
-            }.onFailure { err ->
-                Log.w(TAG, "Kokoro-G2P CompiledModel fallback: ${err.message}")
             }
         }
 
-        // 2) Initialize Kokoro-82M INT8/GPU-FP16 LiteRT-LM engine with persistent --cache_dir
         if (kokoroEngineHandle == null && isModelReady) {
             val gpuEngine = tryInitLiteRtLmEngine(
                 modelPath = kokoroModelFile.absolutePath,
@@ -233,7 +202,6 @@ class LiteRtKokoroEngine(
                 } else {
                     HardwareStatusBadge.GPU_FP16
                 }
-                Log.i(TAG, "Kokoro-82M initialized on Adreno GPU FP16 with --cache_dir=$cachePath")
             } else {
                 val cpuEngine = tryInitLiteRtLmEngine(
                     modelPath = kokoroModelFile.absolutePath,
@@ -247,7 +215,6 @@ class LiteRtKokoroEngine(
             }
         }
 
-        // 3) Configure MediaPipe Tasks Audio TextToSpeech BaseOptions (GPU delegate + model asset path)
         if (mediaPipeTtsHandle == null && isModelReady) {
             mediaPipeTtsHandle = tryInitMediaPipeTts(kokoroModelFile.absolutePath)
         }
@@ -274,7 +241,6 @@ class LiteRtKokoroEngine(
         val args = arrayOfNulls<Any?>(configCtor.parameterTypes.size)
         args[0] = modelPath
         args[1] = backendInstance
-        // Pass persistent --cache_dir path if String parameter is accepted in EngineConfig
         for (i in 2 until configCtor.parameterTypes.size) {
             if (configCtor.parameterTypes[i] == String::class.java) {
                 args[i] = cachePath
@@ -287,17 +253,6 @@ class LiteRtKokoroEngine(
         engine as? AutoCloseable
     }.getOrNull()
 
-    /**
-     * Explicit LiteRT-LM runtime flags including persistent OpenCL / QNN `--cache_dir`.
-     */
-    fun buildLiteRtRuntimeFlags(cachePath: String = kernelCacheDir.absolutePath): List<String> = listOf(
-        "--cache_dir=$cachePath",
-        "--backend=gpu",
-        "--precision=fp16",
-        "--g2p_backend=npu_qairt",
-        "--qnn_htp_performance=burst"
-    )
-
     private fun tryInitMediaPipeTts(modelPath: String): AutoCloseable? = runCatching {
         val baseOptions = BaseOptions.builder()
             .setModelAssetPath(modelPath)
@@ -306,13 +261,12 @@ class LiteRtKokoroEngine(
 
         val ttsClass = Class.forName("com.google.mediapipe.tasks.audio.texttospeech.TextToSpeech")
         val optsClass = Class.forName("com.google.mediapipe.tasks.audio.texttospeech.TextToSpeechOptions")
-        val builderMethod = optsClass.getMethod("builder")
-        val optsBuilder = builderMethod.invoke(null)
+        val optsBuilder = optsClass.getMethod("builder").invoke(null)
         optsBuilder.javaClass.getMethod("setBaseOptions", BaseOptions::class.java)
             .invoke(optsBuilder, baseOptions)
         val builtOpts = optsBuilder.javaClass.getMethod("build").invoke(optsBuilder)
-        val createMethod = ttsClass.getMethod("createFromOptions", Context::class.java, optsClass)
-        createMethod.invoke(null, context, builtOpts) as? AutoCloseable
+        ttsClass.getMethod("createFromOptions", Context::class.java, optsClass)
+            .invoke(null, context, builtOpts) as? AutoCloseable
     }.getOrNull()
 
     private fun trySynthesizeViaMediaPipeTasks(
@@ -333,8 +287,7 @@ class LiteRtKokoroEngine(
             val audioMethod = result?.javaClass?.methods?.firstOrNull {
                 it.name in setOf("audioData", "pcmFloatData", "samples") && it.parameterCount == 0
             }
-            val raw = audioMethod?.invoke(result)
-            when (raw) {
+            when (val raw = audioMethod?.invoke(result)) {
                 is FloatArray -> raw
                 is ByteBuffer -> {
                     raw.order(ByteOrder.LITTLE_ENDIAN)
@@ -346,30 +299,26 @@ class LiteRtKokoroEngine(
     }
 
     private fun runG2pPhonemizer(text: String): String {
-        val model = g2pCompiledModel
-        if (model != null) {
-            runCatching {
-                val inputBufs = model.createInputBuffers()
-                val outputBufs = model.createOutputBuffers()
-                try {
-                    val encoded = text.lowercase().take(128).map { it.code }.toIntArray()
-                    if (inputBufs.isNotEmpty()) {
-                        inputBufs[0].writeInt(encoded)
-                        model.run(inputBufs, outputBufs)
-                        if (outputBufs.isNotEmpty()) {
-                            val ids = outputBufs[0].readInt()
-                            if (ids.isNotEmpty()) {
-                                return ids.joinToString(" ")
-                            }
-                        }
+        val model = g2pCompiledModel ?: return text
+        return runCatching {
+            val inputBufs = model.createInputBuffers()
+            val outputBufs = model.createOutputBuffers()
+            try {
+                val encoded = text.lowercase().take(128).map { it.code }.toIntArray()
+                if (inputBufs.isNotEmpty()) {
+                    inputBufs[0].writeInt(encoded)
+                    model.run(inputBufs, outputBufs)
+                    if (outputBufs.isNotEmpty()) {
+                        val ids = outputBufs[0].readInt()
+                        if (ids.isNotEmpty()) return ids.joinToString(" ")
                     }
-                } finally {
-                    inputBufs.forEach { runCatching { it.close() } }
-                    outputBufs.forEach { runCatching { it.close() } }
                 }
+                text
+            } finally {
+                inputBufs.forEach { runCatching { it.close() } }
+                outputBufs.forEach { runCatching { it.close() } }
             }
-        }
-        return text
+        }.getOrDefault(text)
     }
 
     private fun trySynthesizeViaLiteRtLm(
@@ -413,12 +362,6 @@ class LiteRtKokoroEngine(
         }
     }
 
-    private fun hasAdrenoOrQnnDevice(): Boolean {
-        val qnnLib = File("/vendor/lib64/libQnnHtp.so")
-        val openClLib = File("/vendor/lib64/libOpenCL.so")
-        return qnnLib.exists() || openClLib.exists()
-    }
-
     private fun applyPitchShiftResample(samples: FloatArray, pitch: Float): FloatArray {
         if (pitch in 0.985f..1.015f || samples.isEmpty()) return samples
         val targetLen = (samples.size / pitch).toInt().coerceAtLeast(1)
@@ -429,58 +372,6 @@ class LiteRtKokoroEngine(
             val i1 = (i0 + 1).coerceAtMost(samples.lastIndex)
             val frac = pos - i0
             out[i] = samples[i0] + (samples[i1] - samples[i0]) * frac
-        }
-        return out
-    }
-
-    /**
-     * Expressive syllable-cadenced formant synthesis fallback used when `.litertlm` weights have not
-     * been downloaded yet, allowing live studio auditioning of MIKASTOP pauses, pitch curves, and DSP.
-     */
-    private fun synthesizeFormantPreview(
-        text: String,
-        speakerIndex: Int,
-        speakingRate: Float,
-        pitch: Float
-    ): FloatArray {
-        val cleanWords = text.split(Regex("\\s+")).filter { it.isNotBlank() }
-        if (cleanWords.isEmpty()) return FloatArray(0)
-
-        val isMale = PurrDefaultPresets.builtInVoices().getOrNull(speakerIndex)?.gender?.tag == "male"
-        val baseF0 = (if (isMale) 128.0 else 218.0) * pitch
-        val syllableDurationSec = (0.145 / speakingRate.coerceIn(0.65f, 1.5f))
-        val samplesPerWordBase = (SAMPLE_RATE_HZ * syllableDurationSec).toInt()
-        val totalSamples = cleanWords.sumOf { w ->
-            (samplesPerWordBase * (1 + (w.length / 4).coerceAtMost(3))).coerceAtLeast(1200)
-        }
-        val out = FloatArray(totalSamples)
-        var cursor = 0
-
-        cleanWords.forEachIndexed { wIdx, word ->
-            val wordLen = (samplesPerWordBase * (1 + (word.length / 4).coerceAtMost(3))).coerceAtLeast(1200)
-            val isQuestion = word.endsWith("?")
-            val isExclaim = word.endsWith("!")
-            val f1 = 440.0 + ((word.firstOrNull()?.code ?: 65) % 7) * 55.0
-            val f2 = 1350.0 + ((word.lastOrNull()?.code ?: 65) % 5) * 140.0
-
-            for (i in 0 until wordLen) {
-                if (cursor + i >= out.size) break
-                val t = i.toDouble() / SAMPLE_RATE_HZ
-                val norm = i.toDouble() / wordLen
-                val env = sin(PI * norm).coerceIn(0.0, 1.0) * exp(-0.4 * norm)
-                val contour = when {
-                    isQuestion -> 1.0 + 0.16 * norm
-                    isExclaim -> 1.08 - 0.06 * norm
-                    wIdx == cleanWords.lastIndex -> 0.98 - 0.08 * norm
-                    else -> 1.0 + 0.03 * sin(2.0 * PI * norm)
-                }
-                val f0 = baseF0 * contour
-                val fundamental = 0.55 * sin(2.0 * PI * f0 * t)
-                val formant1 = 0.28 * sin(2.0 * PI * f1 * t)
-                val formant2 = 0.14 * sin(2.0 * PI * f2 * t)
-                out[cursor + i] = ((fundamental + formant1 + formant2) * env * 0.45).toFloat()
-            }
-            cursor += wordLen
         }
         return out
     }

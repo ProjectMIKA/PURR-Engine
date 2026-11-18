@@ -18,9 +18,9 @@ import kotlinx.coroutines.sync.withLock
 
 /**
  * ✨ MIKA'S DUAL-RUNTIME BACKEND ROUTER & SINGLE-LANE SERIALIZER ✨
- * Coordinates LiteRT-LM (Primary NPU/GPU), Sherpa-ONNX (Multi-engine + Zero-Shot Cloning),
- * and External Proxy fallback behind a strict single-lane Mutex (`MikaSynthQueue` pattern)
- * while emitting real-time 32-band waveform & MIKASTOP chunk telemetry to the Forge UI.
+ * Routes speech chunks to the user's selected engine (`CORE_OS`, `SHERPA_ONNX` Cartridge,
+ * `LITERT_NPU_GPU` Cartridge, or `EXTERNAL_PROXY`), failing soft to real `CORE_OS` speech if a
+ * neural cartridge is ejected/not downloaded so output is ALWAYS coherent spoken words.
  */
 class TtsBackendRouter(
     context: Context,
@@ -31,7 +31,7 @@ class TtsBackendRouter(
         val badge: HardwareStatusBadge = HardwareStatusBadge.IDLE,
         val waveformBins: FloatArray = FloatArray(32),
         val activeChunkLabel: String = "STANDBY // AWAITING_INPUT",
-        val lastEngineSummary: String = "LiteRT NPU/GPU + Sherpa-ONNX Ready",
+        val lastEngineSummary: String = "CORE_OS Speech Ready • Slot Cartridges in Tab 3",
         val activeSentimentLabel: String = "NEUTRAL",
         val vramCountdownSec: Int = 0
     )
@@ -60,29 +60,35 @@ class TtsBackendRouter(
 
         val selectedBackend = resolveBackendForVoice(voiceId, profile)
 
-        val rawOutcome = when (selectedBackend) {
+        var rawOutcome = when (selectedBackend) {
             BackendType.LITERT_NPU_GPU -> {
                 liteRtEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
             }
             BackendType.SHERPA_ONNX -> {
                 sherpaEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
             }
-            BackendType.EXTERNAL_PROXY -> {
-                val proxyRes = proxyEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
-                if (proxyRes.pcmFloat24k.isNotEmpty()) {
-                    proxyRes
-                } else {
-                    // Fail-soft fallback to local LiteRT/Preview if LAN proxy is unreachable
-                    liteRtEngine.synthesizeChunk(chunk.text, profile.primaryVoiceId, effectiveRate, effectivePitch, profile)
-                }
+            BackendType.CORE_OS, BackendType.EXTERNAL_PROXY -> {
+                proxyEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
             }
+        }
+
+        // Fail soft to real CORE_OS speech whenever a cartridge isn't downloaded or slotted yet
+        if (rawOutcome.pcmFloat24k.isEmpty() && selectedBackend != BackendType.CORE_OS) {
+            rawOutcome = proxyEngine.synthesizeChunk(
+                text = chunk.text,
+                voiceId = "core_os_auto",
+                speakingRate = effectiveRate,
+                pitch = effectivePitch,
+                profile = profile.copy(preferredBackend = BackendType.CORE_OS)
+            )
         }
 
         val processedPcm = PurrDspProcessor.process(
             input = rawOutcome.pcmFloat24k,
             sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ,
             config = profile.dspConfig,
-            volumeGain = chunk.volumeGain
+            volumeGain = chunk.volumeGain,
+            dspEnabled = profile.enableDsp
         )
 
         val bins = PurrDspProcessor.computeWaveformBins(processedPcm, 32)
@@ -96,6 +102,17 @@ class TtsBackendRouter(
         )
 
         rawOutcome.copy(pcmFloat24k = processedPcm)
+    }
+
+    fun emitSpeechTelemetry(label: String, badge: HardwareStatusBadge, summary: String, sentiment: String, bins: FloatArray) {
+        _telemetry.value = _telemetry.value.copy(
+            badge = badge,
+            waveformBins = bins,
+            activeChunkLabel = label,
+            lastEngineSummary = summary,
+            activeSentimentLabel = sentiment,
+            vramCountdownSec = liteRtEngine.vramRemainingSeconds.value
+        )
     }
 
     fun emitSilenceTelemetry(durationMs: Int, reason: String) {
@@ -131,10 +148,20 @@ class TtsBackendRouter(
     }
 
     private fun resolveBackendForVoice(voiceId: String, profile: PurrProfile): BackendType {
+        if (voiceId.startsWith(ExternalProxyEngine.SYS_VOICE_PREFIX) || voiceId == "core_os_auto") {
+            return BackendType.CORE_OS
+        }
         val cloned = repository.state.value.clonedVoices.any { it.id == voiceId }
         if (cloned) return BackendType.SHERPA_ONNX
 
         val descriptor = repository.allAvailableVoices().firstOrNull { it.id == voiceId }
-        return descriptor?.engine ?: profile.preferredBackend
+        if (descriptor != null && repository.isCartridgeSlotted(descriptor.cartridgeId)) {
+            return descriptor.engine
+        }
+        return if (repository.isCartridgeSlotted(profile.selectedCartridgeId)) {
+            profile.preferredBackend
+        } else {
+            BackendType.CORE_OS
+        }
     }
 }

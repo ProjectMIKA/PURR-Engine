@@ -1,5 +1,6 @@
 package com.projectmika.purrtts.ui.forge
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -22,6 +23,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -43,12 +46,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
-import com.projectmika.purrtts.core.purr.BackendType
-import com.projectmika.purrtts.core.purr.PurrDefaultPresets
+import com.projectmika.purrtts.core.purr.ActionHandlingMode
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
+import com.projectmika.purrtts.ui.theme.CartridgeSlamOverlay
 import com.projectmika.purrtts.ui.theme.CyberDropdown
+import com.projectmika.purrtts.ui.theme.ExpandableTerminalSection
 import com.projectmika.purrtts.ui.theme.LiveWaveformMonitor
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
@@ -56,19 +60,12 @@ import com.projectmika.purrtts.ui.theme.MikaStatusBadge
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 import com.projectmika.purrtts.ui.theme.MikaTerminalStage
 import com.projectmika.purrtts.ui.theme.TerminalToastBanner
+import kotlin.math.roundToInt
 
-private enum class ForgeTab(val title: String) {
-    FORGE("> TTS_FORGE"),
-    RULEBOOK("> PURR_RULEBOOK"),
-    CATALOG("> MODEL_CATALOG")
-}
-
-private enum class EngineFilter(val label: String) {
-    ALL("ALL"),
-    LITERT("LITERT NPU/GPU"),
-    SHERPA("SHERPA-ONNX"),
-    CLONED("CLONED"),
-    PROXY("PROXY")
+private enum class PurrTab(val title: String) {
+    VOICE_ENGINE("> VOICE & ENGINE"),
+    PURR_ENGINE("> PURR ENGINE"),
+    CARTRIDGE_BAY("> CARTRIDGE BAY")
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -79,9 +76,11 @@ fun TtsForgeScreen(
     onOpenSystemTtsSettings: () -> Unit
 ) {
     val forgeState by viewModel.forgeState.collectAsState()
+    val discoveredSystemVoices by viewModel.discoveredSystemVoices.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val vramSec by viewModel.vramRemainingSeconds.collectAsState()
     val toastMsg by viewModel.toastMessage.collectAsState()
+    val cartridgeAnim by viewModel.cartridgeAnim.collectAsState()
     val testText by viewModel.testInputText.collectAsState()
     val isPlaying by viewModel.isPlayingPreview.collectAsState()
     val isRecordingClone by viewModel.isRecordingClone.collectAsState()
@@ -90,60 +89,42 @@ fun TtsForgeScreen(
 
     val activeProfile = forgeState.profiles.firstOrNull { it.id == forgeState.activeProfileId }
         ?: forgeState.profiles.first()
-    val allVoices = remember(forgeState.clonedVoices) { viewModel.allAvailableVoices() }
+    val allVoices = remember(forgeState.clonedVoices, discoveredSystemVoices) {
+        viewModel.allAvailableVoices()
+    }
 
     var activeTab by remember {
-        mutableIntStateOf(initialTabIndex.coerceIn(0, ForgeTab.entries.lastIndex))
+        mutableIntStateOf(initialTabIndex.coerceIn(0, PurrTab.entries.lastIndex))
     }
     var showSaveProfileDialog by remember { mutableStateOf(false) }
     var showCloneStudio by remember { mutableStateOf(false) }
+    var showAdvancedVoice by remember { mutableStateOf(false) }
 
-    // Voice Forge Filters
-    var searchQuery by remember { mutableStateOf("") }
-    var engineFilter by remember { mutableStateOf(EngineFilter.ALL) }
+    // Simple Tab 1 filters
+    var voiceSearch by remember { mutableStateOf("") }
     var genderFilter by remember { mutableStateOf<VoiceGender?>(null) }
-    var langFilter by remember { mutableStateOf<String?>(null) }
-    var statusFilter by remember { mutableStateOf<String?>(null) } // "WHITELISTED" | "BLACKLISTED" | null
-    var vibeFilter by remember { mutableStateOf<String?>(null) }
 
-    val filteredVoices = remember(
-        allVoices, searchQuery, engineFilter, genderFilter, langFilter, statusFilter, vibeFilter, activeProfile
-    ) {
+    val activeCartridgeId = activeProfile.selectedCartridgeId
+    val voicesForSelectedEngine = remember(allVoices, activeCartridgeId, voiceSearch, genderFilter) {
         allVoices.filter { v ->
-            val customTags = activeProfile.customVoiceTags[v.id].orEmpty()
-            val allTags = (v.nativeTags + customTags).map { it.lowercase() }
-
-            if (searchQuery.isNotBlank()) {
-                val q = searchQuery.lowercase()
-                val matchesName = v.displayName.lowercase().contains(q) || v.id.lowercase().contains(q)
-                val matchesTag = allTags.any { it.contains(q) }
-                if (!matchesName && !matchesTag) return@filter false
-            }
-
-            when (engineFilter) {
-                EngineFilter.ALL -> Unit
-                EngineFilter.LITERT -> if (v.engine != BackendType.LITERT_NPU_GPU) return@filter false
-                EngineFilter.SHERPA -> if (v.engine != BackendType.SHERPA_ONNX || v.isCloned) return@filter false
-                EngineFilter.CLONED -> if (!v.isCloned) return@filter false
-                EngineFilter.PROXY -> if (v.engine != BackendType.EXTERNAL_PROXY) return@filter false
-            }
-
+            if (v.cartridgeId != activeCartridgeId) return@filter false
             if (genderFilter != null && v.gender != genderFilter) return@filter false
-            if (langFilter != null && !v.languageCode.equals(langFilter, ignoreCase = true)) return@filter false
-
-            when (statusFilter) {
-                "WHITELISTED" -> if (v.id !in activeProfile.whitelist) return@filter false
-                "BLACKLISTED" -> if (v.id !in activeProfile.blacklist) return@filter false
-                else -> Unit
+            if (voiceSearch.isNotBlank()) {
+                val q = voiceSearch.lowercase()
+                val matchName = v.displayName.lowercase().contains(q) || v.id.lowercase().contains(q)
+                val matchLang = v.languageCode.lowercase().contains(q)
+                if (!matchName && !matchLang) return@filter false
             }
-
-            if (vibeFilter != null && !allTags.contains(vibeFilter!!.lowercase())) return@filter false
             true
         }
     }
 
     val previewChunks = remember(testText, activeProfile, forgeState.customPhoneticRules) {
         viewModel.previewChunks(testText, activeProfile, forgeState.customPhoneticRules)
+    }
+
+    val slottedSpecs = remember(forgeState.slottedCartridges, viewModel.modelCatalog) {
+        viewModel.modelCatalog.filter { it.id in forgeState.slottedCartridges }
     }
 
     MikaTerminalStage {
@@ -155,7 +136,7 @@ fun TtsForgeScreen(
                 contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 12.dp, bottom = 36.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // 1. Header Bar + Single Animated Status Badge + OS TTS Settings Trigger
+                // 1. Clean Top HUD
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -164,16 +145,16 @@ fun TtsForgeScreen(
                     ) {
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "> TTS_FORGE // ROM-04",
+                                text = "> PURR_TTS // SYSTEM ENGINE",
                                 color = MikaColors.TerminalGreen,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
-                                fontSize = 16.sp,
-                                letterSpacing = 1.4.sp
+                                fontSize = 15.sp,
+                                letterSpacing = 1.2.sp
                             )
                             Text(
-                                text = "// System-Wide Android PURR Neural Engine",
-                                color = MikaColors.TerminalGreen.copy(alpha = 0.6f),
+                                text = "// Preset: ${activeProfile.name}",
+                                color = MikaColors.TerminalGreen.copy(alpha = 0.65f),
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 10.sp
                             )
@@ -187,58 +168,26 @@ fun TtsForgeScreen(
                             Box(
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(MikaColors.NeonCyan.copy(alpha = 0.12f))
-                                    .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                                    .background(MikaColors.NeonCyan.copy(alpha = 0.14f))
+                                    .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
                                     .clickable(onClick = onOpenSystemTtsSettings)
                                     .padding(horizontal = 8.dp, vertical = 4.dp)
                             ) {
                                 Text(
-                                    text = "OS_TTS",
+                                    text = "SET_OS_TTS",
                                     color = MikaColors.NeonCyan,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp
+                                    fontSize = 9.sp
                                 )
                             }
                         }
                     }
                 }
 
-                // 2. Profile Selector + Save New Profile + Live Waveform Monitor & Synth Test Bench
+                // 2. Live Waveform + Quick Voice Test Bench
                 item {
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalAlignment = Alignment.Bottom
-                        ) {
-                            CyberDropdown(
-                                label = "> ACTIVE_PURR_PROFILE",
-                                options = forgeState.profiles,
-                                selectedOption = activeProfile,
-                                optionLabel = { "${it.name} (${it.preferredBackend.displayLabel})" },
-                                onSelect = { p -> viewModel.selectProfile(p.id) },
-                                accent = MikaColors.TerminalGreen,
-                                modifier = Modifier.weight(1f)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MikaColors.NeonPink.copy(alpha = 0.14f))
-                                    .border(1.dp, MikaColors.NeonPink.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
-                                    .clickable { showSaveProfileDialog = true }
-                                    .padding(horizontal = 10.dp, vertical = 10.dp)
-                            ) {
-                                Text(
-                                    text = "+ SAVE",
-                                    color = MikaColors.NeonPink,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 10.sp
-                                )
-                            }
-                        }
-
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         LiveWaveformMonitor(
                             waveformBins = telemetry.waveformBins,
                             activeChunkLabel = telemetry.activeChunkLabel,
@@ -246,7 +195,6 @@ fun TtsForgeScreen(
                             sentimentLabel = telemetry.activeSentimentLabel
                         )
 
-                        // Interactive Audition Bench
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -257,7 +205,7 @@ fun TtsForgeScreen(
                                 onValueChange = { viewModel.updateTestInputText(it) },
                                 placeholder = {
                                     Text(
-                                        "Test MIKASTOP, *actions*, \"dialogue\", slang...",
+                                        "Type anything to hear PURR + selected voice...",
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 10.sp,
                                         color = MikaColors.DimText
@@ -292,7 +240,7 @@ fun TtsForgeScreen(
                                     .clickable {
                                         if (isPlaying) viewModel.stopAudition() else viewModel.auditionText()
                                     }
-                                    .padding(horizontal = 12.dp, vertical = 14.dp)
+                                    .padding(horizontal = 14.dp, vertical = 14.dp)
                             ) {
                                 Text(
                                     text = if (isPlaying) "■ STOP" else "▶ TEST",
@@ -306,25 +254,27 @@ fun TtsForgeScreen(
                     }
                 }
 
-                // 3. 3-Tab Terminal Switcher (`settings-tab-btn` exact recipe)
+                // 3. 3-Tab Selector
                 item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        ForgeTab.entries.forEachIndexed { index, tab ->
+                        PurrTab.entries.forEachIndexed { index, tab ->
                             val isSelected = activeTab == index
+                            val tabColor = when (tab) {
+                                PurrTab.VOICE_ENGINE -> MikaColors.NeonCyan
+                                PurrTab.PURR_ENGINE -> MikaColors.NeonPink
+                                PurrTab.CARTRIDGE_BAY -> MikaColors.TerminalGreen
+                            }
                             Box(
                                 modifier = Modifier
                                     .weight(1f)
                                     .clip(RoundedCornerShape(4.dp))
-                                    .background(
-                                        if (isSelected) MikaColors.NeonCyan.copy(alpha = 0.16f)
-                                        else MikaColors.PanelBg
-                                    )
+                                    .background(if (isSelected) tabColor.copy(alpha = 0.16f) else MikaColors.PanelBg)
                                     .border(
                                         1.dp,
-                                        if (isSelected) MikaColors.NeonCyan else Color.White.copy(alpha = 0.20f),
+                                        if (isSelected) tabColor else Color.White.copy(alpha = 0.20f),
                                         RoundedCornerShape(4.dp)
                                     )
                                     .clickable { activeTab = index }
@@ -333,11 +283,11 @@ fun TtsForgeScreen(
                             ) {
                                 Text(
                                     text = tab.title,
-                                    color = if (isSelected) MikaColors.NeonCyan else Color.White.copy(alpha = 0.55f),
+                                    color = if (isSelected) tabColor else Color.White.copy(alpha = 0.55f),
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.sp,
-                                    letterSpacing = 0.5.sp,
+                                    letterSpacing = 0.4.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -347,45 +297,199 @@ fun TtsForgeScreen(
                 }
 
                 // 4. Tab Content
-                when (ForgeTab.entries[activeTab]) {
-                    ForgeTab.FORGE -> {
-                        // System Note Banner
+                when (PurrTab.entries[activeTab]) {
+                    PurrTab.VOICE_ENGINE -> {
+                        // Step 1: Engine Picker (Built-in Device Speech + Slotted Cartridges + LAN Proxy)
                         item {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(6.dp))
-                                    .background(MikaColors.TerminalGreen.copy(alpha = 0.05f))
-                                    .border(1.dp, MikaColors.TerminalGreen.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
-                                    .padding(10.dp)
-                            ) {
+                            MikaGlowPanel(accent = MikaColors.NeonCyan) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "> 1. CHOOSE_TTS_ENGINE",
+                                        color = MikaColors.NeonCyan,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.sp
+                                    )
+                                    Text(
+                                        text = "+ CARTRIDGES (${slottedSpecs.size}/${viewModel.modelCatalog.size})",
+                                        color = MikaColors.TerminalGreen,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.sp,
+                                        modifier = Modifier.clickable { activeTab = PurrTab.CARTRIDGE_BAY.ordinal }
+                                    )
+                                }
                                 Text(
-                                    text = "> SYSTEM_NOTE",
-                                    color = MikaColors.TerminalGreen,
+                                    text = "// Built-in Android Speech works instantly. Download & slam ROM cartridges in Tab 3 for offline neural voices.",
+                                    color = MikaColors.DimText,
                                     fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 10.sp
+                                    fontSize = 9.5.sp,
+                                    modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
                                 )
-                                Text(
-                                    text = "Smart Assignment ONLY picks whitelisted/non-blacklisted tagged voices. Assign 1ST:MAIN narrator and 2ND:DIALOGUE voices below!",
-                                    color = MikaColors.CyanWhite.copy(alpha = 0.8f),
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp
-                                )
+
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                ) {
+                                    MikaTagPill(
+                                        label = "DEVICE SPEECH (READY)",
+                                        selected = activeCartridgeId == "core_os",
+                                        activeColor = MikaColors.NeonCyan,
+                                        onClick = { viewModel.selectEngineCartridge("core_os") }
+                                    )
+                                    slottedSpecs.forEach { spec ->
+                                        MikaTagPill(
+                                            label = "${spec.romCode}: ${spec.name}",
+                                            selected = activeCartridgeId == spec.id,
+                                            activeColor = Color(spec.accentHex),
+                                            onClick = { viewModel.selectEngineCartridge(spec.id) }
+                                        )
+                                    }
+                                    MikaTagPill(
+                                        label = "LAN PROXY",
+                                        selected = activeCartridgeId == "proxy_lan",
+                                        activeColor = MikaColors.NeonPurple,
+                                        onClick = { viewModel.selectEngineCartridge("proxy_lan") }
+                                    )
+                                }
                             }
                         }
 
-                        // Filter HUD
+                        // Optional Feature: Dual Narrator & "Dialogue" Voices
+                        item {
+                            MikaGlowPanel(accent = MikaColors.NeonPurple) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = "🎭 SPLIT NARRATOR & \"DIALOGUE\" VOICES",
+                                            color = MikaColors.NeonPurple,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 11.sp
+                                        )
+                                        Text(
+                                            text = "Optional: use one voice for narration and a second character voice inside \"quotes\".",
+                                            color = MikaColors.DimText,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.5.sp
+                                        )
+                                    }
+                                    Switch(
+                                        checked = activeProfile.enableDualVoiceSplit,
+                                        onCheckedChange = { enabled ->
+                                            viewModel.updateActiveProfile { p -> p.copy(enableDualVoiceSplit = enabled) }
+                                        },
+                                        colors = SwitchDefaults.colors(
+                                            checkedThumbColor = MikaColors.VoidBg,
+                                            checkedTrackColor = MikaColors.NeonPurple
+                                        )
+                                    )
+                                }
+
+                                AnimatedVisibility(visible = activeProfile.enableDualVoiceSplit) {
+                                    Column(
+                                        modifier = Modifier.padding(top = 10.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        val selectableVoices = allVoices.filter {
+                                            viewModel.repository.isCartridgeSlotted(it.cartridgeId)
+                                        }
+                                        val primaryVoiceObj = selectableVoices.firstOrNull { it.id == activeProfile.primaryVoiceId }
+                                            ?: selectableVoices.firstOrNull()
+                                        val dialogueVoiceObj = selectableVoices.firstOrNull { it.id == activeProfile.dialogueVoiceId }
+                                            ?: selectableVoices.firstOrNull()
+
+                                        if (primaryVoiceObj != null) {
+                                            CyberDropdown(
+                                                label = "> NARRATOR_VOICE (PROSE & *ACTIONS*)",
+                                                options = selectableVoices,
+                                                selectedOption = primaryVoiceObj,
+                                                optionLabel = { it.displayName },
+                                                onSelect = { v -> viewModel.selectPrimaryVoice(v) },
+                                                accent = MikaColors.NeonCyan
+                                            )
+                                        }
+                                        if (dialogueVoiceObj != null) {
+                                            CyberDropdown(
+                                                label = "> DIALOGUE_VOICE (INSIDE \"QUOTES\")",
+                                                options = selectableVoices,
+                                                selectedOption = dialogueVoiceObj,
+                                                optionLabel = { it.displayName },
+                                                onSelect = { v -> viewModel.selectDialogueVoice(v) },
+                                                accent = MikaColors.NeonPink
+                                            )
+                                        }
+
+                                        Text(
+                                            text = "*ACTION* BLOCKS:",
+                                            color = MikaColors.NeonPurple,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp
+                                        )
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            ActionHandlingMode.entries.forEach { mode ->
+                                                MikaTagPill(
+                                                    label = mode.label,
+                                                    selected = activeProfile.actionHandlingMode == mode,
+                                                    activeColor = MikaColors.NeonPurple,
+                                                    onClick = {
+                                                        viewModel.updateActiveProfile { p -> p.copy(actionHandlingMode = mode) }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Step 2: Preferred Voice Picker
                         item {
                             MikaGlowPanel(accent = MikaColors.TerminalGreen) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "> 2. PREFERRED_VOICE (${voicesForSelectedEngine.size})",
+                                        color = MikaColors.TerminalGreen,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 11.sp
+                                    )
+                                    if (activeCartridgeId == "core_os") {
+                                        Text(
+                                            text = "↻ REFRESH",
+                                            color = MikaColors.NeonCyan,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp,
+                                            modifier = Modifier.clickable { viewModel.refreshSystemVoices() }
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
                                 OutlinedTextField(
-                                    value = searchQuery,
-                                    onValueChange = { searchQuery = it },
+                                    value = voiceSearch,
+                                    onValueChange = { voiceSearch = it },
                                     placeholder = {
                                         Text(
-                                            "Search voice name, ID, or tag...",
+                                            "Search voices or language (e.g. bella, en-GB, ja)...",
                                             fontFamily = FontFamily.Monospace,
-                                            fontSize = 11.sp,
+                                            fontSize = 10.sp,
                                             color = MikaColors.DimText
                                         )
                                     },
@@ -393,39 +497,24 @@ fun TtsForgeScreen(
                                     textStyle = TextStyle(
                                         color = MikaColors.TerminalGreen,
                                         fontFamily = FontFamily.Monospace,
-                                        fontSize = 12.sp
+                                        fontSize = 11.sp
                                     ),
                                     colors = OutlinedTextFieldDefaults.colors(
                                         focusedBorderColor = MikaColors.TerminalGreen,
-                                        unfocusedBorderColor = MikaColors.TerminalGreen.copy(alpha = 0.35f),
-                                        focusedContainerColor = MikaColors.PanelBg,
-                                        unfocusedContainerColor = MikaColors.PanelBg
+                                        unfocusedBorderColor = MikaColors.TerminalGreen.copy(alpha = 0.3f),
+                                        focusedContainerColor = MikaColors.DeepWellBg,
+                                        unfocusedContainerColor = MikaColors.DeepWellBg
                                     ),
                                     modifier = Modifier.fillMaxWidth()
                                 )
-
-                                Spacer(modifier = Modifier.height(8.dp))
-                                FilterLabel("ENGINE FILTER:")
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    EngineFilter.entries.forEach { ef ->
-                                        MikaTagPill(
-                                            label = ef.label,
-                                            selected = engineFilter == ef,
-                                            activeColor = MikaColors.TerminalGreen,
-                                            onClick = { engineFilter = ef }
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-                                FilterLabel("GENDER / LANGUAGE / STATUS:")
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    MikaTagPill(
+                                        label = "ALL",
+                                        selected = genderFilter == null,
+                                        activeColor = MikaColors.TerminalGreen,
+                                        onClick = { genderFilter = null }
+                                    )
                                     VoiceGender.entries.forEach { g ->
                                         MikaTagPill(
                                             label = g.tag.uppercase(),
@@ -434,134 +523,127 @@ fun TtsForgeScreen(
                                             onClick = { genderFilter = if (genderFilter == g) null else g }
                                         )
                                     }
-                                    listOf("en-US", "en-GB", "ja-JP").forEach { lang ->
-                                        MikaTagPill(
-                                            label = lang,
-                                            selected = langFilter == lang,
-                                            activeColor = MikaColors.NeonCyan,
-                                            onClick = { langFilter = if (langFilter == lang) null else lang }
-                                        )
-                                    }
-                                    MikaTagPill(
-                                        label = "WHITELISTED",
-                                        selected = statusFilter == "WHITELISTED",
-                                        activeColor = MikaColors.TerminalGreen,
-                                        onClick = { statusFilter = if (statusFilter == "WHITELISTED") null else "WHITELISTED" }
-                                    )
-                                    MikaTagPill(
-                                        label = "BLACKLISTED",
-                                        selected = statusFilter == "BLACKLISTED",
-                                        activeColor = MikaColors.DangerRed,
-                                        onClick = { statusFilter = if (statusFilter == "BLACKLISTED") null else "BLACKLISTED" }
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.height(8.dp))
-                                FilterLabel("VIBE TAGS:")
-                                FlowRow(
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    listOf("cute", "shy", "energetic", "calm", "yandere", "tsundere", "ara-ara", "narrator", "deep", "breathy")
-                                        .forEach { vibe ->
-                                            MikaTagPill(
-                                                label = vibe,
-                                                selected = vibeFilter == vibe,
-                                                activeColor = MikaColors.NeonPink,
-                                                onClick = { vibeFilter = if (vibeFilter == vibe) null else vibe }
-                                            )
-                                        }
-                                }
-
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(MikaColors.TerminalGreen.copy(alpha = 0.12f))
-                                            .border(1.dp, MikaColors.TerminalGreen, RoundedCornerShape(4.dp))
-                                            .clickable {
-                                                viewModel.bulkSetWhitelist(filteredVoices.map { it.id }, true)
-                                            }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "+ WHITELIST VISIBLE (${filteredVoices.size})",
-                                            color = MikaColors.TerminalGreen,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 9.sp
-                                        )
-                                    }
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clip(RoundedCornerShape(4.dp))
-                                            .background(MikaColors.DangerRed.copy(alpha = 0.08f))
-                                            .border(1.dp, MikaColors.DangerRed, RoundedCornerShape(4.dp))
-                                            .clickable {
-                                                viewModel.bulkSetWhitelist(filteredVoices.map { it.id }, false)
-                                            }
-                                            .padding(vertical = 8.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "- BLACKLIST VISIBLE",
-                                            color = MikaColors.DangerRed,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = FontWeight.Black,
-                                            fontSize = 9.sp
-                                        )
-                                    }
                                 }
                             }
                         }
 
-                        // Voice Roster Cards
-                        items(filteredVoices, key = { it.id }) { voice ->
-                            VoiceRosterCard(
+                        // Clean Voice Cards
+                        items(voicesForSelectedEngine, key = { it.id }) { voice ->
+                            SimpleVoiceCard(
                                 voice = voice,
-                                profile = activeProfile,
-                                onToggleWhitelist = { checked -> viewModel.toggleWhitelist(voice.id, checked) },
-                                onToggleBlacklist = { black -> viewModel.toggleBlacklist(voice.id, black) },
-                                onSetPrimary = { viewModel.assignPrimaryVoice(voice.id, voice.engine) },
-                                onSetDialogue = { viewModel.assignDialogueVoice(voice.id) },
-                                onSample = { viewModel.auditionText(overrideVoiceId = voice.id) },
-                                onToggleCustomTag = { tag -> viewModel.toggleCustomTag(voice.id, tag) }
+                                isSelectedPrimary = activeProfile.primaryVoiceId == voice.id,
+                                isSelectedDialogue = activeProfile.enableDualVoiceSplit && activeProfile.dialogueVoiceId == voice.id,
+                                showDialogueButton = activeProfile.enableDualVoiceSplit,
+                                onSelectPrimary = { viewModel.selectPrimaryVoice(voice) },
+                                onSelectDialogue = { viewModel.selectDialogueVoice(voice) },
+                                onSample = { viewModel.auditionText(overrideVoice = voice) }
                             )
+                        }
+
+                        // Expandable Advanced Voice Tuning & Clone Studio (Collapsed by default)
+                        item {
+                            ExpandableTerminalSection(
+                                title = "ADVANCED: SPEED, PITCH & CLONE STUDIO",
+                                subtitle = "Base speech rate/pitch sliders & 5s zero-shot voice cloning",
+                                expanded = showAdvancedVoice,
+                                onToggle = { showAdvancedVoice = !showAdvancedVoice },
+                                accent = MikaColors.NeonCyan
+                            ) {
+                                SimpleSliderRow(
+                                    label = "BASE_SPEED",
+                                    valueText = "${"%.2f".format(activeProfile.baseSpeed)}x",
+                                    value = activeProfile.baseSpeed,
+                                    range = 0.70f..1.45f,
+                                    accent = MikaColors.NeonCyan,
+                                    onChange = { v -> viewModel.updateActiveProfile { it.copy(baseSpeed = v) } }
+                                )
+                                SimpleSliderRow(
+                                    label = "BASE_PITCH",
+                                    valueText = "${"%.2f".format(activeProfile.basePitch)}x",
+                                    value = activeProfile.basePitch,
+                                    range = 0.75f..1.30f,
+                                    accent = MikaColors.NeonCyan,
+                                    onChange = { v -> viewModel.updateActiveProfile { it.copy(basePitch = v) } }
+                                )
+
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(MikaColors.NeonPurple.copy(alpha = 0.16f))
+                                        .border(1.dp, MikaColors.NeonPurple, RoundedCornerShape(6.dp))
+                                        .clickable { showCloneStudio = true }
+                                        .padding(10.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "🧬 OPEN 5S VOICE CLONE STUDIO (POCKET / ZIPVOICE)",
+                                        color = MikaColors.NeonPurple,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp
+                                    )
+                                }
+
+                                // Optional LAN Proxy Endpoint Config
+                                var proxyUrl by remember(activeProfile.id) { mutableStateOf(activeProfile.proxyConfig.openAiBaseUrl) }
+                                OutlinedTextField(
+                                    value = proxyUrl,
+                                    onValueChange = {
+                                        proxyUrl = it
+                                        viewModel.updateActiveProfile { p -> p.copy(proxyConfig = p.proxyConfig.copy(openAiBaseUrl = it, useOpenAiEndpoint = true)) }
+                                    },
+                                    label = { Text("LAN OPENAI / KOKORO-FASTAPI URL", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+                                    singleLine = true,
+                                    textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MikaColors.NeonPurple,
+                                        unfocusedBorderColor = MikaColors.NeonPurple.copy(alpha = 0.3f),
+                                        focusedContainerColor = MikaColors.DeepWellBg,
+                                        unfocusedContainerColor = MikaColors.DeepWellBg
+                                    ),
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
                         }
                     }
 
-                    ForgeTab.RULEBOOK -> {
+                    PurrTab.PURR_ENGINE -> {
                         item {
                             PurrRulebookTab(
-                                profile = activeProfile,
-                                customRules = forgeState.customPhoneticRules,
-                                allVoices = allVoices,
+                                forgeState = forgeState,
+                                activeProfile = activeProfile,
                                 previewChunks = previewChunks,
-                                viewModel = viewModel
+                                viewModel = viewModel,
+                                onOpenSaveDialog = { showSaveProfileDialog = true }
                             )
                         }
                     }
 
-                    ForgeTab.CATALOG -> {
+                    PurrTab.CARTRIDGE_BAY -> {
                         item {
                             ModelCatalogTab(
                                 forgeState = forgeState,
                                 modelCatalog = viewModel.modelCatalog,
                                 vramRemainingSec = vramSec,
                                 viewModel = viewModel,
+                                onJumpToVoiceSelector = { cartridgeId ->
+                                    viewModel.selectEngineCartridge(cartridgeId)
+                                    activeTab = PurrTab.VOICE_ENGINE.ordinal
+                                },
                                 onOpenCloneStudio = { showCloneStudio = true }
                             )
                         }
                     }
                 }
             }
+
+            // Dramatic ROM Cartridge Slot / Eject HUD Overlay
+            CartridgeSlamOverlay(
+                spec = cartridgeAnim?.spec,
+                isInsert = cartridgeAnim?.isInsert ?: true,
+                onDismiss = { viewModel.dismissCartridgeAnim() }
+            )
 
             // Floating Top TerminalToastBanner
             TerminalToastBanner(
@@ -598,33 +680,23 @@ fun TtsForgeScreen(
     }
 }
 
-@OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun VoiceRosterCard(
+private fun SimpleVoiceCard(
     voice: VoiceDescriptor,
-    profile: PurrProfile,
-    onToggleWhitelist: (Boolean) -> Unit,
-    onToggleBlacklist: (Boolean) -> Unit,
-    onSetPrimary: () -> Unit,
-    onSetDialogue: () -> Unit,
-    onSample: () -> Unit,
-    onToggleCustomTag: (String) -> Unit
+    isSelectedPrimary: Boolean,
+    isSelectedDialogue: Boolean,
+    showDialogueButton: Boolean,
+    onSelectPrimary: () -> Unit,
+    onSelectDialogue: () -> Unit,
+    onSample: () -> Unit
 ) {
-    val isWhitelisted = voice.id in profile.whitelist
-    val isBlacklisted = voice.id in profile.blacklist
-    val isPrimary = profile.primaryVoiceId == voice.id
-    val isDialogue = profile.dialogueVoiceId == voice.id
-    val customTags = profile.customVoiceTags[voice.id].orEmpty()
-
-    val borderAccent = when {
-        isPrimary -> MikaColors.TerminalGreen
-        isDialogue -> MikaColors.NeonPink
-        isBlacklisted -> MikaColors.DangerRed
-        isWhitelisted -> MikaColors.NeonCyan
-        else -> MikaColors.TerminalGreen.copy(alpha = 0.25f)
+    val accent = when {
+        isSelectedPrimary -> MikaColors.TerminalGreen
+        isSelectedDialogue -> MikaColors.NeonPink
+        else -> MikaColors.NeonCyan.copy(alpha = 0.45f)
     }
 
-    MikaGlowPanel(accent = borderAccent) {
+    MikaGlowPanel(accent = accent, contentPadding = 10.dp) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -633,106 +705,40 @@ private fun VoiceRosterCard(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = voice.displayName,
-                    color = if (isBlacklisted) MikaColors.DimText else MikaColors.WarmCream,
+                    color = if (isSelectedPrimary || isSelectedDialogue) Color.White else MikaColors.WarmCream,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "ID:${voice.id} • ${voice.engine.displayLabel} • ${voice.languageCode}",
-                    color = borderAccent.copy(alpha = 0.85f),
+                    text = "${voice.languageCode} • ${voice.gender.tag.uppercase()}",
+                    color = accent,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 9.sp
                 )
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = if (isWhitelisted) "WL" else "--",
-                    color = if (isWhitelisted) MikaColors.TerminalGreen else MikaColors.DimText,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                MikaTagPill(
+                    label = "▶ TEST",
+                    selected = true,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = onSample
                 )
-                Spacer(modifier = Modifier.width(4.dp))
-                Switch(
-                    checked = isWhitelisted,
-                    onCheckedChange = onToggleWhitelist,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = MikaColors.VoidBg,
-                        checkedTrackColor = MikaColors.TerminalGreen
-                    )
+                MikaTagPill(
+                    label = if (isSelectedPrimary) "✓ ACTIVE" else "SELECT",
+                    selected = isSelectedPrimary,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = onSelectPrimary
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            MikaTagPill(
-                label = if (isPrimary) "✓ 1ST:MAIN" else "SET_MAIN",
-                selected = isPrimary,
-                activeColor = MikaColors.TerminalGreen,
-                onClick = onSetPrimary
-            )
-            MikaTagPill(
-                label = if (isDialogue) "✓ 2ND:DIALOGUE" else "SET_DIALOGUE",
-                selected = isDialogue,
-                activeColor = MikaColors.NeonPink,
-                onClick = onSetDialogue
-            )
-            MikaTagPill(
-                label = "▶ SAMPLE",
-                selected = true,
-                activeColor = MikaColors.NeonCyan,
-                onClick = onSample
-            )
-            MikaTagPill(
-                label = if (isBlacklisted) "BLOCKED" else "BLK",
-                selected = isBlacklisted,
-                activeColor = MikaColors.DangerRed,
-                onClick = { onToggleBlacklist(!isBlacklisted) }
-            )
-        }
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(
-            text = "ASSIGNED TAGS:",
-            color = Color.White.copy(alpha = 0.45f),
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.sp
-        )
-        Spacer(modifier = Modifier.height(4.dp))
-        FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            verticalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            voice.nativeTags.forEach { nt ->
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(Color.White.copy(alpha = 0.05f))
-                        .border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 6.dp, vertical = 3.dp)
-                ) {
-                    Text(
-                        text = "🔒 $nt",
-                        color = Color.White.copy(alpha = 0.65f),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp
-                    )
-                }
-            }
-
-            PurrDefaultPresets.TTS_TAG_POOL.take(10).forEach { tag ->
-                if (tag !in voice.nativeTags) {
+                if (showDialogueButton) {
                     MikaTagPill(
-                        label = tag,
-                        selected = tag in customTags,
-                        activeColor = MikaColors.TerminalGreen,
-                        onClick = { onToggleCustomTag(tag) }
+                        label = if (isSelectedDialogue) "✓ \"DLG\"" else "\"DLG\"",
+                        selected = isSelectedDialogue,
+                        activeColor = MikaColors.NeonPink,
+                        onClick = onSelectDialogue
                     )
                 }
             }
@@ -741,16 +747,33 @@ private fun VoiceRosterCard(
 }
 
 @Composable
-private fun FilterLabel(text: String) {
-    Text(
-        text = text,
-        color = MikaColors.TerminalGreen.copy(alpha = 0.65f),
-        fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Bold,
-        fontSize = 9.sp,
-        letterSpacing = 0.9.sp,
-        modifier = Modifier.padding(bottom = 5.dp)
-    )
+private fun SimpleSliderRow(
+    label: String,
+    valueText: String,
+    value: Float,
+    range: ClosedFloatingPointRange<Float>,
+    accent: Color,
+    onChange: (Float) -> Unit
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Text(label, color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+            Text(valueText, color = accent, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
+        }
+        Slider(
+            value = value.coerceIn(range.start, range.endInclusive),
+            onValueChange = onChange,
+            valueRange = range,
+            colors = SliderDefaults.colors(
+                thumbColor = accent,
+                activeTrackColor = accent,
+                inactiveTrackColor = accent.copy(alpha = 0.22f)
+            )
+        )
+    }
 }
 
 @Composable
@@ -770,7 +793,7 @@ private fun SaveProfileDialog(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             Text(
-                text = "> SAVE_PURR_PROFILE",
+                text = "> SAVE_VIBE_PRESET",
                 color = MikaColors.NeonPink,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
@@ -779,7 +802,7 @@ private fun SaveProfileDialog(
             OutlinedTextField(
                 value = name,
                 onValueChange = { name = it },
-                placeholder = { Text("e.g. Cozy Audiobooks", fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
+                placeholder = { Text("e.g. Late Night Storytime", fontFamily = FontFamily.Monospace, fontSize = 11.sp) },
                 singleLine = true,
                 textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 12.sp),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -796,7 +819,7 @@ private fun SaveProfileDialog(
             ) {
                 MikaTagPill(label = "CANCEL", selected = true, activeColor = MikaColors.DimText, onClick = onDismiss)
                 Spacer(modifier = Modifier.width(8.dp))
-                MikaTagPill(label = "SAVE_PRESET", selected = true, activeColor = MikaColors.NeonPink, onClick = { onSave(name) })
+                MikaTagPill(label = "SAVE", selected = true, activeColor = MikaColors.NeonPink, onClick = { onSave(name) })
             }
         }
     }

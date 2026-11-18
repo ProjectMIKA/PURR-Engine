@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: 'Release tag to attach APK builds to (e.g. v1.0.0)'
+        description: 'Release tag to attach APK builds to (e.g. v1.1.0)'
         required: false
-        default: 'v1.0.0'
+        default: 'v1.1.0'
 
 permissions:
   contents: write
@@ -34,6 +34,13 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Fetch Prebuilt sherpa-onnx Android JNI AAR (v2.0.1)
+        run: |
+          mkdir -p app/libs
+          curl -fSL -o app/libs/sherpa-onnx-2.0.1.aar \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar"
+          ls -lh app/libs/sherpa-onnx-2.0.1.aar
+
       - name: Verify project manifests & structure
         run: python3 scripts/verify_project.py
 
@@ -52,13 +59,14 @@ jobs:
       - name: Package & Verify Signed Release APKs
         run: |
           mkdir -p builds
+          VERSION=$(grep -E 'versionName\s*=' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
           APK_SRC="app/build/outputs/apk/release/app-release.apk"
           if [ ! -f "$APK_SRC" ]; then
             echo "Error: Release APK not found at $APK_SRC" >&2
             exit 1
           fi
-          cp "$APK_SRC" "builds/PURR-Engine_V1.0.0_Android.apk"
-          cp "$APK_SRC" "builds/PURR-TTS_V1.0.0.apk"
+          cp "$APK_SRC" "builds/PURR-Engine_V${VERSION}_Android.apk"
+          cp "$APK_SRC" "builds/PURR-TTS_V${VERSION}.apk"
           ls -lh builds/*.apk
 
       - name: Upload Release APK Artifacts
@@ -68,21 +76,22 @@ jobs:
           path: builds/*.apk
 
       - name: Attach Signed APKs to GitHub Release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          VERSION=$(grep -E 'versionName\s*=' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
           TAG="${{ github.event.inputs.release_tag }}"
           if [ -z "$TAG" ]; then
             TAG="${GITHUB_REF_NAME}"
           fi
           if [[ "$TAG" != v* ]]; then
-            TAG="v1.0.0"
+            TAG="v${VERSION}"
           fi
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
-              builds/PURR-Engine_V1.0.0_Android.apk \
-              builds/PURR-TTS_V1.0.0.apk \
+              "builds/PURR-Engine_V${VERSION}_Android.apk" \
+              "builds/PURR-TTS_V${VERSION}.apk" \
               --clobber
           else
             echo "Release $TAG does not exist yet; skipping upload."

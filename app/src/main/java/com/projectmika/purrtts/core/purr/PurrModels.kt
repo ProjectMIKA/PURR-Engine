@@ -4,19 +4,21 @@ import kotlinx.serialization.Serializable
 
 /**
  * ✨ MIKA'S P.U.R.R. ENGINE DATA MODELS ✨
- * Shared immutable state contracts between the Android TextToSpeechService,
- * the dual-backend neural synthesizer router, and the Jetpack Compose Forge UI.
+ * Shared immutable contracts between PurrTtsService, TtsBackendRouter,
+ * Cartridge Bay manager, and the streamlined Compose UI.
  */
 
 @Serializable
 enum class BackendType(val displayLabel: String) {
-    LITERT_NPU_GPU("LiteRT NPU/GPU"),
-    SHERPA_ONNX("Sherpa-ONNX"),
-    EXTERNAL_PROXY("Proxy Passthrough")
+    CORE_OS("System Speech (Built-in)"),
+    SHERPA_ONNX("Sherpa-ONNX Cartridge"),
+    LITERT_NPU_GPU("LiteRT GPU/NPU Cartridge"),
+    EXTERNAL_PROXY("LAN OpenAI / Proxy")
 }
 
 @Serializable
 enum class SherpaModelFamily(val label: String) {
+    KOKORO("Kokoro-82M INT8"),
     SUPERTONIC_3("Supertonic 3"),
     POCKET_TTS("Pocket TTS (Clone)"),
     ZIPVOICE("ZipVoice (Clone)"),
@@ -28,15 +30,16 @@ enum class HardwareStatusBadge(val terminalLabel: String) {
     NPU_ACTIVE("[NPU ACTIVE]"),
     GPU_FP16("[GPU FP16]"),
     CPU_NEON("[CPU NEON]"),
+    CORE_OS("[CORE_OS]"),
     PROXY_LINK("[PROXY LINK]"),
     IDLE("[IDLE]")
 }
 
 @Serializable
 enum class ActionHandlingMode(val label: String, val description: String) {
-    STRIP_ACTIONS("STRIP_ACTIONS", "Remove *action blocks* and inject clean MIKASTOP pause"),
-    NARRATE_SOFT("NARRATE_SOFT", "Speak *actions* softer and slower as narrator prose"),
-    DUAL_VOICE_ROUTING("DUAL_VOICE", "Route \"dialogue\" to secondary Character Voice ID")
+    NARRATE_SOFT("SOFT_NARRATION", "Read *actions* softer and slower as narrator prose"),
+    STRIP_ACTIONS("SKIP_ACTIONS", "Skip *action blocks* and insert a clean MIKASTOP pause"),
+    DUAL_VOICE_ROUTING("NORMAL_CADENCE", "Read *actions* at normal pace with narrator voice")
 }
 
 @Serializable
@@ -144,28 +147,35 @@ data class DspConfig(
 
 @Serializable
 data class ProxyEndpointConfig(
-    val useOpenAiEndpoint: Boolean = true,
+    val useOpenAiEndpoint: Boolean = false,
     val openAiBaseUrl: String = "http://192.168.1.50:8880/v1/audio/speech",
     val openAiApiKey: String = "",
     val openAiModel: String = "kokoro",
     val openAiVoice: String = "af_bella",
-    val fallbackSystemEnginePackage: String = "com.google.android.tts"
+    val fallbackSystemEnginePackage: String = ""
 )
 
 @Serializable
 data class PurrProfile(
     val id: String,
     val name: String,
-    val preferredBackend: BackendType = BackendType.LITERT_NPU_GPU,
-    val sherpaFamily: SherpaModelFamily = SherpaModelFamily.SUPERTONIC_3,
-    val primaryVoiceId: String = "af_bella",
+    val badgeTag: String = "CUSTOM",
+    val summary: String = "Custom PURR speech preset",
+    val selectedCartridgeId: String = "core_os",
+    val preferredBackend: BackendType = BackendType.CORE_OS,
+    val sherpaFamily: SherpaModelFamily = SherpaModelFamily.KOKORO,
+    val primaryVoiceId: String = "core_os_auto",
     val dialogueVoiceId: String = "af_sarah",
+    val enableDualVoiceSplit: Boolean = false,
     val actionHandlingMode: ActionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
-    val narrationVolumeMultiplier: Float = 0.72f,
+    val narrationVolumeMultiplier: Float = 0.78f,
     val narrationRateMultiplier: Float = 0.92f,
     val baseSpeed: Float = 1.0f,
     val basePitch: Float = 1.0f,
-    val characterTags: List<String> = listOf("cute", "energetic", "yandere"),
+    val enableSlangAndHonorifics: Boolean = true,
+    val enableMikaStopPauses: Boolean = true,
+    val enableDsp: Boolean = true,
+    val characterTags: List<String> = listOf("cute", "energetic"),
     val affectionScore: Int = 75,
     val whitelist: Set<String> = emptySet(),
     val blacklist: Set<String> = emptySet(),
@@ -208,6 +218,7 @@ data class VoiceDescriptor(
     val id: String,
     val displayName: String,
     val engine: BackendType,
+    val cartridgeId: String = "core_os",
     val sherpaFamily: SherpaModelFamily? = null,
     val gender: VoiceGender = VoiceGender.FEMALE,
     val languageCode: String = "en-US",
@@ -241,8 +252,12 @@ enum class DownloadState {
 @Serializable
 data class ModelBundleSpec(
     val id: String,
+    val romCode: String,
+    val badge: String,
+    val accentHex: Long,
     val name: String,
     val subtitle: String,
+    val description: String,
     val backend: BackendType,
     val sherpaFamily: SherpaModelFamily? = null,
     val downloadUrl: String,
@@ -269,26 +284,16 @@ data class ModelBundleState(
 
 @Serializable
 data class PurrForgeState(
-    val activeProfileId: String = "gachaswipe_rp",
+    val activeProfileId: String = "gachaswipe_default",
     val profiles: List<PurrProfile> = PurrDefaultPresets.builtInProfiles(),
     val customPhoneticRules: List<PhoneticRule> = PurrDefaultPresets.defaultCustomRules(),
     val clonedVoices: List<ClonedVoiceProfile> = emptyList(),
-    val modelStates: Map<String, ModelBundleState> = emptyMap()
+    val modelStates: Map<String, ModelBundleState> = emptyMap(),
+    val slottedCartridges: Set<String> = emptySet()
 )
 
 object PurrDefaultPresets {
 
-    val TTS_TAG_POOL: List<String> = listOf(
-        "female", "male", "androgynous", "cute", "mature", "shy", "energetic",
-        "calm", "teasing", "yandere", "breathy", "deep", "high-pitched",
-        "soft", "loud", "creepy", "tsundere", "ara-ara", "bratty",
-        "american", "british", "japanese", "narrator", "audiobook", "warm"
-    )
-
-    /**
-     * Exact curated tags ported from GachaSwipe's `GACHASWIPE_TTS_PRESETS` (src/data/constants.js),
-     * expanded with the full 54-voice Kokoro-82M roster + Sherpa-ONNX & Proxy entries.
-     */
     val GACHASWIPE_TTS_PRESETS: Map<String, List<String>> = mapOf(
         "af_bella" to listOf("female", "american", "cute", "energetic", "high-pitched", "yandere"),
         "af_sarah" to listOf("female", "american", "calm", "mature", "soft", "ara-ara", "oneesan"),
@@ -320,39 +325,26 @@ object PurrDefaultPresets {
         "bm_daniel" to listOf("male", "british", "mature", "deep")
     )
 
-    /**
-     * Full 54-voice Kokoro-82M roster + Sherpa-ONNX (Supertonic 3, Pocket TTS, ZipVoice, Piper) + Proxy.
-     */
-    fun builtInVoices(): List<VoiceDescriptor> {
+    fun kokoroVoices(cartridgeId: String, backend: BackendType): List<VoiceDescriptor> {
         val kokoroIds = listOf(
-            // American Female (11)
             "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore",
             "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
-            // American Male (9)
             "am_adam", "am_echo", "am_eric", "am_fenrir", "am_liam", "am_michael",
             "am_onyx", "am_puck", "am_santa",
-            // British Female (4) + Male (4)
             "bf_alice", "bf_emma", "bf_isabella", "bf_lily",
             "bm_daniel", "bm_fable", "bm_george", "bm_lewis",
-            // Japanese (5)
             "jf_alpha", "jf_gongitsune", "jf_nezumi", "jf_tebukuro", "jm_kumo",
-            // Mandarin Chinese (8)
             "zf_xiaobei", "zf_xiaoni", "zf_xiaoxiao", "zf_xiaoyi",
             "zm_yunjian", "zm_yunxi", "zm_yunxia", "zm_yunyang",
-            // Spanish (3), French (1), Hindi (4), Italian (2), Portuguese (3) => Total 54 voices
             "ef_dora", "em_alex", "em_santa",
             "ff_siwis",
             "hf_alpha", "hf_beta", "hm_omega", "hm_psi",
             "if_sara", "im_nicola",
             "pf_dora", "pm_alex", "pm_santa"
         )
-
-        val kokoroVoices = kokoroIds.mapIndexed { idx, id ->
+        return kokoroIds.mapIndexed { idx, id ->
             val prefix = id.substringBefore('_')
-            val gender = when {
-                prefix.endsWith("m") -> VoiceGender.MALE
-                else -> VoiceGender.FEMALE
-            }
+            val gender = if (prefix.endsWith("m")) VoiceGender.MALE else VoiceGender.FEMALE
             val lang = when (prefix.firstOrNull()) {
                 'a' -> "en-US"
                 'b' -> "en-GB"
@@ -365,55 +357,78 @@ object PurrDefaultPresets {
                 'p' -> "pt-BR"
                 else -> "en-US"
             }
-            val prettyName = id.split('_').joinToString(" ") { part ->
-                part.replaceFirstChar { it.uppercase() }
+            val prettyName = id.split('_').joinToString(" ") { p ->
+                p.replaceFirstChar { it.uppercase() }
             }
-            val tags = GACHASWIPE_TTS_PRESETS[id] ?: listOf(
-                gender.tag,
-                when (lang) {
-                    "en-US" -> "american"
-                    "en-GB" -> "british"
-                    "ja-JP" -> "japanese"
-                    else -> lang.lowercase()
-                },
-                "kokoro"
-            )
+            val tags = GACHASWIPE_TTS_PRESETS[id] ?: listOf(gender.tag, lang.lowercase(), "kokoro")
             VoiceDescriptor(
                 id = id,
-                displayName = "Kokoro // $prettyName",
-                engine = BackendType.LITERT_NPU_GPU,
+                displayName = prettyName,
+                engine = backend,
+                cartridgeId = cartridgeId,
+                sherpaFamily = if (backend == BackendType.SHERPA_ONNX) SherpaModelFamily.KOKORO else null,
                 gender = gender,
                 languageCode = lang,
                 speakerIndex = idx,
                 nativeTags = tags
             )
         }
+    }
 
-        val sherpaVoices = listOf(
+    fun builtInVoices(): List<VoiceDescriptor> {
+        val coreOsVoices = listOf(
             VoiceDescriptor(
-                id = "supertonic3_mika_en",
-                displayName = "Supertonic 3 // MIKA-EN",
+                id = "core_os_auto",
+                displayName = "Android Device Default Voice",
+                engine = BackendType.CORE_OS,
+                cartridgeId = "core_os",
+                gender = VoiceGender.ANDROGYNOUS,
+                languageCode = "en-US",
+                nativeTags = listOf("built-in", "coherent", "always-ready")
+            )
+        )
+
+        val kokoroSherpa = kokoroVoices("rom_kokoro_sherpa", BackendType.SHERPA_ONNX)
+
+        val sherpaSpecialized = listOf(
+            VoiceDescriptor(
+                id = "supertonic3_f1",
+                displayName = "Supertonic 3 // Female Lead (F1)",
                 engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_supertonic3",
                 sherpaFamily = SherpaModelFamily.SUPERTONIC_3,
                 gender = VoiceGender.FEMALE,
                 languageCode = "en-US",
                 speakerIndex = 0,
-                nativeTags = listOf("female", "american", "cute", "energetic", "teasing", "supertonic")
+                nativeTags = listOf("female", "american", "cute", "energetic", "supertonic")
             ),
             VoiceDescriptor(
-                id = "supertonic3_aria_warm",
-                displayName = "Supertonic 3 // Aria Warm",
+                id = "supertonic3_m1",
+                displayName = "Supertonic 3 // Male Lead (M1)",
                 engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_supertonic3",
                 sherpaFamily = SherpaModelFamily.SUPERTONIC_3,
-                gender = VoiceGender.FEMALE,
+                gender = VoiceGender.MALE,
                 languageCode = "en-US",
                 speakerIndex = 1,
-                nativeTags = listOf("female", "american", "warm", "calm", "narrator", "audiobook")
+                nativeTags = listOf("male", "american", "calm", "narrator", "supertonic")
+            ),
+            VoiceDescriptor(
+                id = "piper_libritts_lessac",
+                displayName = "Piper VITS // Lessac High",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_piper",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "calm", "narrator", "audiobook")
             ),
             VoiceDescriptor(
                 id = "pocket_tts_zero_shot",
-                displayName = "Pocket TTS // Zero-Shot Core",
+                displayName = "Pocket TTS // Base Zero-Shot",
                 engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_pocket_tts",
                 sherpaFamily = SherpaModelFamily.POCKET_TTS,
                 gender = VoiceGender.ANDROGYNOUS,
                 languageCode = "en-US",
@@ -424,107 +439,86 @@ object PurrDefaultPresets {
                 id = "zipvoice_flow_en",
                 displayName = "ZipVoice // Flow Neural",
                 engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_zipvoice",
                 sherpaFamily = SherpaModelFamily.ZIPVOICE,
                 gender = VoiceGender.FEMALE,
                 languageCode = "en-US",
                 speakerIndex = 0,
                 nativeTags = listOf("female", "american", "soft", "breathy", "clone")
-            ),
-            VoiceDescriptor(
-                id = "piper_libritts_lessac",
-                displayName = "Piper // Lessac High",
-                engine = BackendType.SHERPA_ONNX,
-                sherpaFamily = SherpaModelFamily.PIPER,
-                gender = VoiceGender.FEMALE,
-                languageCode = "en-US",
-                speakerIndex = 0,
-                nativeTags = listOf("female", "american", "calm", "narrator", "audiobook")
-            ),
-            VoiceDescriptor(
-                id = "piper_ryan_deep",
-                displayName = "Piper // Ryan Deep",
-                engine = BackendType.SHERPA_ONNX,
-                sherpaFamily = SherpaModelFamily.PIPER,
-                gender = VoiceGender.MALE,
-                languageCode = "en-US",
-                speakerIndex = 0,
-                nativeTags = listOf("male", "american", "deep", "calm", "narrator")
             )
         )
 
         val proxyVoices = listOf(
             VoiceDescriptor(
                 id = "proxy_openai_endpoint",
-                displayName = "Proxy // LAN OpenAI TTS",
+                displayName = "LAN OpenAI / Kokoro-FastAPI",
                 engine = BackendType.EXTERNAL_PROXY,
+                cartridgeId = "proxy_lan",
                 gender = VoiceGender.ANDROGYNOUS,
                 languageCode = "en-US",
                 nativeTags = listOf("androgynous", "cloud", "proxy")
             )
         )
 
-        return kokoroVoices + sherpaVoices + proxyVoices
+        return coreOsVoices + kokoroSherpa + sherpaSpecialized + proxyVoices
     }
 
+    /**
+     * 6 Intuitive Vibe Presets for Tab 2 (`> PURR ENGINE`) inspired by GachaSwipe's presets.
+     */
     fun builtInProfiles(): List<PurrProfile> = listOf(
         PurrProfile(
-            id = "gachaswipe_rp",
-            name = "GachaSwipe RP",
-            preferredBackend = BackendType.LITERT_NPU_GPU,
-            primaryVoiceId = "af_bella",
-            dialogueVoiceId = "af_sarah",
-            actionHandlingMode = ActionHandlingMode.DUAL_VOICE_ROUTING,
-            narrationVolumeMultiplier = 0.72f,
-            narrationRateMultiplier = 0.92f,
+            id = "gachaswipe_default",
+            name = "GachaSwipe Default",
+            badgeTag = "★ MIKA PICK",
+            summary = "Balanced slang expansion, MIKASTOP breaths & expressive sentiment acting.",
+            selectedCartridgeId = "core_os",
+            preferredBackend = BackendType.CORE_OS,
+            primaryVoiceId = "core_os_auto",
+            dialogueVoiceId = "af_bella",
+            enableDualVoiceSplit = false,
+            actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
+            narrationVolumeMultiplier = 0.80f,
+            narrationRateMultiplier = 0.94f,
             baseSpeed = 1.0f,
-            basePitch = 1.02f,
-            characterTags = listOf("cute", "energetic", "yandere"),
-            affectionScore = 82,
-            whitelist = setOf("af_bella", "af_sarah", "af_nicole", "af_sky", "af_heart", "am_adam", "bf_isabella", "supertonic3_mika_en"),
-            mikaStopConfig = MikaStopConfig(
-                ellipsisPauseMs = 450,
-                emDashPauseMs = 320,
-                sentencePauseMs = 280,
-                commaPauseMs = 140,
-                actionStripPauseMs = 200,
-                sliceAtCommas = true
-            ),
+            basePitch = 1.0f,
+            enableSlangAndHonorifics = true,
+            enableMikaStopPauses = true,
+            enableDsp = true,
+            mikaStopConfig = MikaStopConfig(450, 320, 280, 140, 200, sliceAtCommas = true),
             sentimentConfig = SentimentCurveConfig(
                 enabled = true,
                 toneOverride = ArchetypeTone.AUTO,
-                stutterIntensity = 0.15f,
-                vowelStretchIntensity = 0.15f
+                stutterIntensity = 0.12f,
+                vowelStretchIntensity = 0.10f
             ),
             dspConfig = DspConfig(
                 warmthEqDb = 2.5f,
-                presenceEqDb = 1.8f,
-                reverbWetMix = 0.09f,
+                presenceEqDb = 1.5f,
+                reverbWetMix = 0.08f,
                 effectPreset = AcousticEffectPreset.WARM_STUDIO,
                 normalizePeak = true
             )
         ),
         PurrProfile(
             id = "light_novel_reader",
-            name = "Light Novel Reader",
-            preferredBackend = BackendType.LITERT_NPU_GPU,
-            primaryVoiceId = "af_sky",
+            name = "Audiobook / Light Novel",
+            badgeTag = "READER",
+            summary = "Clean book prose, dual-voice dialogue split ready & steady breath pauses.",
+            selectedCartridgeId = "core_os",
+            preferredBackend = BackendType.CORE_OS,
+            primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_bella",
-            actionHandlingMode = ActionHandlingMode.DUAL_VOICE_ROUTING,
+            enableDualVoiceSplit = true,
+            actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             narrationVolumeMultiplier = 0.85f,
             narrationRateMultiplier = 0.96f,
             baseSpeed = 1.04f,
             basePitch = 1.0f,
-            characterTags = listOf("narrator", "audiobook", "calm", "warm"),
-            affectionScore = 50,
-            whitelist = setOf("af_sky", "af_heart", "af_river", "af_bella", "am_michael", "bm_lewis", "piper_libritts_lessac"),
-            mikaStopConfig = MikaStopConfig(
-                ellipsisPauseMs = 520,
-                emDashPauseMs = 360,
-                sentencePauseMs = 340,
-                commaPauseMs = 170,
-                actionStripPauseMs = 240,
-                sliceAtCommas = true
-            ),
+            enableSlangAndHonorifics = false,
+            enableMikaStopPauses = true,
+            enableDsp = true,
+            mikaStopConfig = MikaStopConfig(520, 360, 340, 170, 220, sliceAtCommas = true),
             sentimentConfig = SentimentCurveConfig(
                 enabled = true,
                 toneOverride = ArchetypeTone.AUTO,
@@ -540,28 +534,117 @@ object PurrDefaultPresets {
             )
         ),
         PurrProfile(
-            id = "notification_assistant",
-            name = "Notification Assistant",
-            preferredBackend = BackendType.SHERPA_ONNX,
-            sherpaFamily = SherpaModelFamily.SUPERTONIC_3,
-            primaryVoiceId = "supertonic3_aria_warm",
-            dialogueVoiceId = "supertonic3_mika_en",
+            id = "tsundere_bratty",
+            name = "Tsundere / Bratty",
+            badgeTag = "SPICY",
+            summary = "Punchy exclamations, flustered stutters & snappy comedic pacing.",
+            selectedCartridgeId = "core_os",
+            preferredBackend = BackendType.CORE_OS,
+            primaryVoiceId = "core_os_auto",
+            dialogueVoiceId = "af_alloy",
+            enableDualVoiceSplit = false,
             actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS,
-            narrationVolumeMultiplier = 1.0f,
-            narrationRateMultiplier = 1.0f,
-            baseSpeed = 1.12f,
-            basePitch = 1.0f,
-            characterTags = listOf("calm", "clear", "american"),
-            affectionScore = 30,
-            whitelist = setOf("supertonic3_aria_warm", "supertonic3_mika_en", "af_kore", "piper_libritts_lessac"),
-            mikaStopConfig = MikaStopConfig(
-                ellipsisPauseMs = 250,
-                emDashPauseMs = 180,
-                sentencePauseMs = 180,
-                commaPauseMs = 90,
-                actionStripPauseMs = 120,
-                sliceAtCommas = false
+            baseSpeed = 1.05f,
+            basePitch = 1.05f,
+            enableSlangAndHonorifics = true,
+            enableMikaStopPauses = true,
+            enableDsp = true,
+            mikaStopConfig = MikaStopConfig(380, 260, 220, 110, 160, sliceAtCommas = true),
+            sentimentConfig = SentimentCurveConfig(
+                enabled = true,
+                toneOverride = ArchetypeTone.TSUNDERE_LOVE,
+                stutterIntensity = 0.20f,
+                vowelStretchIntensity = 0.05f
             ),
+            dspConfig = DspConfig(
+                warmthEqDb = 1.5f,
+                presenceEqDb = 2.8f,
+                reverbWetMix = 0.05f,
+                effectPreset = AcousticEffectPreset.NONE,
+                normalizePeak = true
+            )
+        ),
+        PurrProfile(
+            id = "yandere_obsessive",
+            name = "Yandere / Obsessive",
+            badgeTag = "DEVOTED",
+            summary = "Slow sultry breath pauses, subtle vowel stretch & intimate warm reverb.",
+            selectedCartridgeId = "core_os",
+            preferredBackend = BackendType.CORE_OS,
+            primaryVoiceId = "core_os_auto",
+            dialogueVoiceId = "af_bella",
+            enableDualVoiceSplit = false,
+            actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
+            narrationVolumeMultiplier = 0.72f,
+            narrationRateMultiplier = 0.90f,
+            baseSpeed = 0.93f,
+            basePitch = 0.96f,
+            enableSlangAndHonorifics = true,
+            enableMikaStopPauses = true,
+            enableDsp = true,
+            mikaStopConfig = MikaStopConfig(620, 440, 360, 200, 260, sliceAtCommas = true),
+            sentimentConfig = SentimentCurveConfig(
+                enabled = true,
+                toneOverride = ArchetypeTone.YANDERE_LOVE,
+                stutterIntensity = 0.05f,
+                vowelStretchIntensity = 0.22f
+            ),
+            dspConfig = DspConfig(
+                warmthEqDb = 4.0f,
+                presenceEqDb = 0.8f,
+                reverbWetMix = 0.16f,
+                effectPreset = AcousticEffectPreset.ETHEREAL,
+                normalizePeak = true
+            )
+        ),
+        PurrProfile(
+            id = "shy_dandere",
+            name = "Shy / Dandere",
+            badgeTag = "SOFT",
+            summary = "Gentle hesitant stutters, airy EQ & tender soft-spoken pauses.",
+            selectedCartridgeId = "core_os",
+            preferredBackend = BackendType.CORE_OS,
+            primaryVoiceId = "core_os_auto",
+            dialogueVoiceId = "af_nicole",
+            enableDualVoiceSplit = false,
+            actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
+            baseSpeed = 0.98f,
+            basePitch = 1.04f,
+            enableSlangAndHonorifics = true,
+            enableMikaStopPauses = true,
+            enableDsp = true,
+            mikaStopConfig = MikaStopConfig(540, 380, 300, 170, 220, sliceAtCommas = true),
+            sentimentConfig = SentimentCurveConfig(
+                enabled = true,
+                toneOverride = ArchetypeTone.SHY_LOVE,
+                stutterIntensity = 0.25f,
+                vowelStretchIntensity = 0.08f
+            ),
+            dspConfig = DspConfig(
+                warmthEqDb = 2.0f,
+                presenceEqDb = 2.5f,
+                reverbWetMix = 0.10f,
+                effectPreset = AcousticEffectPreset.ANGELIC,
+                normalizePeak = true
+            )
+        ),
+        PurrProfile(
+            id = "clean_fast",
+            name = "Clean & Fast",
+            badgeTag = "SYSTEM",
+            summary = "Zero drama filters or reverb — fast, crystal-clear everyday OS reading.",
+            selectedCartridgeId = "core_os",
+            preferredBackend = BackendType.CORE_OS,
+            primaryVoiceId = "core_os_auto",
+            dialogueVoiceId = "af_kore",
+            enableDualVoiceSplit = false,
+            actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS,
+            baseSpeed = 1.10f,
+            basePitch = 1.0f,
+            enableSlangAndHonorifics = false,
+            enableMikaStopPauses = false,
+            enableDsp = false,
+            mikaStopConfig = MikaStopConfig(220, 150, 160, 80, 100, sliceAtCommas = false),
             sentimentConfig = SentimentCurveConfig(
                 enabled = false,
                 toneOverride = ArchetypeTone.NORMAL,
@@ -569,8 +652,8 @@ object PurrDefaultPresets {
                 vowelStretchIntensity = 0.0f
             ),
             dspConfig = DspConfig(
-                warmthEqDb = 1.0f,
-                presenceEqDb = 3.0f,
+                warmthEqDb = 0f,
+                presenceEqDb = 1.5f,
                 reverbWetMix = 0.0f,
                 effectPreset = AcousticEffectPreset.NONE,
                 normalizePeak = true
@@ -599,35 +682,36 @@ object PurrDefaultPresets {
         )
     )
 
+    /**
+     * 6 Physical ROM Cartridge Bundles in Tab 3 (`> CARTRIDGE BAY`).
+     * Download -> Slam Cartridge In -> Voices appear ready in Tab 1 (`> VOICE & ENGINE`).
+     */
     fun modelCatalog(): List<ModelBundleSpec> = listOf(
         ModelBundleSpec(
-            id = "kokoro_82m_litert",
-            name = "Kokoro-82M (INT8 GPU FP16)",
-            subtitle = "litert-community/Kokoro-82M • 54 voices • 24kHz mono float32 PCM",
-            backend = BackendType.LITERT_NPU_GPU,
-            downloadUrl = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm",
-            fileName = "kokoro_int8_gpu_fp16.litertlm",
-            expectedSha256 = "1ef178b127ec48c737daf17eabb4cea5f6b3ffbc510aced270fe5c267bbeac52",
-            approximateSizeMb = 281,
-            isArchiveTarBz2 = false,
-            hardwareAccelNote = "Adreno GPU FP16 + persistent OpenCL cache"
+            id = "rom_kokoro_sherpa",
+            romCode = "ROM-01",
+            badge = "54_VOICES",
+            accentHex = 0xFF00FF41,
+            name = "KOKORO_82M_NEURAL",
+            subtitle = "k2-fsa/sherpa-onnx • 54 Multi-Lang Voices • 24kHz INT8 ONNX",
+            description = "The flagship GachaSwipe voice pack (af_bella, af_sarah, am_adam, bf_emma & 50 more). Runs completely offline via bundled sherpa-onnx JNI.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.KOKORO,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2",
+            fileName = "kokoro-int8-multi-lang-v1_0.tar.bz2",
+            expectedSha256 = "72c347230107ef8a31098ec4d468a605244beef5f1ed00db97efa13518800653",
+            approximateSizeMb = 126,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Bundled sherpa-onnx JNI • ARM64 NEON multi-threaded"
         ),
         ModelBundleSpec(
-            id = "kokoro_g2p_en_us",
-            name = "Kokoro-G2P-en-US (Hexagon NPU)",
-            subtitle = "litert-community/Kokoro-G2P-en-US • QAIRT accelerated grapheme-to-phoneme",
-            backend = BackendType.LITERT_NPU_GPU,
-            downloadUrl = "https://huggingface.co/litert-community/Kokoro-G2P-en-US/resolve/main/dp_g2p_litert.tflite",
-            fileName = "dp_g2p_litert.tflite",
-            expectedSha256 = "f8d6bbd16197b2468f53273de13f971a0e1e8657709d7f4285f2cd1c31f26620",
-            approximateSizeMb = 49,
-            isArchiveTarBz2 = false,
-            hardwareAccelNote = "Snapdragon Hexagon NPU / QNN HTP delegate"
-        ),
-        ModelBundleSpec(
-            id = "sherpa_supertonic_3",
-            name = "Supertonic 3 (sherpa-onnx)",
-            subtitle = "k2-fsa/sherpa-onnx • Ultra-low latency CPU NEON neural TTS",
+            id = "rom_supertonic3",
+            romCode = "ROM-02",
+            badge = "LOW_LATENCY",
+            accentHex = 0xFF00E5FF,
+            name = "SUPERTONIC_3_TTS",
+            subtitle = "k2-fsa/sherpa-onnx • Ultra-Fast Natural Conversational Speech",
+            description = "Snappy multilingual neural synthesis optimized for rapid chat turn-taking and low battery draw.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.SUPERTONIC_3,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2",
@@ -635,38 +719,16 @@ object PurrDefaultPresets {
             expectedSha256 = "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427",
             approximateSizeMb = 123,
             isArchiveTarBz2 = true,
-            hardwareAccelNote = "ARM64 NEON multi-threaded int8"
+            hardwareAccelNote = "ARM64 NEON INT8 Supertonic 3"
         ),
         ModelBundleSpec(
-            id = "sherpa_pocket_tts",
-            name = "Pocket TTS (Zero-Shot Cloner)",
-            subtitle = "k2-fsa/sherpa-onnx • 5-second reference audio voice cloning",
-            backend = BackendType.SHERPA_ONNX,
-            sherpaFamily = SherpaModelFamily.POCKET_TTS,
-            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
-            fileName = "sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
-            expectedSha256 = "2f3b88823cbbb9bf0b2477ec8ae7b3fec417b3a87b6bb5f256dba66f2ad967cb",
-            approximateSizeMb = 94,
-            isArchiveTarBz2 = true,
-            hardwareAccelNote = "Zero-shot speaker encoder + CPU NEON"
-        ),
-        ModelBundleSpec(
-            id = "sherpa_zipvoice",
-            name = "ZipVoice (Flow-Matching Clone)",
-            subtitle = "k2-fsa/sherpa-onnx • High-fidelity flow-matching zero-shot TTS",
-            backend = BackendType.SHERPA_ONNX,
-            sherpaFamily = SherpaModelFamily.ZIPVOICE,
-            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
-            fileName = "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
-            expectedSha256 = "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
-            approximateSizeMb = 104,
-            isArchiveTarBz2 = true,
-            hardwareAccelNote = "ONNX Runtime INT8 + Vocos vocoder"
-        ),
-        ModelBundleSpec(
-            id = "sherpa_piper_lessac",
-            name = "Piper VITS (en_US-lessac-high)",
-            subtitle = "k2-fsa/sherpa-onnx • Lightweight classic VITS + espeak-ng",
+            id = "rom_piper",
+            romCode = "ROM-03",
+            badge = "NARRATOR",
+            accentHex = 0xFFFFD700,
+            name = "PIPER_VITS_LESSAC",
+            subtitle = "k2-fsa/sherpa-onnx • Lightweight Crisp Audiobook Narrator",
+            description = "Classic rock-solid English VITS narrator voice with minimal RAM usage for long reading sessions.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-high.tar.bz2",
@@ -675,6 +737,56 @@ object PurrDefaultPresets {
             approximateSizeMb = 110,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "VITS ONNX 22.05kHz -> 24kHz resampled"
+        ),
+        ModelBundleSpec(
+            id = "rom_pocket_tts",
+            romCode = "ROM-04",
+            badge = "5S_CLONE",
+            accentHex = 0xFFB533FF,
+            name = "POCKET_TTS_CLONER",
+            subtitle = "k2-fsa/sherpa-onnx • 5-Second Zero-Shot Voice Cloning",
+            description = "Record any 5-second reference clip and clone that voice timbre offline in real time.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.POCKET_TTS,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+            fileName = "sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
+            expectedSha256 = "2f3b88823cbbb9bf0b2477ec8ae7b3fec417b3a87b6bb5f256dba66f2ad967cb",
+            approximateSizeMb = 94,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Pocket TTS Zero-Shot Speaker Encoder"
+        ),
+        ModelBundleSpec(
+            id = "rom_zipvoice",
+            romCode = "ROM-05",
+            badge = "FLOW_CLONE",
+            accentHex = 0xFFFF107A,
+            name = "ZIPVOICE_FLOW_CLONE",
+            subtitle = "k2-fsa/sherpa-onnx • High-Fidelity Flow-Matching Clone",
+            description = "Distilled flow-matching zero-shot voice cloning engine with expressive prosody transfer.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.ZIPVOICE,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
+            fileName = "sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
+            expectedSha256 = "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
+            approximateSizeMb = 104,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "ONNX Runtime INT8 + Vocos"
+        ),
+        ModelBundleSpec(
+            id = "rom_kokoro_litert",
+            romCode = "ROM-06",
+            badge = "GPU_FP16",
+            accentHex = 0xFFFF9100,
+            name = "KOKORO_LITERT_GPU",
+            subtitle = "litert-community/Kokoro-82M • Adreno GPU FP16 (.litertlm)",
+            description = "Experimental Google AI Edge LiteRT-LM single-file GPU FP16 bundle with persistent --cache_dir and 5-minute VRAM eviction.",
+            backend = BackendType.LITERT_NPU_GPU,
+            downloadUrl = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm",
+            fileName = "kokoro_int8_gpu_fp16.litertlm",
+            expectedSha256 = "1ef178b127ec48c737daf17eabb4cea5f6b3ffbc510aced270fe5c267bbeac52",
+            approximateSizeMb = 281,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Adreno GPU FP16 + OpenCL Cache"
         )
     )
 }
