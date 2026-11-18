@@ -282,6 +282,7 @@ class ModelCatalogManager(
     private fun resolveDestinationFile(spec: ModelBundleSpec): File = when (spec.backend) {
         BackendType.LITERT_NPU_GPU -> File(context.filesDir, "models/litert/${spec.fileName}")
         BackendType.SHERPA_ONNX -> File(context.filesDir, "models/downloads/${spec.fileName}")
+        BackendType.CORE_OS,
         BackendType.EXTERNAL_PROXY -> File(context.filesDir, "models/proxy/${spec.fileName}")
     }
 
