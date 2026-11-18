@@ -2,7 +2,7 @@
 
 ### ✨ What's New since v1.3.2
 
-Master spotted the top hardware badge (`[CPU NEON]` etc.) resizing on every synthesis state change — re-measuring the pinned header, re-wrapping the title onto two lines, and shifting the entire page below. Fixed at the layout-contract level with a new **Fixed-Size Slot Law**! 🐾
+Live testing surfaced the top hardware badge (`[CPU NEON]` etc.) resizing on every synthesis state change — re-measuring the pinned header, re-wrapping the title onto two lines, and shifting the entire page below. Fixed at the layout-contract level with a new **Fixed-Size Slot Law**! 🐾
 
 * **📐 FIXED-SIZE HEADER HUD (`TtsForgeScreen`)**:
   * Header title shortened to **`> PURR_TTS // ENGINE`**, tuned to `14sp` + `1.0sp` tracking, and hard-capped at `maxLines = 1` with ellipsis overflow so it can never wrap onto a second line again.
@@ -29,7 +29,7 @@ Master spotted the top hardware badge (`[CPU NEON]` etc.) resizing on every synt
 
 ### ✨ What's New since v1.3.1
 
-Master noticed three subtle neural synthesis issues during live testing — **KittenTTS Nano (`ROM-03`)** failing to generate audio, difficult/rare words occasionally being skipped in **Kokoro/Piper**, and a low-level **buzzing/muffled artifact** on default voices — all tracked down and fixed cleanly in **v1.3.2**! 🐾
+Three subtle neural synthesis issues surfaced during live testing — **KittenTTS Nano (`ROM-03`)** failing to generate audio, difficult/rare words occasionally being skipped in **Kokoro/Piper**, and a low-level **buzzing/muffled artifact** on default voices — all tracked down and fixed cleanly in **v1.3.2**! 🐾
 
 * **🐱 KITTEN_TTS_NANO (`ROM-03`) FIXED & `espeak-ng` G2P RESTORED (`sherpa-onnx v1.13.8`)**:
   * Pinned the bundled `sherpa-onnx` native runtime to **`v1.13.8`**, restoring full **`espeak-ng` + `piper-phonemize` G2P** support removed in `v2.0.0`.
@@ -55,7 +55,7 @@ Master noticed three subtle neural synthesis issues during live testing — **Ki
 
 ### ✨ What's New since v1.3.0
 
-Master wanted the bottom HUD to capture **GachaSwipe's frosted glassmorphic bar**, replace every stock system emoji with custom cyberdeck vector artwork, add sleek phasing transitions between pages, and declutter the **Modules** desktop! 🐾
+v1.3.1 chased the glassmorphic look of **GachaSwipe's frosted bar** for the bottom HUD, replaced every stock system emoji with custom cyberdeck vector artwork, added sleek phasing transitions between pages, and decluttered the **Modules** desktop! 🐾
 
 * **🧊 GACHA-SWIPE GLASSMORPHIC ICON-ONLY BOTTOM HUD (`MikaBottomHudBar`)**:
   * Redesigned as a floating `54dp` see-through frosted glassmorphic capsule anchored cleanly above the Android gesture navigation pill so scrolling terminal content flows visibly underneath.
@@ -80,7 +80,7 @@ Master wanted the bottom HUD to capture **GachaSwipe's frosted glassmorphic bar*
 
 ### ✨ What's New since v1.2.0
 
-Master wanted PURR-TTS to level up into an **All-in-One Cyberdeck Neural TTS Suite** with more engines & voices, a slick bottom HUD layout, a full OS Module launcher with custom vector icons, dual-category Cartridge Bay (`TTS` vs `TOOLS`), and a brand-new **Audio Media Exporter** to turn short messages or multi-page audiobook chapters into downloadable `.WAV` files! 🐾
+v1.3.0 leveled PURR-TTS up into an **All-in-One Cyberdeck Neural TTS Suite** with more engines & voices, a slick bottom HUD layout, a full OS Module launcher with custom vector icons, dual-category Cartridge Bay (`TTS` vs `TOOLS`), and a brand-new **Audio Media Exporter** to turn short messages or multi-page audiobook chapters into downloadable `.WAV` files! 🐾
 
 * **🎙️ NEW `AUDIO_MEDIA_EXPORTER` OS MODULE (`TOOL-05`)**:
   * Paste a short message or multi-page audiobook chapters, pick loose sentence chunk sizing (`SHORT ~160c`, `BOOK ~240c`, `LONG ~360c`) & paragraph pause timings, and export a mastered **24kHz mono `.WAV`** file straight to Android **`Downloads/PURR-TTS/`**.
@@ -110,7 +110,7 @@ Master wanted PURR-TTS to level up into an **All-in-One Cyberdeck Neural TTS Sui
 
 ### ✨ What's New since v1.1.0
 
-Master wanted cleaner voice selection via a stylized dropdown, the ability to eject built-in Android system voices just like any other cartridge, and the full **NPU / Adreno GPU** cartridges restored to the bay! 🐾
+v1.2.0 brought cleaner voice selection via a stylized dropdown, the ability to eject built-in Android system voices just like any other cartridge, and the full **NPU / Adreno GPU** cartridges restored to the bay! 🐾
 
 * **🎛️ STYLIZED CYBERDECK VOICE DROPDOWN (`MikaVoiceDropdownSelector` in `> VOICE & ENGINE`)**:
   * Replaced the long vertical voice card list in Tab 1 with a compact stylized dropdown selector displaying `[GENDER • LANG]`, native vibe tags, and inline **`▶ TEST`** + **`▼ CHANGE`** triggers.
@@ -135,7 +135,7 @@ Master wanted cleaner voice selection via a stylized dropdown, the ability to ej
 
 ### ✨ What's New since v1.0.0
 
-Master wanted PURR-TTS to stop sounding like a sine-wave synth, stop crashing when Android binds it as system TTS, and stop hiding voice selection behind confusing Forge toggles. Done, done, and *slammed* into a real Cyberdeck Cartridge Bay! 🐾
+v1.1.0 made PURR-TTS stop sounding like a sine-wave synth, stop crashing when Android binds it as system TTS, and stop hiding voice selection behind confusing Forge toggles. Done, done, and *slammed* into a real Cyberdeck Cartridge Bay! 🐾
 
 * **🛠️ FIXED SYSTEM TTS BINDER CRASH (`PurrTtsService` + `CheckVoiceDataActivity`)**:
   * **Root-Cause Init Fix**: Android's `TextToSpeechService.onCreate()` calls `onLoadLanguage()` synchronously inside `super.onCreate()`. Dependencies (`repository` & `backendRouter`) now initialize **before `super.onCreate()`**, eliminating the `UninitializedPropertyAccessException` crash when selecting PURR-TTS in Android Settings.
@@ -161,7 +161,7 @@ Master wanted PURR-TTS to stop sounding like a sine-wave synth, stop crashing wh
 
 ### ✨ What's New in v1.0.0 (Initial Android System-Wide Release)
 
-Master finally gave M.I.K.A.'s **P.U.R.R. Engine** the keys to the entire Android operating system! **PURR-TTS v1.0.0** packages the full GachaSwipe speech middleware, dual-runtime neural synthesis router, and neon terminal Forge into a standalone signed Android `.apk` and system-wide `TextToSpeechService`.
+v1.0.0 handed M.I.K.A.'s **P.U.R.R. Engine** the keys to the entire Android operating system! **PURR-TTS v1.0.0** packages the full GachaSwipe speech middleware, dual-runtime neural synthesis router, and neon terminal Forge into a standalone signed Android `.apk` and system-wide `TextToSpeechService`.
 
 * **🎤 SYSTEM-WIDE ANDROID `TextToSpeechService` (`PurrTtsService`)**:
   * Registers natively under `Settings > Accessibility > Text-to-speech output` (`android.intent.action.TTS_SERVICE`), streaming **24kHz mono PCM16 / Float32** chunks into Android's `SynthesisCallback` across every reader, RP client, browser, and accessibility app on your phone.

@@ -1,0 +1,37 @@
+PURR-TTS // The PURR Engine
+Copyright (c) 2026 ProjectMIKA (Project M.I.K.A.)
+https://github.com/ProjectMIKA/PURR-Engine
+
+NAMING & ATTRIBUTION NOTICE
+(read alongside the MIT License in LICENSE)
+
+1. ATTRIBUTION
+   Any use, redistribution, fork, modification, or derivative work of this
+   software must retain ProjectMIKA (Project M.I.K.A.) as the original
+   author in the source headers, documentation, and public distribution
+   pages of the derived work.
+
+2. THE PURR ENGINE NAME
+   The internal text-to-speech engine of this project — the middleware
+   pipeline under `app/src/main/java/com/projectmika/purrtts/core/purr/`
+   (PurrTextProcessor, PurrSentimentScorer, PurrDspProcessor,
+   PurrVoiceMatcher, PurrProfileRepository, PurrModels), the synthesis
+   routers under `app/src/main/java/com/projectmika/purrtts/engine/`
+   (PurrSynthesizer, TtsBackendRouter, ModelCatalogManager, the LiteRT,
+   sherpa-onnx, and proxy runtimes), and the system speech service under
+   `app/src/main/java/com/projectmika/purrtts/service/` — is named the
+   "PURR Engine" ("P.U.R.R.", Per-Utterance Reaction Rendering).
+
+   * You MAY rename, rebrand, or repackage the application, its launcher
+     icon, and its store/listing presence under any name you choose.
+   * You MUST retain the "PURR Engine" name (or a clear derivative such as
+     "PURR Engine (fork)") for the internal engine code, its documentation,
+     its package/namespace references, and any on-screen or user-facing
+     reference to the engine itself.
+   * You MUST NOT present the PURR Engine as an original creation of any
+     party other than ProjectMIKA (Project M.I.K.A.).
+
+3. NOTICE PRESERVATION
+   This NOTICE file, including the attribution and naming conditions above,
+   must be preserved and included in all copies or substantial portions of
+   the Software and in any derived distribution.

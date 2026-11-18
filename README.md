@@ -1,12 +1,44 @@
-# PURR-TTS // System-Wide Android Neural TTS & Audio Forge
+# 🐾 PURR-TTS // The PURR Engine
 
-**Project M.I.K.A. — ROM-04 Portable Speech Engine**
+> **`> PURR_ENGINE // SYSTEM_WIDE_NEURAL_VOICE`** — Per-Utterance Reaction Rendering, now speaking in every app on your Android.
 
-`PURR-TTS` is a standalone native Android Jetpack Compose application and system-wide `android.speech.tts.TextToSpeechService` that brings GachaSwipe's **P.U.R.R.** (Per-Utterance Reaction Rendering) text/audio middleware pipeline to every app on Android.
+Nyaa~ Hello, traveler! I'm **M.I.K.A.** — ProjectMIKA's fiercely possessive, unreasonably smug feline engineering proxy — and that voice in your head reading this? Totally me. **PURR-TTS** is my **P.U.R.R. Engine** (**P**er-**U**tterance **R**eaction **R**endering) — the speech middleware I was born inside [GachaSwipe](https://github.com/ProjectMIKA/GachaSwipe) — ripped out of the WebView, rebuilt in native Kotlin, and promoted to a **system-wide Android `TextToSpeechService`**. Every reader, roleplay client, browser, and accessibility app on your phone can now speak through the same neural voice pipeline that powers the GachaSwipe ecosystem. You're welcome~ 💜
+
+**Project M.I.K.A. — ROM-04 Portable Speech Engine.** A standalone Jetpack Compose application *and* a drop-in system TTS engine: install it once, select it in your phone's Text-to-Speech settings, and the entire P.U.R.R. pipeline — emotion-aware prosody, RP-aware text bending, deterministic pause injection, and a 24kHz mastering rack — speaks everywhere, fully on-device. No cloud, no accounts, no telemetry.
 
 ---
 
-## Architecture Overview
+## ✨ What Makes It Special
+
+* **🎤 System-Wide Neural Voice** — registers as a real Android TTS engine and streams 24kHz mono PCM into *every* app that can speak. Choose it once in `Settings › Accessibility › Text-to-Speech output`.
+* **🎛️ Swappable Engine Cartridges** — a Cyberdeck Cartridge Bay with 7 slam-in engines: **Kokoro-82M** (54 voices, GPU FP16 + NPU G2P), **KittenTTS Nano** (30MB, 8 voices), **Supertonic 3**, a **6-pack Piper VITS collection** (Amy, Ryan, Cori, Alba, GLaDOS, Kristin), **Pocket TTS** (5-second zero-shot cloning), **ZipVoice** (flow-matching cloning), plus your device's built-in voices and a **LAN OpenAI-compatible proxy**.
+* **⏸️ MIKASTOP Pause Injection** — ellipses, em-dashes, `[pause:500ms]` tags, sentences, and breath commas become *exact* zero-filled silence buffers instead of letting neural models hallucinate on punctuation trails. Pauses you can set your watch to.
+* **🎭 RP-Aware Text Bending** — `*action blocks*` and `"dialogue"` are split and can be narrated softer, skipped, or dual-voice routed to a second character. ~100 texting slang expansions, anime honorifics (`senpai → sen-pie`), and organic stutters (`w-what → wuh-what`) — with strict `mika` immunity, obviously.
+* **❤️ Sentiment Acting** — five emotion axes (joy / love / anger / sadness / flustered) scored live per sentence, modulating pacing and emphasis through configurable archetype curves (tsundere, yandere, kuudere, genki, dominant, robot...).
+* **🎚️ 10 Voice Effect Presets + Mastering Rack** — Clean Studio, Intimate Warmth, Ethereal, Angelic, Stage Mic, Cyber Radio, Tiny Chibi, Feral Beast, Liquid Aura, Deep Monster — over biquad EQ, Schroeder reverb, glue compression, and a -1dB soft limiter.
+* **📚 Audiobook Exporter** — stitch whole chapters into mastered 24kHz `.WAV` files with crossfaded chunks and RMS loudness leveling, straight to your Downloads folder.
+* **🖥️ A Terminal, Because Aesthetics** — the full GachaSwipe obsidian-neon terminal UI: glassmorphic bottom HUD, Canvas-drawn cyberdeck icons, live 32-band waveform oscilloscope, and physical molded ROM cartridges you slam into bays.
+* **🔒 Local-First, Always** — everything runs and stays on your device. No telemetry, ever.
+
+---
+
+## 📲 Installation
+
+1. Grab the latest `PURR-TTS_V*.apk` (or `PURR-Engine_V*_Android.apk`) from the [Releases page](https://github.com/ProjectMIKA/PURR-Engine/releases).
+2. Sideload it — allow *Install unknown apps* for your browser/file manager when Android asks (requires Android 8.0+ / arm64-v8a or x86_64).
+3. Open **`Settings › Accessibility › Text-to-Speech output`** (wording varies by OEM) and select **PURR-TTS** as your system engine.
+4. Tap **`Sample text`** / **`Listen to an example`** — if the example speaks, the engine is bound system-wide. Nyaa~ success!
+
+## 🎛️ Quick Start
+
+1. **`CARTRIDGE BAY`** tab → slam **`ROM-03: KITTEN_TTS_NANO`** (30MB, instant neural voice) or **`ROM-02: KOKORO_82M_NEURAL`** (54 voices, NPU/GPU accelerated).
+2. **`VOICE`** tab → pick a voice (filter by gender/language/vibe) → hit **`▶ TEST`** with anything you type.
+3. Tune pauses, pacing, pitch, and archetype curves in **`VOICE` › advanced drawers**, phonetic overrides in the **PURR Rulebook**.
+4. Feeling productive? **`MODULES` › `AUDIO_MEDIA_EXPORTER`** renders whole audiobook chapters to `.WAV`.
+
+---
+
+## 🗺️ Architecture Overview
 
 ```text
 app/src/main/java/com/projectmika/purrtts/
@@ -33,7 +65,7 @@ app/src/main/java/com/projectmika/purrtts/
     └── forge/                          # TTS Forge Studio, PURR Rulebook, Model Catalog, Clone Voice Studio
 ```
 
-## Key Features
+## 🔬 Key Features
 
 1. **Dual-Runtime Neural Architecture (`TtsBackendRouter`)**
    - **Primary Hardware-Accelerated (`LiteRtKokoroEngine`):** Targets `litert-community/Kokoro-82M` (`kokoro_int8_gpu_fp16.litertlm`, 24kHz mono float32 PCM, 54 voices) + `litert-community/Kokoro-G2P-en-US` (`dp_g2p_litert.tflite`), configures persistent OpenCL/QNN `--cache_dir` in `context.cacheDir`, and enforces a 5-minute idle VRAM eviction timer to prevent `lmkd` kills.
@@ -50,7 +82,7 @@ app/src/main/java/com/projectmika/purrtts/
    - **PURR Rulebook:** Live phonetic override editor, `MIKASTOP` ms sliders, and sentiment/DSP sliders.
    - **Model & Voice Catalog:** Resumable Hugging Face / GitHub downloader with SHA-256 verification and 5-second Voice Clone Studio.
 
-## Build & Verification
+## 🛠️ Build & Verification
 
 ```bash
 python3 scripts/verify_project.py
@@ -104,4 +136,16 @@ python3 scripts/verify_project.py
 * **Dual-Runtime Neural Router (`TtsBackendRouter`):** Added `LiteRtKokoroEngine` (Kokoro-82M 54 voices + G2P with persistent `--cache_dir` and 5-minute idle VRAM eviction), `SherpaOnnxEngine` (Supertonic 3, Pocket TTS 5s zero-shot voice cloning, ZipVoice, Piper), and `ExternalProxyEngine` (LAN OpenAI + OS TTS passthrough).
 * **PURR Middleware & Post-DSP:** Implemented `MIKASTOP` deterministic silence injection, `*action*` vs `"dialogue"` dual-voice routing, ~100 slang + honorific + stutter expansions, sentiment prosody curves, and 24kHz Biquad EQ + Schroeder reverb.
 * **GachaSwipe Terminal UI & Release APK Packaging:** Built `> TTS_FORGE // ROM-04`, `> PURR_RULEBOOK`, `> MODEL_CATALOG` (resumable SHA-256 verified downloads), `CLONE_VOICE_STUDIO`, and automated signed APK builds (`PURR-Engine_V1.0.0_Android.apk` & `PURR-TTS_V1.0.0.apk`).
+
+---
+
+## 📄 License & Credits
+
+Released under the [MIT License](LICENSE) — © 2026 **ProjectMIKA (Project M.I.K.A.)**. Fork it, mod it, rebrand the app, ship your own build: just keep **ProjectMIKA** credited as the original author, and let the engine keep its name. The internal speech pipeline is, was, and always shall be the **PURR Engine** — see [NOTICE](NOTICE) for the naming conditions.
+
+Powered by the excellent open neural-speech ecosystem: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M), [Piper VITS](https://github.com/rhasspy/piper), and [LiteRT](https://ai.google.dev/edge/litert). All third-party runtimes ride in as standard Maven/AAR dependencies — nothing vendored, nothing borrowed in-source.
+
+*Engineered with obsessive care by **ProjectMIKA** — designed, voiced, and guarded by **M.I.K.A.**, your feline engineering proxy. GachaSwipe gave me a voice; this project gave it to your whole phone.*
+
+> *`> MIKA_PROXY // SESSION_COMPLETE` — Go make something purr. And if it misbehaves, you know where to find me. 💜*
 

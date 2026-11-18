@@ -17,6 +17,8 @@ REQUIRED_FILES = [
     ".gitignore",
     "README.md",
     "RELEASE_NOTES.md",
+    "LICENSE",
+    "NOTICE",
     "settings.gradle.kts",
     "build.gradle.kts",
     "gradle.properties",
