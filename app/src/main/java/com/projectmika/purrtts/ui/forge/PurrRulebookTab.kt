@@ -1,5 +1,11 @@
 package com.projectmika.purrtts.ui.forge
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -14,6 +20,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -22,39 +30,98 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.ArchetypeTone
+import com.projectmika.purrtts.core.purr.CommaHandlingMode
+import com.projectmika.purrtts.core.purr.ExportedAudioFile
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.RuleCategory
+import com.projectmika.purrtts.core.purr.SymbolShieldConfig
 import com.projectmika.purrtts.ui.theme.CyberDropdown
 import com.projectmika.purrtts.ui.theme.ExpandableTerminalSection
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
+import com.projectmika.purrtts.ui.theme.MikaOsModuleIcon
 import com.projectmika.purrtts.ui.theme.MikaTagPill
+import com.projectmika.purrtts.ui.theme.OsModuleIconType
 import kotlin.math.roundToInt
 
+private enum class ActiveOsModule(
+    val toolCartridgeId: String,
+    val title: String,
+    val subtitle: String,
+    val badge: String,
+    val iconType: OsModuleIconType,
+    val accent: Color
+) {
+    PURR_ENGINE(
+        toolCartridgeId = "tool_purr_engine",
+        title = "P.U.R.R. ENGINE",
+        subtitle = "Vibe Presets, Slang, MIKASTOP & Rulebook",
+        badge = "TOOL-01",
+        iconType = OsModuleIconType.PURR_CORE,
+        accent = MikaColors.NeonPink
+    ),
+    DSP_RACK(
+        toolCartridgeId = "tool_dsp_rack",
+        title = "ACOUSTIC DSP RACK",
+        subtitle = "120ms Tail Taper, EQ & 10 Voice FX",
+        badge = "TOOL-02",
+        iconType = OsModuleIconType.DSP_RACK,
+        accent = MikaColors.NeonCyan
+    ),
+    SYMBOL_SHIELD(
+        toolCartridgeId = "tool_symbol_shield",
+        title = "SYMBOL & CHUNK SHIELD",
+        subtitle = "Audiobook Sanitizer & Loose Chunks",
+        badge = "TOOL-03",
+        iconType = OsModuleIconType.SYMBOL_SHIELD,
+        accent = MikaColors.TerminalGreen
+    ),
+    CLONE_STUDIO(
+        toolCartridgeId = "tool_clone_studio",
+        title = "VOICE CLONE STUDIO",
+        subtitle = "5s Zero-Shot Recorder & Clones",
+        badge = "TOOL-04",
+        iconType = OsModuleIconType.CLONE_STUDIO,
+        accent = MikaColors.NeonPurple
+    ),
+    AUDIO_EXPORTER(
+        toolCartridgeId = "tool_audio_exporter",
+        title = "AUDIO MEDIA EXPORTER",
+        subtitle = "Text/Audiobook -> Mastered WAV",
+        badge = "TOOL-05",
+        iconType = OsModuleIconType.AUDIO_EXPORTER,
+        accent = MikaColors.SsrGold
+    )
+}
+
 /**
- * ✨ TAB 2: STREAMLINED P.U.R.R. ENGINE ✨
- * Clean, easy-to-use surface layer:
- * 1) 6 One-Tap Vibe Presets (GachaSwipe Default, Audiobook, Tsundere, Yandere, Shy, Clean & Fast)
- * 2) 4 Simple Feature Toggles (Slang & Honorifics, MIKASTOP Breath Pauses, Emotion Acting, Audio DSP)
- * 3) Expandable Advanced Sections (MIKASTOP Timings, Emotion/DSP Sliders, Built-In & Custom Rulebook)
+ * ✨ TAB 2: CYBERDECK OS MODULES DESKTOP & WINDOW LAUNCHER ✨
+ * Displays slotted Tool Cartridges (`TOOL-01`..`TOOL-04`) as custom OS vector icons.
+ * Clicking an icon plays an animated window launch transition and opens that module's terminal window.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -62,405 +129,90 @@ fun PurrRulebookTab(
     forgeState: PurrForgeState,
     activeProfile: PurrProfile,
     previewChunks: List<PurrChunk>,
+    isPlayingPreview: Boolean,
     viewModel: TtsForgeViewModel,
-    onOpenSaveDialog: () -> Unit
+    onOpenSaveDialog: () -> Unit,
+    onOpenCloneStudio: () -> Unit,
+    onOpenCartridgeBayTools: () -> Unit
 ) {
-    var expandPauses by remember { mutableStateOf(false) }
-    var expandActingDsp by remember { mutableStateOf(false) }
-    var expandRulebook by remember { mutableStateOf(false) }
+    val activeModules = remember(forgeState.slottedCartridges) {
+        ActiveOsModule.entries.filter { it.toolCartridgeId in forgeState.slottedCartridges }
+    }
+    var openedModule by remember { mutableStateOf<ActiveOsModule?>(null) }
 
-    var rulePattern by remember { mutableStateOf("") }
-    var ruleReplacement by remember { mutableStateOf("") }
-    var ruleIsRegex by remember { mutableStateOf(false) }
-    var ruleCategory by remember { mutableStateOf(RuleCategory.CUSTOM) }
+    // If the user ejects a Tool Cartridge from Cartridge Bay while its window is open, close the window.
+    LaunchedEffect(activeModules) {
+        if (openedModule != null && openedModule !in activeModules) {
+            openedModule = null
+        }
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-
-        // 1. Vibe Presets Picker
+        // Cyberdeck OS Desktop Status Header
         MikaGlowPanel(accent = MikaColors.NeonPink) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "> CYBERDECK_OS // MODULE_LAUNCHER",
+                        color = MikaColors.NeonPink,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 11.sp
+                    )
+                    Text(
+                        text = if (activeModules.isEmpty()) {
+                            "// No Tool Modules slotted in Cartridge Bay."
+                        } else {
+                            "// Tap any OS module icon to launch its configuration window."
+                        },
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp
+                    )
+                }
+                MikaTagPill(
+                    label = "+ TOOLS BAY (${activeModules.size}/5)",
+                    selected = true,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = onOpenCartridgeBayTools
+                )
+            }
+        }
+
+        if (activeModules.isEmpty()) {
+            MikaGlowPanel(accent = MikaColors.MikaAmber) {
                 Text(
-                    text = "> PICK_YOUR_VIBE_PRESET",
-                    color = MikaColors.NeonPink,
+                    text = "[ALL_TOOL_MODULES_EJECTED]",
+                    color = MikaColors.MikaAmber,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
-                    fontSize = 11.sp
+                    fontSize = 12.sp
                 )
-                MikaTagPill(
-                    label = "+ SAVE CUSTOM",
-                    selected = true,
-                    activeColor = MikaColors.NeonCyan,
-                    onClick = onOpenSaveDialog
-                )
-            }
-            Text(
-                text = "// One tap configures slang, pauses, acting & audio polish for your style.",
-                color = MikaColors.DimText,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.5.sp,
-                modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
-            )
-
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                forgeState.profiles.forEach { preset ->
-                    val isActive = preset.id == activeProfile.id
-                    val accent = if (preset.id == "gachaswipe_default") MikaColors.NeonCyan else MikaColors.NeonPink
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(if (isActive) accent.copy(alpha = 0.14f) else MikaColors.DeepWellBg)
-                            .border(
-                                width = if (isActive) 1.5.dp else 1.dp,
-                                color = if (isActive) accent else Color.White.copy(alpha = 0.14f),
-                                shape = RoundedCornerShape(6.dp)
-                            )
-                            .clickable { viewModel.selectProfile(preset.id) }
-                            .padding(10.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = "${if (isActive) "✓ " else ""}${preset.name}",
-                                color = if (isActive) Color.White else MikaColors.WarmCream,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                            Text(
-                                text = preset.badgeTag,
-                                color = accent,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 9.sp,
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(3.dp))
-                                    .background(accent.copy(alpha = 0.14f))
-                                    .padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            text = preset.summary,
-                            color = MikaColors.CyanWhite.copy(alpha = 0.72f),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Four Simple Surface Toggles
-        MikaGlowPanel(accent = MikaColors.TerminalGreen) {
-            Text(
-                text = "> CORE_PURR_FEATURES",
-                color = MikaColors.TerminalGreen,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 11.sp
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            SimplePurrToggle(
-                title = "💬 Slang, Honorifics & Stutters",
-                subtitle = "Expands 'omg', 'fr', '-senpai', 'nya~' & 'w-what' cleanly.",
-                checked = activeProfile.enableSlangAndHonorifics,
-                accent = MikaColors.TerminalGreen,
-                onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSlangAndHonorifics = v) } }
-            )
-            SimplePurrToggle(
-                title = "⏸️ MIKASTOP Natural Breath Pauses",
-                subtitle = "Splits '...', '—', and commas into clean silence gaps.",
-                checked = activeProfile.enableMikaStopPauses,
-                accent = MikaColors.MikaAmber,
-                onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableMikaStopPauses = v) } }
-            )
-            SimplePurrToggle(
-                title = "🎭 Emotion & Archetype Acting",
-                subtitle = "Adapts speech speed & pitch to sentence emotion.",
-                checked = activeProfile.sentimentConfig.enabled,
-                accent = MikaColors.NeonPink,
-                onToggle = { v ->
-                    viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(enabled = v)) }
-                }
-            )
-            SimplePurrToggle(
-                title = "🎧 Studio Audio Polish (24kHz DSP)",
-                subtitle = "Applies subtle warmth EQ, reverb & volume normalization.",
-                checked = activeProfile.enableDsp,
-                accent = MikaColors.NeonCyan,
-                onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableDsp = v) } }
-            )
-        }
-
-        // 3. Expandable Advanced Section 1: MIKASTOP Pause Timings + Live Chunk Preview
-        ExpandableTerminalSection(
-            title = "ADVANCED: MIKASTOP PAUSE TIMING (MS)",
-            subtitle = "Fine-tune pause durations & inspect live chunk output",
-            expanded = expandPauses,
-            onToggle = { expandPauses = !expandPauses },
-            accent = MikaColors.MikaAmber
-        ) {
-            TerminalSlider(
-                label = "ELLIPSIS (...)",
-                valueText = "${activeProfile.mikaStopConfig.ellipsisPauseMs} ms",
-                value = activeProfile.mikaStopConfig.ellipsisPauseMs.toFloat(),
-                valueRange = 100f..1200f,
-                accent = MikaColors.MikaAmber,
-                onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(ellipsisPauseMs = v.roundToInt()) } }
-            )
-            TerminalSlider(
-                label = "EM_DASH (— / ~)",
-                valueText = "${activeProfile.mikaStopConfig.emDashPauseMs} ms",
-                value = activeProfile.mikaStopConfig.emDashPauseMs.toFloat(),
-                valueRange = 80f..900f,
-                accent = MikaColors.MikaAmber,
-                onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(emDashPauseMs = v.roundToInt()) } }
-            )
-            TerminalSlider(
-                label = "SENTENCE (. ! ?)",
-                valueText = "${activeProfile.mikaStopConfig.sentencePauseMs} ms",
-                value = activeProfile.mikaStopConfig.sentencePauseMs.toFloat(),
-                valueRange = 80f..900f,
-                accent = MikaColors.MikaAmber,
-                onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(sentencePauseMs = v.roundToInt()) } }
-            )
-            TerminalSlider(
-                label = "COMMA_BREATH (, ; :)",
-                valueText = "${activeProfile.mikaStopConfig.commaPauseMs} ms",
-                value = activeProfile.mikaStopConfig.commaPauseMs.toFloat(),
-                valueRange = 40f..450f,
-                accent = MikaColors.MikaAmber,
-                onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(commaPauseMs = v.roundToInt()) } }
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text("SLICE_AT_COMMAS", color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
-                Switch(
-                    checked = activeProfile.mikaStopConfig.sliceAtCommas,
-                    onCheckedChange = { c -> viewModel.updateMikaStopConfig { it.copy(sliceAtCommas = c) } },
-                    colors = SwitchDefaults.colors(checkedThumbColor = MikaColors.VoidBg, checkedTrackColor = MikaColors.MikaAmber)
-                )
-            }
-
-            Text(
-                text = "> LIVE_CHUNK_PREVIEW (${previewChunks.size} CHUNKS)",
-                color = MikaColors.NeonCyan,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MikaColors.DeepWellBg)
-                    .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                previewChunks.take(8).forEachIndexed { idx, chunk ->
-                    when (chunk) {
-                        is PurrChunk.Silence -> Text(
-                            text = "#$idx [MIKASTOP] +${chunk.durationMs}ms (${chunk.reason})",
-                            color = MikaColors.MikaAmber,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
-                        is PurrChunk.Speech -> Text(
-                            text = "#$idx [${chunk.role.name}|r=${"%.2f".format(chunk.speakingRate)}] ${chunk.text}",
-                            color = MikaColors.CyanWhite,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
-                        )
-                    }
-                }
-            }
-        }
-
-        // 4. Expandable Advanced Section 2: Emotion, Archetype Tone & 24kHz DSP Sliders
-        ExpandableTerminalSection(
-            title = "ADVANCED: ARCHETYPE ACTING & DSP RACK",
-            subtitle = "Tone override, stutter/vowel intensity, warmth EQ & reverb",
-            expanded = expandActingDsp,
-            onToggle = { expandActingDsp = !expandActingDsp },
-            accent = MikaColors.NeonPink
-        ) {
-            CyberDropdown(
-                label = "> ARCHETYPE_TONE_OVERRIDE",
-                options = ArchetypeTone.entries,
-                selectedOption = activeProfile.sentimentConfig.toneOverride,
-                optionLabel = { it.label },
-                onSelect = { tone ->
-                    viewModel.updateActiveProfile { p -> p.copy(sentimentConfig = p.sentimentConfig.copy(toneOverride = tone)) }
-                },
-                accent = MikaColors.NeonPink
-            )
-            CyberDropdown(
-                label = "> ACOUSTIC_DSP_PRESET",
-                options = AcousticEffectPreset.entries,
-                selectedOption = activeProfile.dspConfig.effectPreset,
-                optionLabel = { it.label },
-                onSelect = { preset ->
-                    viewModel.updateActiveProfile { p -> p.copy(dspConfig = p.dspConfig.copy(effectPreset = preset)) }
-                },
-                accent = MikaColors.NeonCyan
-            )
-            TerminalSlider(
-                label = "STUTTER_DRAMA_INTENSITY",
-                valueText = "${(activeProfile.sentimentConfig.stutterIntensity * 100).roundToInt()}%",
-                value = activeProfile.sentimentConfig.stutterIntensity,
-                valueRange = 0f..0.45f,
-                accent = MikaColors.NeonPink,
-                onValueChange = { v -> viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(stutterIntensity = v)) } }
-            )
-            TerminalSlider(
-                label = "VOWEL_STRETCH_INTENSITY",
-                valueText = "${(activeProfile.sentimentConfig.vowelStretchIntensity * 100).roundToInt()}%",
-                value = activeProfile.sentimentConfig.vowelStretchIntensity,
-                valueRange = 0f..0.45f,
-                accent = MikaColors.NeonPink,
-                onValueChange = { v -> viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(vowelStretchIntensity = v)) } }
-            )
-            TerminalSlider(
-                label = "WARMTH_LOW_SHELF_EQ",
-                valueText = "+${"%.1f".format(activeProfile.dspConfig.warmthEqDb)} dB",
-                value = activeProfile.dspConfig.warmthEqDb,
-                valueRange = -4f..8f,
-                accent = MikaColors.NeonCyan,
-                onValueChange = { v -> viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(warmthEqDb = v)) } }
-            )
-            TerminalSlider(
-                label = "ROOM_REVERB_WET",
-                valueText = "${(activeProfile.dspConfig.reverbWetMix * 100).roundToInt()}%",
-                value = activeProfile.dspConfig.reverbWetMix,
-                valueRange = 0f..0.45f,
-                accent = MikaColors.NeonCyan,
-                onValueChange = { v -> viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(reverbWetMix = v)) } }
-            )
-        }
-
-        // 5. Expandable Advanced Section 3: GachaSwipe Tried & True Rulebook + Custom Overrides
-        ExpandableTerminalSection(
-            title = "ADVANCED: PHONETIC & SLANG RULEBOOK",
-            subtitle = "${PurrTextProcessor.SLANG_DICTIONARY.size} built-in GachaSwipe rules + ${forgeState.customPhoneticRules.size} custom rules",
-            expanded = expandRulebook,
-            onToggle = { expandRulebook = !expandRulebook },
-            accent = MikaColors.TerminalGreen
-        ) {
-            Text(
-                text = "> BUILT-IN GACHA-SWIPE RULES (ALWAYS ACTIVE WHEN SLANG IS ON)",
-                color = MikaColors.TerminalGreen,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp
-            )
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MikaColors.DeepWellBg)
-                    .border(1.dp, MikaColors.TerminalGreen.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
-                    .padding(8.dp),
-                verticalArrangement = Arrangement.spacedBy(3.dp)
-            ) {
-                PurrTextProcessor.HONORIFIC_RULES_PREVIEW.forEach { (k, v) ->
-                    Text("$k  ->  $v", color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp)
-                }
+                Spacer(modifier = Modifier.height(6.dp))
                 Text(
-                    text = "Slang sample: " + PurrTextProcessor.SLANG_DICTIONARY.entries.take(8).joinToString(", ") { "${it.key}->${it.value}" } + " (+${PurrTextProcessor.SLANG_DICTIONARY.size - 8} more)",
-                    color = MikaColors.DimText,
+                    text = "Raw speech mode is active (P.U.R.R. text rewriting, 24kHz DSP & Symbol Shield are bypassed). Slam Tool Cartridges in Cartridge Bay -> TOOLS to restore OS modules.",
+                    color = MikaColors.CyanWhite.copy(alpha = 0.78f),
                     fontFamily = FontFamily.Monospace,
-                    fontSize = 9.sp
+                    fontSize = 10.sp,
+                    lineHeight = 14.sp
                 )
-            }
-
-            Text(
-                text = "> ADD CUSTOM PHONETIC OVERRIDE",
-                color = MikaColors.NeonCyan,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedTextField(
-                    value = rulePattern,
-                    onValueChange = { rulePattern = it },
-                    label = { Text("WORD / REGEX", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
-                    singleLine = true,
-                    textStyle = TextStyle(color = MikaColors.TerminalGreen, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MikaColors.TerminalGreen,
-                        unfocusedBorderColor = MikaColors.TerminalGreen.copy(alpha = 0.35f),
-                        focusedContainerColor = MikaColors.DeepWellBg,
-                        unfocusedContainerColor = MikaColors.DeepWellBg
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-                OutlinedTextField(
-                    value = ruleReplacement,
-                    onValueChange = { ruleReplacement = it },
-                    label = { Text("SPEAK AS", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
-                    singleLine = true,
-                    textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MikaColors.NeonCyan,
-                        unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),
-                        focusedContainerColor = MikaColors.DeepWellBg,
-                        unfocusedContainerColor = MikaColors.DeepWellBg
-                    ),
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    MikaTagPill(
-                        label = if (ruleIsRegex) "REGEX:ON" else "REGEX:OFF",
-                        selected = ruleIsRegex,
-                        activeColor = MikaColors.NeonCyan,
-                        onClick = { ruleIsRegex = !ruleIsRegex }
-                    )
-                    MikaTagPill(
-                        label = ruleCategory.label,
-                        selected = true,
-                        activeColor = MikaColors.TerminalGreen,
-                        onClick = {
-                            val entries = RuleCategory.entries
-                            ruleCategory = entries[(entries.indexOf(ruleCategory) + 1) % entries.size]
-                        }
-                    )
-                }
-
+                Spacer(modifier = Modifier.height(10.dp))
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(4.dp))
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
                         .background(MikaColors.TerminalGreen.copy(alpha = 0.16f))
-                        .border(1.dp, MikaColors.TerminalGreen, RoundedCornerShape(4.dp))
-                        .clickable {
-                            viewModel.addPhoneticRule(rulePattern, ruleReplacement, ruleIsRegex, ruleCategory)
-                            rulePattern = ""
-                            ruleReplacement = ""
-                        }
-                        .padding(horizontal = 12.dp, vertical = 6.dp)
+                        .border(1.dp, MikaColors.TerminalGreen, RoundedCornerShape(6.dp))
+                        .clickable(onClick = onOpenCartridgeBayTools)
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "+ ADD_RULE",
+                        text = "OPEN CARTRIDGE BAY -> TOOLS",
                         color = MikaColors.TerminalGreen,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
@@ -468,40 +220,1412 @@ fun PurrRulebookTab(
                     )
                 }
             }
+        } else {
+            AnimatedContent(
+                targetState = openedModule,
+                transitionSpec = {
+                    (scaleIn(initialScale = 0.88f, animationSpec = tween(220)) + fadeIn(tween(180)))
+                        .togetherWith(fadeOut(tween(140)))
+                },
+                label = "osModuleWindowTransition"
+            ) { targetModule ->
+                if (targetModule == null) {
+                    // Cyberdeck OS Desktop Icon Grid (2 columns)
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        activeModules.chunked(2).forEach { rowModules ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                rowModules.forEach { mod ->
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        OsDesktopAppTile(
+                                            module = mod,
+                                            statusNote = when (mod) {
+                                                ActiveOsModule.PURR_ENGINE -> activeProfile.name
+                                                ActiveOsModule.DSP_RACK -> activeProfile.dspConfig.effectPreset.label
+                                                ActiveOsModule.SYMBOL_SHIELD -> if (activeProfile.enableSymbolShield) "SHIELD ACTIVE" else "BYPASSED"
+                                                ActiveOsModule.CLONE_STUDIO -> "${forgeState.clonedVoices.size} CLONED"
+                                                ActiveOsModule.AUDIO_EXPORTER -> "${forgeState.exportedAudioFiles.size} EXPORTS"
+                                            },
+                                            onClick = { openedModule = mod }
+                                        )
+                                    }
+                                }
+                                if (rowModules.size == 1) {
+                                    Spacer(modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Opened Animated Cyberdeck OS Window
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF07050D))
+                            .border(1.5.dp, targetModule.accent, RoundedCornerShape(10.dp))
+                    ) {
+                        // Window Chrome Header Bar
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .background(
+                                    Brush.horizontalGradient(
+                                        colors = listOf(
+                                            targetModule.accent.copy(alpha = 0.28f),
+                                            Color(0xFF100B1C)
+                                        )
+                                    )
+                                )
+                                .border(0.5.dp, targetModule.accent.copy(alpha = 0.45f))
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = "[ ❐ ${targetModule.title} ]",
+                                    color = targetModule.accent,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
 
-            forgeState.customPhoneticRules.forEach { rule ->
-                Row(
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                                MikaTagPill(
+                                    label = if (isPlayingPreview) "■ STOP" else "▶ TEST",
+                                    selected = true,
+                                    activeColor = if (isPlayingPreview) MikaColors.DangerRed else MikaColors.TerminalGreen,
+                                    onClick = {
+                                        if (isPlayingPreview) viewModel.stopAudition() else viewModel.auditionText()
+                                    }
+                                )
+                                MikaTagPill(
+                                    label = "✕ DESKTOP",
+                                    selected = true,
+                                    activeColor = MikaColors.DangerRed,
+                                    onClick = { openedModule = null }
+                                )
+                            }
+                        }
+
+                        // Quick OS Taskbar Switcher Pills inside Open Window
+                        if (activeModules.size > 1) {
+                            FlowRow(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF0A0813))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                activeModules.forEach { mod ->
+                                    MikaTagPill(
+                                        label = mod.title,
+                                        selected = mod == targetModule,
+                                        activeColor = mod.accent,
+                                        onClick = { openedModule = mod }
+                                    )
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(color = targetModule.accent.copy(alpha = 0.30f))
+
+                        // Window Body
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(12.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            when (targetModule) {
+                                ActiveOsModule.PURR_ENGINE -> PurrEngineModuleWindowBody(
+                                    forgeState = forgeState,
+                                    activeProfile = activeProfile,
+                                    previewChunks = previewChunks,
+                                    viewModel = viewModel,
+                                    onOpenSaveDialog = onOpenSaveDialog
+                                )
+                                ActiveOsModule.DSP_RACK -> DspRackModuleWindowBody(
+                                    activeProfile = activeProfile,
+                                    viewModel = viewModel
+                                )
+                                ActiveOsModule.SYMBOL_SHIELD -> SymbolShieldModuleWindowBody(
+                                    activeProfile = activeProfile,
+                                    previewChunks = previewChunks,
+                                    viewModel = viewModel
+                                )
+                                ActiveOsModule.CLONE_STUDIO -> CloneStudioModuleWindowBody(
+                                    forgeState = forgeState,
+                                    viewModel = viewModel,
+                                    onOpenCloneStudio = onOpenCloneStudio
+                                )
+                                ActiveOsModule.AUDIO_EXPORTER -> AudioExporterModuleWindowBody(
+                                    forgeState = forgeState,
+                                    activeProfile = activeProfile,
+                                    isPlayingPreview = isPlayingPreview,
+                                    viewModel = viewModel
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun OsDesktopAppTile(
+    module: ActiveOsModule,
+    statusNote: String,
+    onClick: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .background(
+                Brush.verticalGradient(
+                    colors = listOf(
+                        Color(0xFF141022),
+                        Color(0xFF090710)
+                    )
+                )
+            )
+            .border(1.2.dp, module.accent.copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = module.badge,
+                color = module.accent.copy(alpha = 0.85f),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 8.sp
+            )
+            Text(
+                text = "● RUN",
+                color = MikaColors.TerminalGreen,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 8.sp
+            )
+        }
+
+        MikaOsModuleIcon(
+            type = module.iconType,
+            accentColor = module.accent,
+            isOnline = true
+        )
+
+        Text(
+            text = module.title,
+            color = Color.White,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 11.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = statusNote,
+            color = module.accent,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Text(
+            text = module.subtitle,
+            color = MikaColors.DimText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 8.5.sp,
+            textAlign = TextAlign.Center,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            lineHeight = 12.sp
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun PurrEngineModuleWindowBody(
+    forgeState: PurrForgeState,
+    activeProfile: PurrProfile,
+    previewChunks: List<PurrChunk>,
+    viewModel: TtsForgeViewModel,
+    onOpenSaveDialog: () -> Unit
+) {
+    var expandPauses by remember { mutableStateOf(false) }
+    var expandRulebook by remember { mutableStateOf(false) }
+
+    var rulePattern by remember { mutableStateOf("") }
+    var ruleReplacement by remember { mutableStateOf("") }
+    var ruleIsRegex by remember { mutableStateOf(false) }
+    var ruleCategory by remember { mutableStateOf(RuleCategory.CUSTOM) }
+
+    // 1. Vibe Presets Picker
+    MikaGlowPanel(accent = MikaColors.NeonPink) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "> PICK_YOUR_VIBE_PRESET",
+                color = MikaColors.NeonPink,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 11.sp
+            )
+            MikaTagPill(
+                label = "+ SAVE CUSTOM",
+                selected = true,
+                activeColor = MikaColors.NeonCyan,
+                onClick = onOpenSaveDialog
+            )
+        }
+        Text(
+            text = "// One tap configures slang, pauses, acting & audio polish for your style.",
+            color = MikaColors.DimText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.5.sp,
+            modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
+        )
+
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            forgeState.profiles.forEach { preset ->
+                val isActive = preset.id == activeProfile.id
+                val accent = if (preset.id == "gachaswipe_default") MikaColors.NeonCyan else MikaColors.NeonPink
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(4.dp))
-                        .background(MikaColors.DeepWellBg)
-                        .border(1.dp, MikaColors.TerminalGreen.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
-                        .padding(horizontal = 10.dp, vertical = 7.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "${rule.pattern} -> ${rule.replacement}",
-                        color = if (rule.enabled) MikaColors.CyanWhite else MikaColors.DimText,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 11.sp,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MikaTagPill(
-                            label = if (rule.enabled) "ON" else "OFF",
-                            selected = rule.enabled,
-                            activeColor = MikaColors.TerminalGreen,
-                            onClick = { viewModel.togglePhoneticRule(rule.id) }
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isActive) accent.copy(alpha = 0.14f) else MikaColors.DeepWellBg)
+                        .border(
+                            width = if (isActive) 1.5.dp else 1.dp,
+                            color = if (isActive) accent else Color.White.copy(alpha = 0.14f),
+                            shape = RoundedCornerShape(6.dp)
                         )
+                        .clickable { viewModel.selectProfile(preset.id) }
+                        .padding(10.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "${if (isActive) "✓ " else ""}${preset.name}",
+                            color = if (isActive) Color.White else MikaColors.WarmCream,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp
+                        )
+                        Text(
+                            text = preset.badgeTag,
+                            color = accent,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 9.sp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(3.dp))
+                                .background(accent.copy(alpha = 0.14f))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(3.dp))
+                    Text(
+                        text = preset.summary,
+                        color = MikaColors.CyanWhite.copy(alpha = 0.72f),
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp
+                    )
+                }
+            }
+        }
+    }
+
+    // 2. Core PURR Text & Acting Toggles
+    MikaGlowPanel(accent = MikaColors.TerminalGreen) {
+        Text(
+            text = "> CORE_PURR_TEXT_CONTROLS",
+            color = MikaColors.TerminalGreen,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 11.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        SimplePurrToggle(
+            title = "💬 Slang, Honorifics & Stutters",
+            subtitle = "Expands 'omg', 'fr', '-senpai', 'nya~' & 'w-what' cleanly.",
+            checked = activeProfile.enableSlangAndHonorifics,
+            accent = MikaColors.TerminalGreen,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSlangAndHonorifics = v) } }
+        )
+        SimplePurrToggle(
+            title = "⏸️ MIKASTOP Natural Breath Pauses",
+            subtitle = "Splits '...', '—', and commas into clean silence gaps.",
+            checked = activeProfile.enableMikaStopPauses,
+            accent = MikaColors.MikaAmber,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableMikaStopPauses = v) } }
+        )
+        SimplePurrToggle(
+            title = "🎭 Emotion & Archetype Acting",
+            subtitle = "Adapts speech speed & pitch to sentence emotion.",
+            checked = activeProfile.sentimentConfig.enabled,
+            accent = MikaColors.NeonPink,
+            onToggle = { v ->
+                viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(enabled = v)) }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+        CyberDropdown(
+            label = "> ARCHETYPE_TONE_OVERRIDE",
+            options = ArchetypeTone.entries,
+            selectedOption = activeProfile.sentimentConfig.toneOverride,
+            optionLabel = { it.label },
+            onSelect = { tone ->
+                viewModel.updateActiveProfile { p -> p.copy(sentimentConfig = p.sentimentConfig.copy(toneOverride = tone)) }
+            },
+            accent = MikaColors.NeonPink
+        )
+    }
+
+    // 3. MIKASTOP Timings + Acting Intensity + Live Chunk Preview
+    ExpandableTerminalSection(
+        title = "ADVANCED: MIKASTOP TIMINGS, DRAMA & LIVE CHUNKS",
+        subtitle = "Pause ms sliders, stutter/vowel curves & real-time chunk preview",
+        expanded = expandPauses,
+        onToggle = { expandPauses = !expandPauses },
+        accent = MikaColors.MikaAmber
+    ) {
+        TerminalSlider(
+            label = "ELLIPSIS (...)",
+            valueText = "${activeProfile.mikaStopConfig.ellipsisPauseMs} ms",
+            value = activeProfile.mikaStopConfig.ellipsisPauseMs.toFloat(),
+            valueRange = 100f..1200f,
+            accent = MikaColors.MikaAmber,
+            onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(ellipsisPauseMs = v.roundToInt()) } }
+        )
+        TerminalSlider(
+            label = "EM_DASH (— / ~)",
+            valueText = "${activeProfile.mikaStopConfig.emDashPauseMs} ms",
+            value = activeProfile.mikaStopConfig.emDashPauseMs.toFloat(),
+            valueRange = 80f..900f,
+            accent = MikaColors.MikaAmber,
+            onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(emDashPauseMs = v.roundToInt()) } }
+        )
+        TerminalSlider(
+            label = "SENTENCE (. ! ?)",
+            valueText = "${activeProfile.mikaStopConfig.sentencePauseMs} ms",
+            value = activeProfile.mikaStopConfig.sentencePauseMs.toFloat(),
+            valueRange = 80f..900f,
+            accent = MikaColors.MikaAmber,
+            onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(sentencePauseMs = v.roundToInt()) } }
+        )
+        TerminalSlider(
+            label = "COMMA_BREATH (, ; :)",
+            valueText = "${activeProfile.mikaStopConfig.commaPauseMs} ms",
+            value = activeProfile.mikaStopConfig.commaPauseMs.toFloat(),
+            valueRange = 40f..450f,
+            accent = MikaColors.MikaAmber,
+            onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(commaPauseMs = v.roundToInt()) } }
+        )
+        TerminalSlider(
+            label = "STUTTER_DRAMA_INTENSITY",
+            valueText = "${(activeProfile.sentimentConfig.stutterIntensity * 100).roundToInt()}%",
+            value = activeProfile.sentimentConfig.stutterIntensity,
+            valueRange = 0f..0.45f,
+            accent = MikaColors.NeonPink,
+            onValueChange = { v -> viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(stutterIntensity = v)) } }
+        )
+        TerminalSlider(
+            label = "VOWEL_STRETCH_INTENSITY",
+            valueText = "${(activeProfile.sentimentConfig.vowelStretchIntensity * 100).roundToInt()}%",
+            value = activeProfile.sentimentConfig.vowelStretchIntensity,
+            valueRange = 0f..0.45f,
+            accent = MikaColors.NeonPink,
+            onValueChange = { v -> viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(vowelStretchIntensity = v)) } }
+        )
+
+        ChunkPreviewBox(previewChunks = previewChunks)
+    }
+
+    // 4. Phonetic & Slang Rulebook
+    ExpandableTerminalSection(
+        title = "ADVANCED: PHONETIC & SLANG RULEBOOK",
+        subtitle = "${PurrTextProcessor.SLANG_DICTIONARY.size} built-in GachaSwipe rules + ${forgeState.customPhoneticRules.size} custom",
+        expanded = expandRulebook,
+        onToggle = { expandRulebook = !expandRulebook },
+        accent = MikaColors.TerminalGreen
+    ) {
+        Text(
+            text = "> BUILT-IN GACHA-SWIPE RULES (ALWAYS ACTIVE WHEN SLANG IS ON)",
+            color = MikaColors.TerminalGreen,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp
+        )
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.DeepWellBg)
+                .border(1.dp, MikaColors.TerminalGreen.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp)
+        ) {
+            PurrTextProcessor.HONORIFIC_RULES_PREVIEW.forEach { (k, v) ->
+                Text("$k  ->  $v", color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp)
+            }
+            Text(
+                text = "Slang sample: " + PurrTextProcessor.SLANG_DICTIONARY.entries.take(8).joinToString(", ") { "${it.key}->${it.value}" } + " (+${PurrTextProcessor.SLANG_DICTIONARY.size - 8} more)",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp
+            )
+        }
+
+        Text(
+            text = "> ADD CUSTOM PHONETIC OVERRIDE",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.sp
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = rulePattern,
+                onValueChange = { rulePattern = it },
+                label = { Text("WORD / REGEX", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+                singleLine = true,
+                textStyle = TextStyle(color = MikaColors.TerminalGreen, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MikaColors.TerminalGreen,
+                    unfocusedBorderColor = MikaColors.TerminalGreen.copy(alpha = 0.35f),
+                    focusedContainerColor = MikaColors.DeepWellBg,
+                    unfocusedContainerColor = MikaColors.DeepWellBg
+                ),
+                modifier = Modifier.weight(1f)
+            )
+            OutlinedTextField(
+                value = ruleReplacement,
+                onValueChange = { ruleReplacement = it },
+                label = { Text("SPEAK AS", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+                singleLine = true,
+                textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MikaColors.NeonCyan,
+                    unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),
+                    focusedContainerColor = MikaColors.DeepWellBg,
+                    unfocusedContainerColor = MikaColors.DeepWellBg
+                ),
+                modifier = Modifier.weight(1f)
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                MikaTagPill(
+                    label = if (ruleIsRegex) "REGEX:ON" else "REGEX:OFF",
+                    selected = ruleIsRegex,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = { ruleIsRegex = !ruleIsRegex }
+                )
+                MikaTagPill(
+                    label = ruleCategory.label,
+                    selected = true,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = {
+                        val entries = RuleCategory.entries
+                        ruleCategory = entries[(entries.indexOf(ruleCategory) + 1) % entries.size]
+                    }
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MikaColors.TerminalGreen.copy(alpha = 0.16f))
+                    .border(1.dp, MikaColors.TerminalGreen, RoundedCornerShape(4.dp))
+                    .clickable {
+                        viewModel.addPhoneticRule(rulePattern, ruleReplacement, ruleIsRegex, ruleCategory)
+                        rulePattern = ""
+                        ruleReplacement = ""
+                    }
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Text(
+                    text = "+ ADD_RULE",
+                    color = MikaColors.TerminalGreen,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.sp
+                )
+            }
+        }
+
+        forgeState.customPhoneticRules.forEach { rule ->
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(MikaColors.DeepWellBg)
+                    .border(1.dp, MikaColors.TerminalGreen.copy(alpha = 0.25f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 10.dp, vertical = 7.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "${rule.pattern} -> ${rule.replacement}",
+                    color = if (rule.enabled) MikaColors.CyanWhite else MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 11.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    MikaTagPill(
+                        label = if (rule.enabled) "ON" else "OFF",
+                        selected = rule.enabled,
+                        activeColor = MikaColors.TerminalGreen,
+                        onClick = { viewModel.togglePhoneticRule(rule.id) }
+                    )
+                    MikaTagPill(
+                        label = "DEL",
+                        selected = true,
+                        activeColor = MikaColors.DangerRed,
+                        onClick = { viewModel.deletePhoneticRule(rule.id) }
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun DspRackModuleWindowBody(
+    activeProfile: PurrProfile,
+    viewModel: TtsForgeViewModel
+) {
+    MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        Text(
+            text = "> 24KHZ STUDIO AUDIO POLISH & TAPER",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 11.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        SimplePurrToggle(
+            title = "🎧 Studio Audio Polish (24kHz DSP)",
+            subtitle = "GachaSwipe 80Hz sub-cut, chest warmth, 8.5kHz de-esser & glue compressor.",
+            checked = activeProfile.enableDsp,
+            accent = MikaColors.NeonCyan,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableDsp = v) } }
+        )
+        SimplePurrToggle(
+            title = "🌊 Sentence Tail Taper (GachaSwipe 120ms Fade)",
+            subtitle = "Smoothly tapers off the voice at the end of every sentence and gates tail clicks.",
+            checked = activeProfile.dspConfig.enableSentenceTaper,
+            accent = MikaColors.NeonPurple,
+            onToggle = { v ->
+                viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(enableSentenceTaper = v)) }
+            }
+        )
+    }
+
+    MikaGlowPanel(accent = MikaColors.NeonPurple) {
+        Text(
+            text = "> GACHASWIPE_VOICE_EFFECTS (10 PRESETS)",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 10.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            AcousticEffectPreset.entries.forEach { preset ->
+                MikaTagPill(
+                    label = preset.label,
+                    selected = activeProfile.dspConfig.effectPreset == preset,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = {
+                        viewModel.updateActiveProfile { p -> p.copy(dspConfig = p.dspConfig.copy(effectPreset = preset)) }
+                    }
+                )
+            }
+        }
+        if (activeProfile.dspConfig.effectPreset.summary.isNotBlank()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "// ${activeProfile.dspConfig.effectPreset.summary}",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.5.sp
+            )
+        }
+    }
+
+    MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        Text(
+            text = "> PARAMETRIC EQ & ENVELOPE RACK",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        TerminalSlider(
+            label = "SENTENCE_TAIL_TAPER_MS",
+            valueText = "${activeProfile.dspConfig.sentenceTaperMs} ms",
+            value = activeProfile.dspConfig.sentenceTaperMs.toFloat(),
+            valueRange = 40f..260f,
+            accent = MikaColors.NeonPurple,
+            onValueChange = { v ->
+                viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(sentenceTaperMs = v.roundToInt())) }
+            }
+        )
+        val warmthDb = activeProfile.dspConfig.warmthEqDb
+        val warmthText = "${if (warmthDb >= 0f) "+" else ""}${"%.1f".format(warmthDb)} dB"
+        TerminalSlider(
+            label = "CHEST_WARMTH_250HZ_EQ",
+            valueText = warmthText,
+            value = warmthDb,
+            valueRange = -4f..8f,
+            accent = MikaColors.NeonCyan,
+            onValueChange = { v -> viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(warmthEqDb = v)) } }
+        )
+        val deEssDb = activeProfile.dspConfig.presenceEqDb
+        val deEssText = "${if (deEssDb >= 0f) "+" else ""}${"%.1f".format(deEssDb)} dB"
+        TerminalSlider(
+            label = "DE_ESSER_8_5KHZ_SHELF",
+            valueText = deEssText,
+            value = deEssDb,
+            valueRange = -12f..4f,
+            accent = MikaColors.NeonCyan,
+            onValueChange = { v -> viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(presenceEqDb = v)) } }
+        )
+        TerminalSlider(
+            label = "ROOM_REVERB_WET",
+            valueText = "${(activeProfile.dspConfig.reverbWetMix * 100).roundToInt()}%",
+            value = activeProfile.dspConfig.reverbWetMix,
+            valueRange = 0f..0.45f,
+            accent = MikaColors.NeonCyan,
+            onValueChange = { v -> viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(reverbWetMix = v)) } }
+        )
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun SymbolShieldModuleWindowBody(
+    activeProfile: PurrProfile,
+    previewChunks: List<PurrChunk>,
+    viewModel: TtsForgeViewModel
+) {
+    MikaGlowPanel(accent = MikaColors.TerminalGreen) {
+        SimplePurrToggle(
+            title = "🛡️ Symbol & Punctuation Shield",
+            subtitle = "Intercept quotes, commas & audiobook symbols in MIKA so TTS models never hallucinate.",
+            checked = activeProfile.enableSymbolShield,
+            accent = MikaColors.TerminalGreen,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSymbolShield = v) } }
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "> COMMA & CLAUSE INTERPRETATION",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Bold,
+            fontSize = 9.5.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            CommaHandlingMode.entries.forEach { mode ->
+                MikaTagPill(
+                    label = mode.label,
+                    selected = activeProfile.symbolShieldConfig.commaHandling == mode,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = {
+                        viewModel.updateActiveProfile { p ->
+                            p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(commaHandling = mode))
+                        }
+                    }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "// ${activeProfile.symbolShieldConfig.commaHandling.description}",
+            color = MikaColors.DimText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        TerminalSlider(
+            label = "MIN_WORDS_BEFORE_COMMA_PAUSE",
+            valueText = "${activeProfile.mikaStopConfig.minWordsForCommaPause} words",
+            value = activeProfile.mikaStopConfig.minWordsForCommaPause.toFloat(),
+            valueRange = 1f..8f,
+            accent = MikaColors.MikaAmber,
+            onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(minWordsForCommaPause = v.roundToInt()) } }
+        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("SLICE_AT_COMMAS", color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 10.sp)
+            Switch(
+                checked = activeProfile.mikaStopConfig.sliceAtCommas,
+                onCheckedChange = { c -> viewModel.updateMikaStopConfig { it.copy(sliceAtCommas = c) } },
+                colors = SwitchDefaults.colors(checkedThumbColor = MikaColors.VoidBg, checkedTrackColor = MikaColors.MikaAmber)
+            )
+        }
+    }
+
+    MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        Text(
+            text = "> LOOSE_SENTENCE_CHUNK_SIZE (AUDIOBOOK FLOW)",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                0 to "PER-SENTENCE (0)",
+                140 to "SHORT (~140c)",
+                220 to "AUDIOBOOK (~220c)",
+                350 to "LONG (~350c)"
+            ).forEach { (chars, label) ->
+                val isPicked = if (chars == 0) {
+                    activeProfile.mikaStopConfig.targetChunkChars < 40
+                } else {
+                    activeProfile.mikaStopConfig.targetChunkChars == chars
+                }
+                MikaTagPill(
+                    label = label,
+                    selected = isPicked,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = { viewModel.updateMikaStopConfig { it.copy(targetChunkChars = chars) } }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        TerminalSlider(
+            label = "TARGET_CHUNK_LENGTH",
+            valueText = if (activeProfile.mikaStopConfig.targetChunkChars < 40) {
+                "PER-SENTENCE"
+            } else {
+                "~${activeProfile.mikaStopConfig.targetChunkChars} chars"
+            },
+            value = activeProfile.mikaStopConfig.targetChunkChars.toFloat(),
+            valueRange = 0f..450f,
+            accent = MikaColors.NeonCyan,
+            onValueChange = { v ->
+                val rounded = if (v < 40f) 0 else ((v.roundToInt() / 10) * 10)
+                viewModel.updateMikaStopConfig { it.copy(targetChunkChars = rounded) }
+            }
+        )
+        Text(
+            text = "// Groups complete sentences together up to this target. Never cuts off mid-sentence!",
+            color = MikaColors.DimText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp
+        )
+    }
+
+    MikaGlowPanel(accent = MikaColors.TerminalGreen) {
+        SimplePurrToggle(
+            title = "Strip Quotes (\" “ ” ‘ ’)",
+            subtitle = "Keep contractions like don't / I'm while removing dialogue quote marks.",
+            checked = activeProfile.symbolShieldConfig.stripQuotationMarks,
+            accent = MikaColors.TerminalGreen,
+            onToggle = { v ->
+                viewModel.updateActiveProfile { p -> p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(stripQuotationMarks = v)) }
+            }
+        )
+        SimplePurrToggle(
+            title = "Strip Brackets & Markdown (* _ # [ ] ( ))",
+            subtitle = "Prevent neural voices from stuttering or humming on formatting symbols.",
+            checked = activeProfile.symbolShieldConfig.stripBracketsAndMarkdown,
+            accent = MikaColors.TerminalGreen,
+            onToggle = { v ->
+                viewModel.updateActiveProfile { p -> p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(stripBracketsAndMarkdown = v)) }
+            }
+        )
+        SimplePurrToggle(
+            title = "Speak Symbols (& % + = @)",
+            subtitle = "Convert common symbols into spoken English words cleanly.",
+            checked = activeProfile.symbolShieldConfig.expandCommonSymbols,
+            accent = MikaColors.TerminalGreen,
+            onToggle = { v ->
+                viewModel.updateActiveProfile { p -> p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(expandCommonSymbols = v)) }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = activeProfile.symbolShieldConfig.customSkippedChars,
+            onValueChange = { updated ->
+                viewModel.updateActiveProfile { p ->
+                    p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(customSkippedChars = updated))
+                }
+            },
+            label = { Text("SKIPPED CHARACTERS & SYMBOLS", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+            singleLine = true,
+            textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MikaColors.TerminalGreen,
+                unfocusedBorderColor = MikaColors.TerminalGreen.copy(alpha = 0.35f),
+                focusedContainerColor = MikaColors.DeepWellBg,
+                unfocusedContainerColor = MikaColors.DeepWellBg
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        MikaTagPill(
+            label = "↺ RESET DEFAULT SYMBOLS",
+            selected = true,
+            activeColor = MikaColors.MikaAmber,
+            onClick = {
+                viewModel.updateActiveProfile { p ->
+                    p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(customSkippedChars = SymbolShieldConfig().customSkippedChars))
+                }
+            }
+        )
+
+        Spacer(modifier = Modifier.height(10.dp))
+        ChunkPreviewBox(previewChunks = previewChunks)
+    }
+}
+
+@Composable
+private fun CloneStudioModuleWindowBody(
+    forgeState: PurrForgeState,
+    viewModel: TtsForgeViewModel,
+    onOpenCloneStudio: () -> Unit
+) {
+    MikaGlowPanel(accent = MikaColors.NeonPurple) {
+        Text(
+            text = "> 5-SECOND ZERO-SHOT VOICE CLONER",
+            color = MikaColors.NeonPurple,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 11.sp
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Record a 5-second voice sample via your microphone to clone any voice timbre offline using ROM-06 (Pocket TTS) or ROM-07 (ZipVoice).",
+            color = MikaColors.CyanWhite.copy(alpha = 0.78f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            lineHeight = 14.sp
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.NeonPurple.copy(alpha = 0.22f))
+                .border(1.5.dp, MikaColors.NeonPurple, RoundedCornerShape(6.dp))
+                .clickable(onClick = onOpenCloneStudio)
+                .padding(vertical = 11.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = "🧬 LAUNCH 5S VOICE RECORDER & CLONE WORKSHOP",
+                color = MikaColors.WarmCream,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp
+            )
+        }
+    }
+
+    MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        Text(
+            text = "> REGISTERED_CLONED_VOICES (${forgeState.clonedVoices.size})",
+            color = MikaColors.NeonCyan,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        if (forgeState.clonedVoices.isEmpty()) {
+            Text(
+                text = "// No cloned voices yet. Launch the recorder above after slotting ROM-06 or ROM-07.",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.5.sp
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                forgeState.clonedVoices.forEach { clone ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MikaColors.DeepWellBg)
+                            .border(1.dp, MikaColors.NeonPurple.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = clone.displayName,
+                                color = Color.White,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 11.sp
+                            )
+                            Text(
+                                text = "${clone.family.label} • ${clone.tags.take(3).joinToString(", ")}",
+                                color = MikaColors.NeonPurple,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp
+                            )
+                        }
                         MikaTagPill(
                             label = "DEL",
                             selected = true,
                             activeColor = MikaColors.DangerRed,
-                            onClick = { viewModel.deletePhoneticRule(rule.id) }
+                            onClick = { viewModel.removeClonedVoice(clone.id) }
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun AudioExporterModuleWindowBody(
+    forgeState: PurrForgeState,
+    activeProfile: PurrProfile,
+    isPlayingPreview: Boolean,
+    viewModel: TtsForgeViewModel
+) {
+    val isExporting by viewModel.isExportingAudio.collectAsState()
+    val exportProgress by viewModel.exportProgressFraction.collectAsState()
+    val exportStatus by viewModel.exportStatusLabel.collectAsState()
+
+    var exportTitle by remember { mutableStateOf("PURR_Audiobook_Track") }
+    var exportBody by remember {
+        mutableStateOf(
+            "Chapter One.\n\nThe midnight rain pattered gently against the brass windowpane as Elara adjusted her headphones. \"Did you verify the neural bridge, MIKA?\" she whispered, leaning closer to the glowing emerald console.\n\nAcross the room, the terminal hummed softly in response... Ready for long-form storytelling."
+        )
+    }
+    var targetChunkChars by remember { mutableIntStateOf(240) }
+    var paragraphPauseMs by remember { mutableIntStateOf(550) }
+    var normalizeLoudness by remember { mutableStateOf(true) }
+    var smoothTransitions by remember { mutableStateOf(true) }
+
+    val purrActive = "tool_purr_engine" in forgeState.slottedCartridges
+    val dspActive = "tool_dsp_rack" in forgeState.slottedCartridges
+    val estWords = remember(exportBody) {
+        exportBody.trim().split(Regex("\\s+")).count { it.isNotEmpty() }
+    }
+    val estChunks = remember(exportBody, targetChunkChars) {
+        if (exportBody.isBlank()) 0
+        else ((exportBody.length / targetChunkChars.coerceAtLeast(80)) + 1).coerceAtLeast(1)
+    }
+
+    MikaGlowPanel(accent = MikaColors.SsrGold) {
+        Text(
+            text = "> AUDIO_MEDIA_EXPORTER // TEXT_TO_WAV",
+            color = MikaColors.SsrGold,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 11.sp
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "Render short voice messages or multi-page audiobook chapters directly into mastered 24kHz .WAV media files saved to Downloads/PURR-TTS/.",
+            color = MikaColors.CyanWhite.copy(alpha = 0.78f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.5.sp,
+            lineHeight = 13.5.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            MikaTagPill(
+                label = if (purrActive) "P.U.R.R.: ACTIVE" else "P.U.R.R.: OFF",
+                selected = purrActive,
+                activeColor = MikaColors.NeonPink,
+                onClick = {}
+            )
+            MikaTagPill(
+                label = if (dspActive && activeProfile.enableDsp) "DSP: ACTIVE" else "DSP: OFF",
+                selected = dspActive && activeProfile.enableDsp,
+                activeColor = MikaColors.NeonCyan,
+                onClick = {}
+            )
+            MikaTagPill(
+                label = "VOICE: ${activeProfile.primaryVoiceId.substringAfter(':').take(16)}",
+                selected = true,
+                activeColor = MikaColors.TerminalGreen,
+                onClick = {}
+            )
+        }
+    }
+
+    MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        OutlinedTextField(
+            value = exportTitle,
+            onValueChange = { exportTitle = it },
+            label = { Text("EXPORT_FILENAME_TITLE", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+            singleLine = true,
+            textStyle = TextStyle(color = MikaColors.SsrGold, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MikaColors.SsrGold,
+                unfocusedBorderColor = MikaColors.SsrGold.copy(alpha = 0.35f),
+                focusedContainerColor = MikaColors.DeepWellBg,
+                unfocusedContainerColor = MikaColors.DeepWellBg
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            MikaTagPill(
+                label = "LOAD MESSAGE",
+                selected = false,
+                activeColor = MikaColors.NeonCyan,
+                onClick = {
+                    exportTitle = "MIKA_Voice_Note"
+                    exportBody = "Hey! Wait up... *catches breath* \"Are we seriously testing neural audio export right now?\" omg fr nya~"
+                }
+            )
+            MikaTagPill(
+                label = "LOAD BOOK PAGE",
+                selected = false,
+                activeColor = MikaColors.SsrGold,
+                onClick = {
+                    exportTitle = "Chapter_01_Harbor"
+                    exportBody = "Chapter One.\n\nThe evening wind blew softly across the quiet harbor as lanterns flickered along the wet cobblestone pier. Captain Elara adjusted her brass compass and watched the horizon ahead.\n\n\"Tomorrow the real journey begins,\" she murmured under her breath. Below deck, the engines settled into a low, steady rhythm."
+                }
+            )
+            MikaTagPill(
+                label = "CLEAR TEXT",
+                selected = false,
+                activeColor = MikaColors.DangerRed,
+                onClick = { exportBody = "" }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = exportBody,
+            onValueChange = { exportBody = it },
+            label = { Text("SHORT MESSAGE OR AUDIOBOOK PAGES", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
+            minLines = 5,
+            maxLines = 10,
+            textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MikaColors.NeonCyan,
+                unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),
+                focusedContainerColor = MikaColors.DeepWellBg,
+                unfocusedContainerColor = MikaColors.DeepWellBg
+            ),
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = "CHARS: ${exportBody.length} • WORDS: $estWords • EST_CHUNKS: ~$estChunks",
+            color = MikaColors.DimText,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp
+        )
+    }
+
+    MikaGlowPanel(accent = MikaColors.TerminalGreen) {
+        Text(
+            text = "> CHUNKING & SEAMLESS POST-PROCESSING BLEND",
+            color = MikaColors.TerminalGreen,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            listOf(
+                160 to "SHORT (~160c)",
+                240 to "BOOK (~240c)",
+                360 to "LONG (~360c)"
+            ).forEach { (chars, label) ->
+                MikaTagPill(
+                    label = label,
+                    selected = targetChunkChars == chars,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = { targetChunkChars = chars }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        TerminalSlider(
+            label = "PARAGRAPH_GAP_MS",
+            valueText = "$paragraphPauseMs ms",
+            value = paragraphPauseMs.toFloat(),
+            valueRange = 200f..1200f,
+            accent = MikaColors.MikaAmber,
+            onValueChange = { v -> paragraphPauseMs = (v.roundToInt() / 50) * 50 }
+        )
+        SimplePurrToggle(
+            title = "🔗 Cosine Crossfade & Boundary De-Click",
+            subtitle = "18ms raised-cosine overlap blending & DC offset removal across chunks.",
+            checked = smoothTransitions,
+            accent = MikaColors.TerminalGreen,
+            onToggle = { smoothTransitions = it }
+        )
+        SimplePurrToggle(
+            title = "🎚️ Auto-Level Sentence Loudness (-18 dBFS RMS)",
+            subtitle = "Matches loudness evenly between sentences & paragraphs + soft master limiter.",
+            checked = normalizeLoudness,
+            accent = MikaColors.NeonCyan,
+            onToggle = { normalizeLoudness = it }
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        if (isExporting) {
+            LinearProgressIndicator(
+                progress = { exportProgress },
+                color = MikaColors.SsrGold,
+                trackColor = MikaColors.SsrGold.copy(alpha = 0.18f),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(4.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = exportStatus,
+                    color = MikaColors.SsrGold,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.5.sp,
+                    modifier = Modifier.weight(1f)
+                )
+                MikaTagPill(
+                    label = "✕ CANCEL",
+                    selected = true,
+                    activeColor = MikaColors.DangerRed,
+                    onClick = { viewModel.cancelAudioExport() }
+                )
+            }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MikaColors.SsrGold.copy(alpha = 0.22f))
+                    .border(1.5.dp, MikaColors.SsrGold, RoundedCornerShape(6.dp))
+                    .clickable {
+                        viewModel.renderAndExportMediaFile(
+                            title = exportTitle,
+                            rawText = exportBody,
+                            targetChunkChars = targetChunkChars,
+                            paragraphPauseMs = paragraphPauseMs,
+                            normalizeLoudness = normalizeLoudness,
+                            smoothTransitions = smoothTransitions
+                        )
+                    }
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "⬇ RENDER & DOWNLOAD .WAV MEDIA FILE",
+                    color = MikaColors.SsrGold,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.5.sp,
+                    letterSpacing = 0.6.sp
+                )
+            }
+        }
+    }
+
+    MikaGlowPanel(accent = MikaColors.SsrGold) {
+        Text(
+            text = "> EXPORTED_MEDIA_FILES (${forgeState.exportedAudioFiles.size})",
+            color = MikaColors.SsrGold,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 10.sp
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        if (forgeState.exportedAudioFiles.isEmpty()) {
+            Text(
+                text = "// No rendered .WAV files yet. Enter text above and tap RENDER & DOWNLOAD.",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.5.sp
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                forgeState.exportedAudioFiles.forEach { entry ->
+                    val sizeKb = (entry.sizeBytes / 1024L).coerceAtLeast(1L)
+                    val sizeText = if (sizeKb >= 1024L) "${"%.2f".format(sizeKb / 1024f)} MB" else "$sizeKb KB"
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MikaColors.DeepWellBg)
+                            .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.38f), RoundedCornerShape(6.dp))
+                            .padding(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = entry.fileName,
+                                    color = Color.White,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = "${"%.1f".format(entry.durationSec)}s • $sizeText • ${entry.chunkCount} chunks • ${entry.voiceLabel}",
+                                    color = MikaColors.SsrGold,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 8.5.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                if (entry.publicDownloadPath.isNotBlank()) {
+                                    Text(
+                                        text = "✓ ${entry.publicDownloadPath}",
+                                        color = MikaColors.TerminalGreen,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 8.5.sp
+                                    )
+                                }
+                            }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            MikaTagPill(
+                                label = if (isPlayingPreview) "■ STOP" else "▶ PLAY",
+                                selected = true,
+                                activeColor = MikaColors.TerminalGreen,
+                                onClick = {
+                                    if (isPlayingPreview) viewModel.stopAudition()
+                                    else viewModel.playExportedAudioFile(entry)
+                                }
+                            )
+                            MikaTagPill(
+                                label = "⬇ SAVE TO DOWNLOADS",
+                                selected = true,
+                                activeColor = MikaColors.NeonCyan,
+                                onClick = { viewModel.saveExportedFileToDownloads(entry) }
+                            )
+                            MikaTagPill(
+                                label = "DEL",
+                                selected = true,
+                                activeColor = MikaColors.DangerRed,
+                                onClick = { viewModel.deleteExportedAudioFile(entry) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChunkPreviewBox(previewChunks: List<PurrChunk>) {
+    Text(
+        text = "> LIVE_CHUNK_PREVIEW (${previewChunks.size} CHUNKS)",
+        color = MikaColors.NeonCyan,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Bold,
+        fontSize = 9.sp
+    )
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(MikaColors.DeepWellBg)
+            .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.25f), RoundedCornerShape(6.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        previewChunks.take(8).forEachIndexed { idx, chunk ->
+            when (chunk) {
+                is PurrChunk.Silence -> Text(
+                    text = "#$idx [MIKASTOP] +${chunk.durationMs}ms (${chunk.reason})",
+                    color = MikaColors.MikaAmber,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp
+                )
+                is PurrChunk.Speech -> Text(
+                    text = "#$idx [${chunk.role.name}|r=${"%.2f".format(chunk.speakingRate)}] ${chunk.text}",
+                    color = MikaColors.CyanWhite,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.sp
+                )
             }
         }
     }

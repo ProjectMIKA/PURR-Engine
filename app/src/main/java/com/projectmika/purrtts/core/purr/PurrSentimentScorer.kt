@@ -172,15 +172,15 @@ object PurrSentimentScorer {
                 (sentiment.sadness * curve.sadnessPitchDelta) +
                 (sentiment.flustered * curve.flusteredPitchDelta)
 
-            // GachaSwipe archetype overrides
+            // Subtle GachaSwipe archetype overrides
             when (curve.toneOverride) {
                 ArchetypeTone.YANDERE_ANGER, ArchetypeTone.YANDERE_LOVE -> {
                     rate = min(rate, 0.94f)
-                    pitch -= 0.04f
+                    pitch -= 0.02f
                 }
                 ArchetypeTone.DOMINANT_LOVE -> {
                     rate = min(rate, 0.95f)
-                    pitch -= 0.05f
+                    pitch -= 0.025f
                 }
                 ArchetypeTone.ROBOT -> {
                     rate = 0.98f
@@ -188,7 +188,7 @@ object PurrSentimentScorer {
                 }
                 ArchetypeTone.KUUDERE, ArchetypeTone.KUUDERE_ANGER -> {
                     rate = 0.97f
-                    pitch -= 0.02f
+                    pitch -= 0.01f
                 }
                 else -> Unit
             }
@@ -203,7 +203,7 @@ object PurrSentimentScorer {
 
         return ProsodyModulation(
             speakingRate = rate.coerceIn(0.65f, 1.50f),
-            pitch = pitch.coerceIn(0.75f, 1.35f),
+            pitch = pitch.coerceIn(0.88f, 1.12f),
             volumeGain = volume.coerceIn(0.30f, 1.25f)
         )
     }

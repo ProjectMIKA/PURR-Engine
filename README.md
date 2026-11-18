@@ -61,7 +61,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.2.0 // Stylized Voice Dropdown, Ejectable System Cartridge & NPU Models)
+### 🌟 Latest Updates (v1.3.0 // KittenTTS, 6 Piper Voice Packs, Cyberdeck OS Modules & Audio Media Exporter)
+
+* **New Tool — `AUDIO_MEDIA_EXPORTER` (`TOOL-05`, Default ON):** Render short messages or multi-page audiobook chapters into mastered 24kHz `.WAV` files exported directly to `Downloads/PURR-TTS/`, featuring paragraph-aware loose chunking, 18ms raised-cosine crossfade blending, DC removal, and RMS loudness leveling (with full P.U.R.R. & DSP integration when enabled).
+* **KittenTTS Nano + 6 Expandable Piper Voice Packs:** Added `ROM-03: KITTEN_TTS_NANO` (30MB, 8 expressive English voices) plus 6 downloadable Piper VITS expansion sub-cartridges (`Amy US`, `Ryan US`, `Cori GB`, `Alba GB`, `GLaDOS AI`, `Kristin US`) under `ROM-05`, and nested Hexagon NPU (`SUB-02A`) / Adreno GPU (`SUB-02B`) accelerator chips under `ROM-02`.
+* **Bottom Cyberdeck HUD (`VOICE | MODULES | CARTRIDGE BAY`):** Moved main navigation to a bottom HUD bar, kept `VOICE` focused purely on engine/voice/pacing/pitch/testing, turned `MODULES` into an animated Cyberdeck OS icon & window launcher for all 5 default-ON Tool Cartridges, and split `CARTRIDGE BAY` into **`TTS`** (`7` engines) and **`TOOLS`** (`5` built-in ejectable OS modules).
+* **GachaSwipe DSP & Audiobook Polish:** Added GachaSwipe's 120ms sentence tail taper, all 10 character voice effects, cubic-Hermite `0.88x..1.12x` pitch shifting, the Symbol & Punctuation Shield, and loose sentence-boundary chunk coalescing.
+
+### 📦 Prior Releases (v1.2.0 // Stylized Voice Dropdown, Ejectable System Cartridge & NPU Models)
 
 * **Stylized Cyberdeck Voice Dropdown (`MikaVoiceDropdownSelector`):** Replaced the long scrolling card list in **`> VOICE & ENGINE`** with a compact searchable/filterable voice dropdown tray supporting instant `▶ TEST` auditioning for both single-voice and dual Narrator/`"Dialogue"` modes.
 * **Ejectable System Voices Cartridge (`ROM-01: ANDROID_OS_SPEECH`):** Device OS speech now lives in Bay `ROM-01` of the **8-Bay Cartridge Rack** and can be ejected anytime to completely disable built-in Android voices across the UI, `PurrTtsService`, and fallback paths.

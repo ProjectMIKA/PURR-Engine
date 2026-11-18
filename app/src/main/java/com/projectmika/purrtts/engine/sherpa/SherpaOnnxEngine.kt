@@ -5,6 +5,7 @@ import android.util.Log
 import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsPocketModelConfig
@@ -41,10 +42,11 @@ import kotlinx.coroutines.withContext
  * ✨ MIKA'S SHERPA-ONNX MULTI-ENGINE & ZERO-SHOT VOICE CLONING RUNTIME ✨
  *
  * Directly backed by the bundled `sherpa-onnx` JNI AAR (`com.k2fsa.sherpa.onnx.OfflineTts`)
- * supporting all 5 offline cartridge architectures:
+ * supporting all 6 offline cartridge architectures:
  * - Kokoro-82M INT8 (54 voices)
+ * - KittenTTS Nano v0.8 INT8 (8 voices, 30MB)
  * - Supertonic 3 INT8
- * - Piper VITS
+ * - Piper VITS (Multi-voice Collection)
  * - Pocket TTS (5-second zero-shot cloning)
  * - ZipVoice (flow-matching zero-shot cloning)
  */
@@ -68,7 +70,7 @@ class SherpaOnnxEngine(
     private val mutex = Mutex()
     private var idleJob: Job? = null
     private var activeOfflineTts: OfflineTts? = null
-    private var activeFamily: SherpaModelFamily? = null
+    private var activeMountKey: String? = null
 
     val modelsBaseDir: File by lazy {
         File(context.filesDir, "models/sherpa").apply { mkdirs() }
@@ -77,14 +79,19 @@ class SherpaOnnxEngine(
     override val isModelReady: Boolean
         get() = modelsBaseDir.listFiles()?.any { it.isDirectory && it.listFiles()?.isNotEmpty() == true } == true
 
-    fun isFamilyInstalled(family: SherpaModelFamily): Boolean {
-        val dir = familyDir(family)
+    fun isFamilyInstalled(family: SherpaModelFamily, subCartridgeId: String? = null): Boolean {
+        val dir = familyDir(family, subCartridgeId)
         return dir.walkTopDown().any { it.extension.equals("onnx", ignoreCase = true) }
     }
 
     override suspend fun warmup(profile: PurrProfile) {
         mutex.withLock {
-            ensureFamilyLoadedLocked(profile.sherpaFamily)
+            val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
+            val voiceDesc = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
+            ensureFamilyLoadedLocked(
+                family = voiceDesc?.sherpaFamily ?: profile.sherpaFamily,
+                subCartridgeId = voiceDesc?.requiredSubCartridgeId
+            )
         }
         resetIdleTimer()
     }
@@ -108,23 +115,29 @@ class SherpaOnnxEngine(
             )
         }
 
-        val targetFamily = inferFamilyFromVoice(voiceId, profile.sherpaFamily)
+        val cleanVoiceId = voiceId.substringAfter(':')
+        val voiceDesc = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
+        val targetFamily = voiceDesc?.sherpaFamily ?: inferFamilyFromVoice(voiceId, profile.sherpaFamily)
+        val subCartridgeId = voiceDesc?.requiredSubCartridgeId
+
         mutex.withLock {
-            ensureFamilyLoadedLocked(targetFamily)
+            ensureFamilyLoadedLocked(targetFamily, subCartridgeId)
             val tts = activeOfflineTts
             if (tts == null) {
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "${targetFamily.label} cartridge not installed",
+                    engineSummary = "${voiceDesc?.displayName ?: targetFamily.label} cartridge not installed",
                     isFallbackNeuralPreview = true
                 )
             }
 
+            val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
+            val compensatedSpeed = (speakingRate / clampedPitch).coerceIn(0.6f, 1.8f)
             val speakerId = resolveSpeakerId(voiceId, targetFamily)
             val generated = runCatching {
-                tts.generate(text = text, sid = speakerId, speed = speakingRate.coerceIn(0.6f, 1.8f))
+                tts.generate(text = text, sid = speakerId, speed = compensatedSpeed)
             }.getOrNull()
 
             if (generated == null || generated.samples.isEmpty()) {
@@ -144,10 +157,10 @@ class SherpaOnnxEngine(
                 toRate = SAMPLE_RATE_HZ
             )
             SynthesisOutcome(
-                pcmFloat24k = applyPitchShift(resampled, pitch),
+                pcmFloat24k = PurrDspProcessor.shiftPitchCubic(resampled, clampedPitch),
                 sampleRateHz = SAMPLE_RATE_HZ,
                 hardwareBadge = HardwareStatusBadge.CPU_NEON,
-                engineSummary = "sherpa-onnx • ${targetFamily.label} (${generated.sampleRate}Hz -> 24kHz)"
+                engineSummary = "sherpa-onnx • ${voiceDesc?.displayName ?: targetFamily.label} (${generated.sampleRate}Hz -> 24kHz)"
             )
         }
     }
@@ -173,18 +186,20 @@ class SherpaOnnxEngine(
                 )
             }
 
+            val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
+            val compensatedSpeed = (speakingRate / clampedPitch).coerceIn(0.6f, 1.8f)
             val refSamples = loadWavMonoFloat24k(File(clonedVoice.referenceWavPath))
             val generated = runCatching {
                 if (refSamples.isNotEmpty()) {
                     val genCfg = GenerationConfig(
-                        speed = speakingRate.coerceIn(0.6f, 1.8f),
+                        speed = compensatedSpeed,
                         referenceAudio = refSamples,
                         referenceSampleRate = SAMPLE_RATE_HZ,
                         referenceText = clonedVoice.referenceTranscript
                     )
                     tts.generateWithConfig(text, genCfg)
                 } else {
-                    tts.generate(text = text, sid = 0, speed = speakingRate.coerceIn(0.6f, 1.8f))
+                    tts.generate(text = text, sid = 0, speed = compensatedSpeed)
                 }
             }.getOrNull()
 
@@ -205,7 +220,7 @@ class SherpaOnnxEngine(
                 toRate = SAMPLE_RATE_HZ
             )
             SynthesisOutcome(
-                pcmFloat24k = applyPitchShift(resampled, pitch),
+                pcmFloat24k = PurrDspProcessor.shiftPitchCubic(resampled, clampedPitch),
                 sampleRateHz = SAMPLE_RATE_HZ,
                 hardwareBadge = HardwareStatusBadge.CPU_NEON,
                 engineSummary = "${clonedVoice.family.label} Cloned • ${clonedVoice.displayName}"
@@ -217,27 +232,33 @@ class SherpaOnnxEngine(
         mutex.withLock {
             runCatching { activeOfflineTts?.release() }
             activeOfflineTts = null
-            activeFamily = null
+            activeMountKey = null
             _statusFlow.value = HardwareStatusBadge.IDLE
             Log.i(TAG, "[ONNX_EVICT] Released sherpa-onnx OfflineTts native memory.")
         }
     }
 
-    fun familyDir(family: SherpaModelFamily): File = when (family) {
+    fun familyDir(family: SherpaModelFamily, subCartridgeId: String? = null): File = when (family) {
         SherpaModelFamily.KOKORO -> File(modelsBaseDir, "kokoro")
+        SherpaModelFamily.KITTEN_TTS -> File(modelsBaseDir, "kitten")
         SherpaModelFamily.SUPERTONIC_3 -> File(modelsBaseDir, "supertonic3")
         SherpaModelFamily.POCKET_TTS -> File(modelsBaseDir, "pocket_tts")
         SherpaModelFamily.ZIPVOICE -> File(modelsBaseDir, "zipvoice")
-        SherpaModelFamily.PIPER -> File(modelsBaseDir, "piper")
+        SherpaModelFamily.PIPER -> if (subCartridgeId != null) {
+            File(modelsBaseDir, "piper_$subCartridgeId")
+        } else {
+            File(modelsBaseDir, "piper")
+        }
     }.apply { mkdirs() }
 
-    private fun ensureFamilyLoadedLocked(family: SherpaModelFamily) {
-        if (activeOfflineTts != null && activeFamily == family) return
+    private fun ensureFamilyLoadedLocked(family: SherpaModelFamily, subCartridgeId: String? = null) {
+        val mountKey = subCartridgeId ?: family.name
+        if (activeOfflineTts != null && activeMountKey == mountKey) return
         runCatching { activeOfflineTts?.release() }
         activeOfflineTts = null
-        activeFamily = family
+        activeMountKey = mountKey
 
-        val dir = familyDir(family)
+        val dir = familyDir(family, subCartridgeId)
         val files = dir.walkTopDown().filter { it.isFile }.toList()
         if (files.none { it.extension.equals("onnx", ignoreCase = true) }) return
 
@@ -257,6 +278,23 @@ class SherpaOnnxEngine(
                         voices = voices,
                         tokens = tokensPath,
                         dataDir = dataDir,
+                        lexicon = lexicons
+                    ),
+                    numThreads = 4,
+                    provider = "cpu"
+                )
+            }
+            SherpaModelFamily.KITTEN_TTS -> {
+                val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
+                val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
+                if (onnx.isEmpty() || voices.isEmpty()) return
+                OfflineTtsModelConfig(
+                    kitten = OfflineTtsKittenModelConfig(
+                        model = onnx,
+                        voices = voices,
+                        tokens = tokensPath,
+                        dataDir = dataDir,
+                        lengthScale = 1.0f,
                         lexicon = lexicons
                     ),
                     numThreads = 4,
@@ -355,6 +393,8 @@ class SherpaOnnxEngine(
 
     private fun resolveSpeakerId(voiceId: String, family: SherpaModelFamily): Int {
         val cleanVoiceId = voiceId.substringAfter(':')
+        val descriptor = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
+        if (descriptor != null) return descriptor.speakerIndex
         if (family == SherpaModelFamily.KOKORO) {
             return PurrDefaultPresets.kokoroVoices("rom_kokoro_sherpa", BackendType.SHERPA_ONNX)
                 .firstOrNull { it.id == cleanVoiceId }?.speakerIndex ?: 0
@@ -403,26 +443,13 @@ class SherpaOnnxEngine(
         val cleanId = voiceId.substringAfter(':')
         return when {
             cleanId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) -> SherpaModelFamily.KOKORO
+            cleanId.contains("kitten", ignoreCase = true) -> SherpaModelFamily.KITTEN_TTS
             cleanId.contains("supertonic", ignoreCase = true) -> SherpaModelFamily.SUPERTONIC_3
             cleanId.contains("pocket", ignoreCase = true) -> SherpaModelFamily.POCKET_TTS
             cleanId.contains("zipvoice", ignoreCase = true) -> SherpaModelFamily.ZIPVOICE
             cleanId.contains("piper", ignoreCase = true) -> SherpaModelFamily.PIPER
             else -> defaultFamily
         }
-    }
-
-    private fun applyPitchShift(samples: FloatArray, pitch: Float): FloatArray {
-        if (pitch in 0.985f..1.015f || samples.isEmpty()) return samples
-        val targetLen = (samples.size / pitch).toInt().coerceAtLeast(1)
-        val out = FloatArray(targetLen)
-        for (i in 0 until targetLen) {
-            val pos = i * pitch
-            val i0 = pos.toInt().coerceIn(0, samples.lastIndex)
-            val i1 = (i0 + 1).coerceAtMost(samples.lastIndex)
-            val frac = pos - i0
-            out[i] = samples[i0] + (samples[i1] - samples[i0]) * frac
-        }
-        return out
     }
 
     private fun resetIdleTimer() {

@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +29,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.ModelBundleState
@@ -37,43 +39,107 @@ import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 
 /**
- * ✨ TAB 3: RETRO CYBERDECK ROM CARTRIDGE BAY (MODEL CATALOG) ✨
+ * ✨ TAB 3: RETRO CYBERDECK CARTRIDGE BAY (TTS MODULES & TOOL MODULES) ✨
  * Mirrors GachaSwipe's `> EXPANSION_BAY // ROM_CARTRIDGES` design:
- * - ${modelCatalog.size}-Bay Cyberdeck Motherboard Pin Rack Visualizer
- * - Physical Molded ROM Cartridge Cards (`ROM-01`..`ROM-08`)
- * - Eject/Slam ROM-01 (System OS Voices) or Download -> Slam Offline NPU/GPU/Sherpa ROMs
+ * - Dual Category Switcher (`TTS MODULES` vs `TOOLS`)
+ * - Interactive Cyberdeck Motherboard Pin Rack Visualizer
+ * - Physical Molded Cartridges with nested Expansion Sub-Cartridges (`SUB-02A/B` & `SUB-05A..F`)
  */
 @Composable
 fun ModelCatalogTab(
     forgeState: PurrForgeState,
     modelCatalog: List<ModelBundleSpec>,
     vramRemainingSec: Int,
+    selectedCategory: CartridgeCategory,
+    onSelectCategory: (CartridgeCategory) -> Unit,
     viewModel: TtsForgeViewModel,
     onJumpToVoiceSelector: (String) -> Unit,
-    onOpenCloneStudio: () -> Unit
+    onOpenCloneStudio: () -> Unit,
+    onOpenModulesTab: () -> Unit
 ) {
-    val slottedCount = modelCatalog.count { it.id in forgeState.slottedCartridges }
-    val busLoadPct = if (modelCatalog.isNotEmpty()) (slottedCount * 100) / modelCatalog.size else 0
+    val mainCatalog = remember(modelCatalog) { modelCatalog.filter { !it.isSubCartridge } }
+    val ttsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TTS } }
+    val toolsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TOOLS } }
+    val visibleCatalog = remember(ttsCatalog, toolsCatalog, selectedCategory) {
+        if (selectedCategory == CartridgeCategory.TTS) ttsCatalog else toolsCatalog
+    }
+    val subCartridgesByParent = remember(modelCatalog) {
+        modelCatalog.filter { it.isSubCartridge && !it.parentCartridgeId.isNullOrBlank() }
+            .groupBy { it.parentCartridgeId!! }
+    }
+    val slottedCount = visibleCatalog.count { it.id in forgeState.slottedCartridges }
+    val busLoadPct = if (visibleCatalog.isNotEmpty()) (slottedCount * 100) / visibleCatalog.size else 0
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-        // 1. Cyberdeck 8-Bay Motherboard Pin Rack Visualizer
-        MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        // 0. Dual Category Switcher: TTS vs TOOLS
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            val isTts = selectedCategory == CartridgeCategory.TTS
+            val isTools = selectedCategory == CartridgeCategory.TOOLS
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isTts) MikaColors.TerminalGreen.copy(alpha = 0.16f) else MikaColors.PanelBg)
+                    .border(1.5.dp, if (isTts) MikaColors.TerminalGreen else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                    .clickable { onSelectCategory(CartridgeCategory.TTS) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "🎤 TTS (${ttsCatalog.size})",
+                    color = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.sp,
+                    letterSpacing = 0.6.sp
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isTools) MikaColors.NeonPink.copy(alpha = 0.16f) else MikaColors.PanelBg)
+                    .border(1.5.dp, if (isTools) MikaColors.NeonPink else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                    .clickable { onSelectCategory(CartridgeCategory.TOOLS) }
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "🛠️ TOOLS (${toolsCatalog.size})",
+                    color = if (isTools) MikaColors.NeonPink else MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.sp,
+                    letterSpacing = 0.6.sp
+                )
+            }
+        }
+
+        // 1. Cyberdeck Motherboard Pin Rack Visualizer
+        MikaGlowPanel(accent = if (selectedCategory == CartridgeCategory.TTS) MikaColors.NeonCyan else MikaColors.NeonPink) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "🔌 MOTHERBOARD_BUS // ${modelCatalog.size}-BAY RACK",
-                    color = MikaColors.NeonCyan,
+                    text = if (selectedCategory == CartridgeCategory.TTS) {
+                        "🔌 TTS_BUS // ${visibleCatalog.size}-BAY RACK"
+                    } else {
+                        "🛠️ TOOL_BUS // ${visibleCatalog.size}-MODULE RACK"
+                    },
+                    color = if (selectedCategory == CartridgeCategory.TTS) MikaColors.NeonCyan else MikaColors.NeonPink,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
                     fontSize = 10.sp,
                     letterSpacing = 0.8.sp
                 )
                 Text(
-                    text = "[ $slottedCount / ${modelCatalog.size} SLOTTED • $busLoadPct% ]",
+                    text = "[ $slottedCount / ${visibleCatalog.size} SLOTTED • $busLoadPct% ]",
                     color = if (slottedCount > 0) MikaColors.TerminalGreen else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -83,7 +149,7 @@ fun ModelCatalogTab(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // 6 Interactive Mini Bay Slots (01..06)
+            // Interactive Mini Bay Slots
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -93,8 +159,11 @@ fun ModelCatalogTab(
                     .padding(horizontal = 6.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                modelCatalog.forEachIndexed { idx, spec ->
-                    val isInstalled = spec.isBuiltInOsCartridge || forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED
+                visibleCatalog.forEachIndexed { idx, spec ->
+                    val childSubs = subCartridgesByParent[spec.id].orEmpty()
+                    val isInstalled = spec.isBuiltInOsCartridge ||
+                        forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED ||
+                        (spec.id == "rom_piper" && childSubs.any { forgeState.modelStates[it.id]?.state == DownloadState.INSTALLED })
                     val isSlotted = spec.id in forgeState.slottedCartridges
                     val accent = Color(spec.accentHex)
 
@@ -131,7 +200,7 @@ fun ModelCatalogTab(
                                 .background(if (isSlotted) accent else Color.White.copy(alpha = 0.15f))
                         )
                         Text(
-                            text = "0${idx + 1}",
+                            text = if (selectedCategory == CartridgeCategory.TTS) "0${idx + 1}" else "T${idx + 1}",
                             color = if (isSlotted) Color.White else Color.White.copy(alpha = 0.35f),
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
@@ -149,7 +218,11 @@ fun ModelCatalogTab(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "// ROM-01 (Device OS Speech) is pre-installed and ejectable to disable system voices. Download & slam ROM-02..ROM-08 for Hexagon NPU / Adreno GPU FP16, Kokoro-82M, Supertonic 3, Piper, & Voice Cloning!",
+                text = if (selectedCategory == CartridgeCategory.TTS) {
+                    "// Download & slam TTS engines (Kokoro 54v, KittenTTS 30MB, Piper Collection, Supertonic, Pocket, ZipVoice). ROM-02 & ROM-05 accept expansion chips!"
+                } else {
+                    "// Slam or eject built-in OS Tool Modules. Ejecting P.U.R.R. ENGINE or DSP RACK removes its icon from the Modules tab and turns off its pipeline!"
+                },
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 9.5.sp,
@@ -185,13 +258,17 @@ fun ModelCatalogTab(
             }
         }
 
-        // 2. Physical Molded ROM Cartridge Cards
-        modelCatalog.forEach { spec ->
+        // 2. Physical Molded Cartridge Cards for Active Category
+        visibleCatalog.forEach { spec ->
             val bundleState = forgeState.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)
-            val isInstalled = spec.isBuiltInOsCartridge || bundleState.state == DownloadState.INSTALLED
+            val childSubs = subCartridgesByParent[spec.id].orEmpty()
+            val isInstalled = spec.isBuiltInOsCartridge ||
+                bundleState.state == DownloadState.INSTALLED ||
+                (spec.id == "rom_piper" && childSubs.any { forgeState.modelStates[it.id]?.state == DownloadState.INSTALLED })
             val isSlotted = isInstalled && spec.id in forgeState.slottedCartridges
+            val isToolCartridge = spec.category == CartridgeCategory.TOOLS
             val accent = Color(spec.accentHex)
-            val sizeLabel = if (spec.isBuiltInOsCartridge) "BUILT-IN" else "${spec.approximateSizeMb}MB"
+            val sizeLabel = if (isToolCartridge) "OS_MODULE" else if (spec.isBuiltInOsCartridge) "BUILT-IN" else "${spec.approximateSizeMb}MB"
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -237,7 +314,7 @@ fun ModelCatalogTab(
                             Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.12f)))
                         }
                         Text(
-                            text = "M.I.K.A.-ROM",
+                            text = if (isToolCartridge) "M.I.K.A.-OS" else "M.I.K.A.-ROM",
                             color = if (isSlotted) accent else Color.White.copy(alpha = 0.3f),
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
@@ -350,6 +427,27 @@ fun ModelCatalogTab(
                                 lineHeight = 13.sp
                             )
 
+                            if (spec.unlocksSummary.isNotBlank()) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 4.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(accent.copy(alpha = 0.10f))
+                                        .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                                ) {
+                                    Text(
+                                        text = "✓ ${spec.unlocksSummary}",
+                                        color = if (isSlotted) Color.White else accent,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 9.5.sp,
+                                        lineHeight = 13.sp
+                                    )
+                                }
+                            }
+
                             if (bundleState.state == DownloadState.DOWNLOADING ||
                                 bundleState.state == DownloadState.VERIFYING ||
                                 bundleState.state == DownloadState.EXTRACTING
@@ -441,7 +539,11 @@ fun ModelCatalogTab(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = if (spec.isBuiltInOsCartridge) "▲ EJECT CARTRIDGE (DISABLE OS)" else "▲ EJECT CARTRIDGE",
+                                        text = when {
+                                            isToolCartridge -> "▲ EJECT MODULE (TURN OFF)"
+                                            spec.isBuiltInOsCartridge -> "▲ EJECT CARTRIDGE (DISABLE OS)"
+                                            else -> "▲ EJECT CARTRIDGE"
+                                        },
                                         color = MikaColors.DangerRed,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Black,
@@ -453,11 +555,19 @@ fun ModelCatalogTab(
                                         .clip(RoundedCornerShape(5.dp))
                                         .background(accent.copy(alpha = 0.18f))
                                         .border(1.dp, accent, RoundedCornerShape(5.dp))
-                                        .clickable { onJumpToVoiceSelector(spec.id) }
+                                        .clickable {
+                                            if (isToolCartridge) onOpenModulesTab() else onJumpToVoiceSelector(spec.id)
+                                        }
                                         .padding(horizontal = 12.dp, vertical = 9.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("⚙ VOICES ▸", color = accent, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                                    Text(
+                                        text = if (isToolCartridge) "⚙ MODULE ▸" else "⚙ VOICES ▸",
+                                        color = accent,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp
+                                    )
                                 }
                             }
                             else -> {
@@ -472,14 +582,18 @@ fun ModelCatalogTab(
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = if (spec.isBuiltInOsCartridge) "▼ SLAM CARTRIDGE IN (ENABLE OS VOICES)" else "▼ SLAM CARTRIDGE IN",
+                                        text = when {
+                                            isToolCartridge -> "▼ SLAM MODULE IN (ENABLE)"
+                                            spec.isBuiltInOsCartridge -> "▼ SLAM CARTRIDGE IN (ENABLE OS VOICES)"
+                                            else -> "▼ SLAM CARTRIDGE IN"
+                                        },
                                         color = accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Black,
                                         fontSize = 10.sp
                                     )
                                 }
-                                if (!spec.isBuiltInOsCartridge) {
+                                if (!spec.isBuiltInOsCartridge && !isToolCartridge) {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(5.dp))
@@ -492,6 +606,74 @@ fun ModelCatalogTab(
                                         Text("DEL", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp)
                                     }
                                 }
+                            }
+                        }
+                    }
+
+                    if (childSubs.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(Color(0xFF07050E))
+                                .border(1.dp, accent.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
+                                .padding(10.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            val subHeaderText = if (spec.id == "rom_piper") {
+                                "🧩 EXPANSION VOICE PACKS (${childSubs.size} EXTRA PIPER VOICES FOR ${spec.romCode})"
+                            } else {
+                                "🧩 EXPANSION SUB-CARTRIDGES (OPTIONAL NPU & GPU FOR ${spec.romCode})"
+                            }
+                            Text(
+                                text = subHeaderText,
+                                color = accent,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 9.5.sp,
+                                letterSpacing = 0.5.sp
+                            )
+                            if (spec.id == "rom_piper") {
+                                Text(
+                                    text = if (isInstalled) {
+                                        "// ${spec.romCode} Piper Bay is ready! Download any additional Piper voices below:"
+                                    } else {
+                                        "💡 Pick Lessac US Base above OR download any individual Piper voice pack below — each works standalone!"
+                                    },
+                                    color = if (isInstalled) MikaColors.DimText else MikaColors.NeonCyan,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 9.sp,
+                                    lineHeight = 13.sp
+                                )
+                            } else if (!isInstalled) {
+                                Text(
+                                    text = "⚠ Step 1 Required: Download & slam ${spec.romCode} (${spec.approximateSizeMb}MB Base) above first so these accelerators have Kokoro's 54 voices to drive.",
+                                    color = MikaColors.MikaAmber,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 9.sp,
+                                    lineHeight = 13.sp
+                                )
+                            } else {
+                                Text(
+                                    text = "// ${spec.romCode} Base is ready! Optionally add hardware accelerator sub-chips below:",
+                                    color = MikaColors.DimText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 9.sp
+                                )
+                            }
+
+                            childSubs.forEach { subSpec ->
+                                val subState = forgeState.modelStates[subSpec.id] ?: ModelBundleState(specId = subSpec.id)
+                                val subInstalled = subState.state == DownloadState.INSTALLED
+                                val subEnabled = subInstalled && subSpec.id in forgeState.enabledSubCartridges
+                                SubCartridgeCard(
+                                    subSpec = subSpec,
+                                    subState = subState,
+                                    isInstalled = subInstalled,
+                                    isEnabled = subEnabled,
+                                    viewModel = viewModel
+                                )
                             }
                         }
                     }
@@ -529,18 +711,213 @@ fun ModelCatalogTab(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = if (isSlotted) "● BUS_LOCKED // VOICES ONLINE" else if (isInstalled) "○ READY TO SLAM" else "○ BAY EMPTY",
+                        text = when {
+                            isToolCartridge && isSlotted -> "● MODULE ONLINE // ACTIVE"
+                            isToolCartridge -> "○ MODULE EJECTED // BYPASSED"
+                            isSlotted -> "● BUS_LOCKED // VOICES ONLINE"
+                            isInstalled -> "○ READY TO SLAM"
+                            else -> "○ BAY EMPTY"
+                        },
                         color = if (isSlotted) MikaColors.TerminalGreen else if (isInstalled) MikaColors.MikaAmber else MikaColors.DimText,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
                         fontSize = 8.5.sp
                     )
                     Text(
-                        text = if (spec.isBuiltInOsCartridge) "${spec.romCode} // OS BINDER" else "SHA-256: ${spec.expectedSha256.take(10)}...",
+                        text = when {
+                            isToolCartridge -> "${spec.romCode} // TOOL MODULE"
+                            spec.isBuiltInOsCartridge -> "${spec.romCode} // OS BINDER"
+                            else -> "SHA-256: ${spec.expectedSha256.take(10)}..."
+                        },
                         color = MikaColors.DimText,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 8.5.sp
                     )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubCartridgeCard(
+    subSpec: ModelBundleSpec,
+    subState: ModelBundleState,
+    isInstalled: Boolean,
+    isEnabled: Boolean,
+    viewModel: TtsForgeViewModel
+) {
+    val subAccent = Color(subSpec.accentHex)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(if (isEnabled) subAccent.copy(alpha = 0.10f) else Color(0xFF0C0916))
+            .border(
+                width = if (isEnabled) 1.5.dp else 1.dp,
+                color = if (isEnabled) subAccent else Color.White.copy(alpha = 0.16f),
+                shape = RoundedCornerShape(6.dp)
+            )
+            .padding(9.dp),
+        verticalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "${subSpec.romCode} // ${subSpec.badge} • ${subSpec.approximateSizeMb}MB",
+                color = subAccent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.sp
+            )
+            Text(
+                text = when {
+                    isEnabled -> "[⚡ ACTIVE]"
+                    isInstalled -> "[INSTALLED • OFF]"
+                    else -> "[OPTIONAL ADD-ON]"
+                },
+                color = when {
+                    isEnabled -> MikaColors.TerminalGreen
+                    isInstalled -> MikaColors.MikaAmber
+                    else -> MikaColors.DimText
+                },
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 8.5.sp
+            )
+        }
+
+        Text(
+            text = subSpec.name,
+            color = Color.White,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 11.sp
+        )
+        Text(
+            text = subSpec.subtitle,
+            color = MikaColors.CyanWhite.copy(alpha = 0.72f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 9.sp
+        )
+        if (subSpec.unlocksSummary.isNotBlank()) {
+            Text(
+                text = "⚡ ${subSpec.unlocksSummary}",
+                color = subAccent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+                lineHeight = 13.sp
+            )
+        }
+
+        if (subState.state == DownloadState.DOWNLOADING ||
+            subState.state == DownloadState.VERIFYING ||
+            subState.state == DownloadState.EXTRACTING
+        ) {
+            LinearProgressIndicator(
+                progress = { subState.progressFraction },
+                color = subAccent,
+                trackColor = subAccent.copy(alpha = 0.18f),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                text = when (subState.state) {
+                    DownloadState.VERIFYING -> "VERIFYING SHA-256 CHECKSUM..."
+                    DownloadState.EXTRACTING -> "UNPACKING .TAR.BZ2 ARCHIVE..."
+                    else -> "DOWNLOADING ${(subState.progressFraction * 100).toInt()}% (${subState.downloadedBytes / (1024 * 1024)} / ${subSpec.approximateSizeMb} MB)"
+                },
+                color = subAccent,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.5.sp
+            )
+        }
+
+        if (!subState.errorMessage.isNullOrBlank()) {
+            Text(
+                text = "! ${subState.errorMessage}",
+                color = MikaColors.DangerRed,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.5.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val packNoun = if (subSpec.parentCartridgeId == "rom_piper") "VOICE PACK" else "SUB-CHIP"
+            when {
+                subState.state == DownloadState.DOWNLOADING -> {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MikaColors.MikaAmber.copy(alpha = 0.16f))
+                            .border(1.dp, MikaColors.MikaAmber, RoundedCornerShape(4.dp))
+                            .clickable { viewModel.pauseModelDownload(subSpec.id) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("⏸ PAUSE", color = MikaColors.MikaAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 9.sp)
+                    }
+                }
+                !isInstalled -> {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(subAccent.copy(alpha = 0.16f))
+                            .border(1.dp, subAccent, RoundedCornerShape(4.dp))
+                            .clickable { viewModel.startModelDownload(subSpec) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (subState.downloadedBytes > 0L) "⬇ RESUME $packNoun (${subSpec.approximateSizeMb}MB)" else "⬇ DOWNLOAD $packNoun (${subSpec.approximateSizeMb}MB)",
+                            color = subAccent,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 9.sp
+                        )
+                    }
+                }
+                else -> {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (isEnabled) MikaColors.TerminalGreen.copy(alpha = 0.18f) else subAccent.copy(alpha = 0.16f))
+                            .border(1.dp, if (isEnabled) MikaColors.TerminalGreen else subAccent, RoundedCornerShape(4.dp))
+                            .clickable { viewModel.toggleSubCartridgeEnabled(subSpec, !isEnabled) }
+                            .padding(vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (isEnabled) "⚡ ${packNoun} ACTIVE (TAP TO DISABLE)" else "○ ENABLE $packNoun",
+                            color = if (isEnabled) MikaColors.TerminalGreen else subAccent,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 9.sp
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MikaColors.DangerRed.copy(alpha = 0.10f))
+                            .border(1.dp, MikaColors.DangerRed.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                            .clickable { viewModel.deleteModelBundle(subSpec) }
+                            .padding(horizontal = 9.dp, vertical = 7.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text("DEL", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 9.sp)
+                    }
                 }
             }
         }

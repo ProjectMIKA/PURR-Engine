@@ -202,7 +202,9 @@ class PurrTtsService : TextToSpeechService() {
         val chunks = PurrTextProcessor.process(
             rawText = rawText,
             profile = profile,
-            customRules = repo.state.value.customPhoneticRules
+            customRules = repo.state.value.customPhoneticRules,
+            purrModuleActive = repo.isPurrEngineModuleActive(),
+            symbolShieldModuleActive = repo.isSymbolShieldModuleActive()
         )
 
         val useFloat32 = profile.dspConfig.useFloat32Callback
