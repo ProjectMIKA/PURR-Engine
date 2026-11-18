@@ -233,6 +233,342 @@ fun MikaGlowPanel(
 }
 
 /**
+ * Custom Cyberpunk Vector Icon Set rendered natively via Compose Canvas.
+ * Replaces system emojis & plain Unicode glyphs across PURR-TTS.
+ */
+enum class CyberIconType {
+    PLAY,
+    STOP,
+    PAUSE,
+    RECORD_DOT,
+    DOWNLOAD,
+    SLAM_IN,
+    EJECT,
+    REFRESH,
+    CHECK,
+    CLOSE,
+    CHEVRON_DOWN,
+    CHEVRON_UP,
+    CHEVRON_RIGHT,
+    MIC_WAVE,
+    WRENCH_TOOL,
+    BUS_PLUG,
+    DNA_CLONE,
+    CHIP_EXPANSION,
+    BOLT_ACCEL,
+    ALERT_TRIANGLE,
+    CHAT_SLANG,
+    DUAL_MASKS,
+    HEADPHONES_DSP,
+    WAVE_TAPER,
+    SHIELD_GUARD,
+    CROSSFADE_LINK,
+    SLIDER_FADER,
+    SPEED_GAUGE,
+    PITCH_TUNER,
+    BOOK_NARRATOR,
+    WINDOW_FRAME,
+    SCREW_BOSS,
+    STAR_BADGE
+}
+
+@Composable
+fun MikaCyberIcon(
+    type: CyberIconType,
+    tint: Color,
+    size: Dp = 14.dp,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(size)) {
+        val w = this.size.width
+        val h = this.size.height
+        val sw = (minOf(w, h) * 0.13f).coerceAtLeast(1.4.dp.toPx())
+        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        val thin = Stroke(width = (sw * 0.78f).coerceAtLeast(1.dp.toPx()), cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+        when (type) {
+            CyberIconType.PLAY -> {
+                val p = Path().apply {
+                    moveTo(w * 0.24f, h * 0.16f)
+                    lineTo(w * 0.84f, h * 0.50f)
+                    lineTo(w * 0.24f, h * 0.84f)
+                    close()
+                }
+                drawPath(p, color = tint)
+            }
+            CyberIconType.STOP -> {
+                drawRoundRect(
+                    color = tint,
+                    topLeft = Offset(w * 0.20f, h * 0.20f),
+                    size = Size(w * 0.60f, h * 0.60f),
+                    cornerRadius = CornerRadius(w * 0.08f)
+                )
+            }
+            CyberIconType.PAUSE -> {
+                drawRoundRect(tint, Offset(w * 0.22f, h * 0.18f), Size(w * 0.20f, h * 0.64f), CornerRadius(w * 0.06f))
+                drawRoundRect(tint, Offset(w * 0.58f, h * 0.18f), Size(w * 0.20f, h * 0.64f), CornerRadius(w * 0.06f))
+            }
+            CyberIconType.RECORD_DOT -> {
+                drawCircle(tint.copy(alpha = 0.35f), radius = w * 0.42f, center = Offset(w * 0.5f, h * 0.5f), style = thin)
+                drawCircle(tint, radius = w * 0.24f, center = Offset(w * 0.5f, h * 0.5f))
+            }
+            CyberIconType.DOWNLOAD -> {
+                drawLine(tint, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.50f, h * 0.64f), strokeWidth = sw, cap = StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.28f, h * 0.46f)
+                    lineTo(w * 0.50f, h * 0.68f)
+                    lineTo(w * 0.72f, h * 0.46f)
+                }
+                drawPath(head, color = tint, style = stroke)
+                val tray = Path().apply {
+                    moveTo(w * 0.18f, h * 0.72f)
+                    lineTo(w * 0.18f, h * 0.86f)
+                    lineTo(w * 0.82f, h * 0.86f)
+                    lineTo(w * 0.82f, h * 0.72f)
+                }
+                drawPath(tray, color = tint, style = stroke)
+            }
+            CyberIconType.SLAM_IN -> {
+                drawLine(tint, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.50f, h * 0.62f), strokeWidth = sw, cap = StrokeCap.Round)
+                val head = Path().apply {
+                    moveTo(w * 0.26f, h * 0.44f)
+                    lineTo(w * 0.50f, h * 0.68f)
+                    lineTo(w * 0.74f, h * 0.44f)
+                }
+                drawPath(head, color = tint, style = stroke)
+                drawLine(tint, Offset(w * 0.16f, h * 0.84f), Offset(w * 0.84f, h * 0.84f), strokeWidth = sw, cap = StrokeCap.Round)
+            }
+            CyberIconType.EJECT -> {
+                val tri = Path().apply {
+                    moveTo(w * 0.50f, h * 0.18f)
+                    lineTo(w * 0.82f, h * 0.58f)
+                    lineTo(w * 0.18f, h * 0.58f)
+                    close()
+                }
+                drawPath(tri, color = tint)
+                drawRoundRect(tint, Offset(w * 0.18f, h * 0.70f), Size(w * 0.64f, h * 0.14f), CornerRadius(w * 0.05f))
+            }
+            CyberIconType.REFRESH -> {
+                drawArc(
+                    color = tint,
+                    startAngle = -55f,
+                    sweepAngle = 275f,
+                    useCenter = false,
+                    topLeft = Offset(w * 0.16f, h * 0.16f),
+                    size = Size(w * 0.68f, h * 0.68f),
+                    style = stroke
+                )
+                val arrow = Path().apply {
+                    moveTo(w * 0.66f, h * 0.14f)
+                    lineTo(w * 0.86f, h * 0.26f)
+                    lineTo(w * 0.68f, h * 0.36f)
+                }
+                drawPath(arrow, color = tint, style = thin)
+            }
+            CyberIconType.CHECK -> {
+                val p = Path().apply {
+                    moveTo(w * 0.18f, h * 0.52f)
+                    lineTo(w * 0.42f, h * 0.76f)
+                    lineTo(w * 0.84f, h * 0.24f)
+                }
+                drawPath(p, color = tint, style = stroke)
+            }
+            CyberIconType.CLOSE -> {
+                drawLine(tint, Offset(w * 0.22f, h * 0.22f), Offset(w * 0.78f, h * 0.78f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.78f, h * 0.22f), Offset(w * 0.22f, h * 0.78f), strokeWidth = sw, cap = StrokeCap.Round)
+            }
+            CyberIconType.CHEVRON_DOWN -> {
+                val p = Path().apply {
+                    moveTo(w * 0.20f, h * 0.34f)
+                    lineTo(w * 0.50f, h * 0.66f)
+                    lineTo(w * 0.80f, h * 0.34f)
+                }
+                drawPath(p, color = tint, style = stroke)
+            }
+            CyberIconType.CHEVRON_UP -> {
+                val p = Path().apply {
+                    moveTo(w * 0.20f, h * 0.66f)
+                    lineTo(w * 0.50f, h * 0.34f)
+                    lineTo(w * 0.80f, h * 0.66f)
+                }
+                drawPath(p, color = tint, style = stroke)
+            }
+            CyberIconType.CHEVRON_RIGHT -> {
+                val p = Path().apply {
+                    moveTo(w * 0.34f, h * 0.20f)
+                    lineTo(w * 0.66f, h * 0.50f)
+                    lineTo(w * 0.34f, h * 0.80f)
+                }
+                drawPath(p, color = tint, style = stroke)
+            }
+            CyberIconType.MIC_WAVE -> {
+                drawRoundRect(tint, Offset(w * 0.36f, h * 0.12f), Size(w * 0.28f, h * 0.44f), CornerRadius(w * 0.14f), style = stroke)
+                drawArc(tint, 0f, 180f, false, Offset(w * 0.24f, h * 0.28f), Size(w * 0.52f, h * 0.40f), style = thin)
+                drawLine(tint, Offset(w * 0.50f, h * 0.68f), Offset(w * 0.50f, h * 0.86f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.34f, h * 0.86f), Offset(w * 0.66f, h * 0.86f), strokeWidth = sw, cap = StrokeCap.Round)
+            }
+            CyberIconType.WRENCH_TOOL -> {
+                drawArc(tint, 35f, 270f, false, Offset(w * 0.14f, h * 0.14f), Size(w * 0.44f, h * 0.44f), style = thin)
+                drawLine(tint, Offset(w * 0.44f, h * 0.44f), Offset(w * 0.84f, h * 0.84f), strokeWidth = sw * 1.2f, cap = StrokeCap.Round)
+            }
+            CyberIconType.BUS_PLUG -> {
+                drawRoundRect(tint, Offset(w * 0.24f, h * 0.32f), Size(w * 0.52f, h * 0.36f), CornerRadius(w * 0.08f), style = stroke)
+                drawLine(tint, Offset(w * 0.36f, h * 0.14f), Offset(w * 0.36f, h * 0.32f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.64f, h * 0.14f), Offset(w * 0.64f, h * 0.32f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.50f, h * 0.68f), Offset(w * 0.50f, h * 0.88f), strokeWidth = sw, cap = StrokeCap.Round)
+            }
+            CyberIconType.DNA_CLONE -> {
+                val p1 = Path()
+                val p2 = Path()
+                for (i in 0..8) {
+                    val t = i / 8f
+                    val y = h * 0.14f + t * h * 0.72f
+                    val x1 = w * 0.5f + sin(t * PI * 2.0).toFloat() * w * 0.26f
+                    val x2 = w * 0.5f - sin(t * PI * 2.0).toFloat() * w * 0.26f
+                    if (i == 0) {
+                        p1.moveTo(x1, y); p2.moveTo(x2, y)
+                    } else {
+                        p1.lineTo(x1, y); p2.lineTo(x2, y)
+                    }
+                    if (i % 2 == 1) {
+                        drawLine(tint.copy(alpha = 0.5f), Offset(x1, y), Offset(x2, y), strokeWidth = sw * 0.65f)
+                    }
+                }
+                drawPath(p1, color = tint, style = thin)
+                drawPath(p2, color = tint, style = thin)
+            }
+            CyberIconType.CHIP_EXPANSION -> {
+                drawRoundRect(tint, Offset(w * 0.22f, h * 0.22f), Size(w * 0.56f, h * 0.56f), CornerRadius(w * 0.08f), style = stroke)
+                drawLine(tint, Offset(w * 0.36f, h * 0.08f), Offset(w * 0.36f, h * 0.22f), strokeWidth = sw * 0.85f)
+                drawLine(tint, Offset(w * 0.64f, h * 0.08f), Offset(w * 0.64f, h * 0.22f), strokeWidth = sw * 0.85f)
+                drawLine(tint, Offset(w * 0.36f, h * 0.78f), Offset(w * 0.36f, h * 0.92f), strokeWidth = sw * 0.85f)
+                drawLine(tint, Offset(w * 0.64f, h * 0.78f), Offset(w * 0.64f, h * 0.92f), strokeWidth = sw * 0.85f)
+                drawCircle(tint, radius = w * 0.10f, center = Offset(w * 0.5f, h * 0.5f))
+            }
+            CyberIconType.BOLT_ACCEL, CyberIconType.SPEED_GAUGE -> {
+                val bolt = Path().apply {
+                    moveTo(w * 0.58f, h * 0.10f)
+                    lineTo(w * 0.26f, h * 0.54f)
+                    lineTo(w * 0.50f, h * 0.54f)
+                    lineTo(w * 0.42f, h * 0.90f)
+                    lineTo(w * 0.76f, h * 0.44f)
+                    lineTo(w * 0.52f, h * 0.44f)
+                    close()
+                }
+                drawPath(bolt, color = tint)
+            }
+            CyberIconType.ALERT_TRIANGLE -> {
+                val tri = Path().apply {
+                    moveTo(w * 0.50f, h * 0.14f)
+                    lineTo(w * 0.86f, h * 0.82f)
+                    lineTo(w * 0.14f, h * 0.82f)
+                    close()
+                }
+                drawPath(tri, color = tint, style = stroke)
+                drawLine(tint, Offset(w * 0.50f, h * 0.38f), Offset(w * 0.50f, h * 0.58f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawCircle(tint, radius = sw * 0.55f, center = Offset(w * 0.50f, h * 0.71f))
+            }
+            CyberIconType.CHAT_SLANG -> {
+                val box = Path().apply {
+                    moveTo(w * 0.14f, h * 0.18f)
+                    lineTo(w * 0.86f, h * 0.18f)
+                    lineTo(w * 0.86f, h * 0.68f)
+                    lineTo(w * 0.46f, h * 0.68f)
+                    lineTo(w * 0.24f, h * 0.84f)
+                    lineTo(w * 0.24f, h * 0.68f)
+                    lineTo(w * 0.14f, h * 0.68f)
+                    close()
+                }
+                drawPath(box, color = tint, style = thin)
+                drawCircle(tint, radius = sw * 0.55f, center = Offset(w * 0.34f, h * 0.43f))
+                drawCircle(tint, radius = sw * 0.55f, center = Offset(w * 0.50f, h * 0.43f))
+                drawCircle(tint, radius = sw * 0.55f, center = Offset(w * 0.66f, h * 0.43f))
+            }
+            CyberIconType.DUAL_MASKS -> {
+                drawCircle(tint, radius = w * 0.24f, center = Offset(w * 0.36f, h * 0.42f), style = thin)
+                drawCircle(tint, radius = w * 0.24f, center = Offset(w * 0.64f, h * 0.58f), style = thin)
+                drawCircle(tint, radius = w * 0.06f, center = Offset(w * 0.30f, h * 0.38f))
+                drawCircle(tint, radius = w * 0.06f, center = Offset(w * 0.70f, h * 0.54f))
+            }
+            CyberIconType.HEADPHONES_DSP -> {
+                drawArc(tint, 180f, 180f, false, Offset(w * 0.16f, h * 0.18f), Size(w * 0.68f, h * 0.68f), style = stroke)
+                drawRoundRect(tint, Offset(w * 0.14f, h * 0.50f), Size(w * 0.18f, h * 0.32f), CornerRadius(w * 0.06f))
+                drawRoundRect(tint, Offset(w * 0.68f, h * 0.50f), Size(w * 0.18f, h * 0.32f), CornerRadius(w * 0.06f))
+            }
+            CyberIconType.WAVE_TAPER -> {
+                val p = Path().apply {
+                    moveTo(w * 0.10f, h * 0.52f)
+                    lineTo(w * 0.26f, h * 0.20f)
+                    lineTo(w * 0.42f, h * 0.80f)
+                    lineTo(w * 0.58f, h * 0.34f)
+                    lineTo(w * 0.74f, h * 0.64f)
+                    lineTo(w * 0.90f, h * 0.52f)
+                }
+                drawPath(p, color = tint, style = stroke)
+            }
+            CyberIconType.SHIELD_GUARD -> {
+                val shield = Path().apply {
+                    moveTo(w * 0.50f, h * 0.12f)
+                    lineTo(w * 0.84f, h * 0.26f)
+                    lineTo(w * 0.80f, h * 0.62f)
+                    lineTo(w * 0.50f, h * 0.88f)
+                    lineTo(w * 0.20f, h * 0.62f)
+                    lineTo(w * 0.16f, h * 0.26f)
+                    close()
+                }
+                drawPath(shield, color = tint, style = stroke)
+            }
+            CyberIconType.CROSSFADE_LINK -> {
+                val p1 = Path().apply {
+                    moveTo(w * 0.14f, h * 0.74f)
+                    lineTo(w * 0.42f, h * 0.74f)
+                    lineTo(w * 0.60f, h * 0.26f)
+                    lineTo(w * 0.86f, h * 0.26f)
+                }
+                val p2 = Path().apply {
+                    moveTo(w * 0.14f, h * 0.26f)
+                    lineTo(w * 0.42f, h * 0.26f)
+                    lineTo(w * 0.60f, h * 0.74f)
+                    lineTo(w * 0.86f, h * 0.74f)
+                }
+                drawPath(p1, color = tint, style = thin)
+                drawPath(p2, color = tint, style = thin)
+            }
+            CyberIconType.SLIDER_FADER -> {
+                val xs = listOf(w * 0.25f, w * 0.50f, w * 0.75f)
+                val ks = listOf(h * 0.34f, h * 0.66f, h * 0.30f)
+                xs.forEachIndexed { i, x ->
+                    drawLine(tint.copy(alpha = 0.45f), Offset(x, h * 0.16f), Offset(x, h * 0.84f), strokeWidth = sw * 0.8f)
+                    drawRoundRect(tint, Offset(x - w * 0.08f, ks[i] - h * 0.07f), Size(w * 0.16f, h * 0.14f), CornerRadius(w * 0.04f))
+                }
+            }
+            CyberIconType.PITCH_TUNER -> {
+                drawLine(tint, Offset(w * 0.42f, h * 0.20f), Offset(w * 0.42f, h * 0.72f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawLine(tint, Offset(w * 0.42f, h * 0.20f), Offset(w * 0.78f, h * 0.28f), strokeWidth = sw, cap = StrokeCap.Round)
+                drawCircle(tint, radius = w * 0.16f, center = Offset(w * 0.32f, h * 0.74f))
+            }
+            CyberIconType.BOOK_NARRATOR -> {
+                drawRoundRect(tint, Offset(w * 0.16f, h * 0.18f), Size(w * 0.68f, h * 0.64f), CornerRadius(w * 0.07f), style = stroke)
+                drawLine(tint, Offset(w * 0.50f, h * 0.18f), Offset(w * 0.50f, h * 0.82f), strokeWidth = sw * 0.85f)
+            }
+            CyberIconType.WINDOW_FRAME -> {
+                drawRoundRect(tint, Offset(w * 0.14f, h * 0.18f), Size(w * 0.72f, h * 0.64f), CornerRadius(w * 0.08f), style = stroke)
+                drawLine(tint, Offset(w * 0.14f, h * 0.38f), Offset(w * 0.86f, h * 0.38f), strokeWidth = sw * 0.85f)
+            }
+            CyberIconType.SCREW_BOSS -> {
+                drawCircle(tint.copy(alpha = 0.7f), radius = w * 0.38f, center = Offset(w * 0.5f, h * 0.5f), style = thin)
+                drawLine(tint, Offset(w * 0.28f, h * 0.50f), Offset(w * 0.72f, h * 0.50f), strokeWidth = sw * 0.75f)
+                drawLine(tint, Offset(w * 0.50f, h * 0.28f), Offset(w * 0.50f, h * 0.72f), strokeWidth = sw * 0.75f)
+            }
+            CyberIconType.STAR_BADGE -> {
+                drawCircle(tint, radius = w * 0.34f, center = Offset(w * 0.5f, h * 0.5f), style = thin)
+                drawCircle(tint, radius = w * 0.14f, center = Offset(w * 0.5f, h * 0.5f))
+            }
+        }
+    }
+}
+
+/**
  * Collapsible terminal disclosure section for keeping advanced settings tucked cleanly away.
  */
 @Composable
@@ -252,22 +588,33 @@ fun ExpandableTerminalSection(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "${if (expanded) "▼" else "▸"} $title",
-                    color = accent,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 11.sp,
-                    letterSpacing = 0.8.sp
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                MikaCyberIcon(
+                    type = if (expanded) CyberIconType.CHEVRON_DOWN else CyberIconType.CHEVRON_RIGHT,
+                    tint = accent,
+                    size = 12.dp
                 )
-                if (!subtitle.isNullOrBlank()) {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = subtitle,
-                        color = MikaColors.DimText,
+                        text = title,
+                        color = accent,
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 9.sp
+                        fontWeight = FontWeight.Black,
+                        fontSize = 11.sp,
+                        letterSpacing = 0.8.sp
                     )
+                    if (!subtitle.isNullOrBlank()) {
+                        Text(
+                            text = subtitle,
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 9.sp
+                        )
+                    }
                 }
             }
             Text(
@@ -342,11 +689,10 @@ fun <T> CyberDropdown(
                     modifier = Modifier.weight(1f)
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (expanded) "▲" else "▼",
-                    color = accent,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 9.sp
+                MikaCyberIcon(
+                    type = if (expanded) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
+                    tint = accent,
+                    size = 11.dp
                 )
             }
 
@@ -375,12 +721,10 @@ fun <T> CyberDropdown(
                                 )
                                 if (isSelected) {
                                     Spacer(modifier = Modifier.width(8.dp))
-                                    Text(
-                                        text = "✓",
-                                        color = MikaColors.NeonCyan,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 11.sp
+                                    MikaCyberIcon(
+                                        type = CyberIconType.CHECK,
+                                        tint = MikaColors.NeonCyan,
+                                        size = 12.dp
                                     )
                                 }
                             }
@@ -400,7 +744,7 @@ fun <T> CyberDropdown(
 }
 
 /**
- * Chunky, pressable GachaSwipe tag pill (4px radius, monospace bold uppercase).
+ * Chunky, pressable GachaSwipe tag pill (4px radius, monospace bold uppercase) with optional custom vector icons.
  */
 @Composable
 fun MikaTagPill(
@@ -409,9 +753,12 @@ fun MikaTagPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     activeColor: Color = MikaColors.TerminalGreen,
-    inactiveColor: Color = Color.White.copy(alpha = 0.45f)
+    inactiveColor: Color = Color.White.copy(alpha = 0.45f),
+    leadingIcon: CyberIconType? = null,
+    trailingIcon: CyberIconType? = null
 ) {
-    Box(
+    val contentColor = if (selected) activeColor else inactiveColor
+    Row(
         modifier = modifier
             .clip(RoundedCornerShape(4.dp))
             .background(if (selected) activeColor.copy(alpha = 0.16f) else Color.Transparent)
@@ -421,16 +768,26 @@ fun MikaTagPill(
                 shape = RoundedCornerShape(4.dp)
             )
             .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        Text(
-            text = label,
-            color = if (selected) activeColor else inactiveColor,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.sp,
-            letterSpacing = 0.6.sp
-        )
+        if (leadingIcon != null) {
+            MikaCyberIcon(type = leadingIcon, tint = contentColor, size = 10.dp)
+        }
+        if (label.isNotEmpty()) {
+            Text(
+                text = label,
+                color = contentColor,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+                letterSpacing = 0.6.sp
+            )
+        }
+        if (trailingIcon != null) {
+            MikaCyberIcon(type = trailingIcon, tint = contentColor, size = 10.dp)
+        }
     }
 }
 
@@ -606,15 +963,31 @@ fun CartridgeSlamOverlay(
                             )
                         }
                         Spacer(modifier = Modifier.height(6.dp))
-                        Text(
-                            text = if (isInsert) "▼ LOCKING BUS PINS ▼" else "▲ RELEASING BUS PINS ▲",
-                            color = accent,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 8.sp,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            MikaCyberIcon(
+                                type = if (isInsert) CyberIconType.SLAM_IN else CyberIconType.EJECT,
+                                tint = accent,
+                                size = 10.dp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isInsert) "LOCKING BUS PINS" else "RELEASING BUS PINS",
+                                color = accent,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 8.sp
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            MikaCyberIcon(
+                                type = if (isInsert) CyberIconType.SLAM_IN else CyberIconType.EJECT,
+                                tint = accent,
+                                size = 10.dp
+                            )
+                        }
                         Spacer(modifier = Modifier.height(6.dp))
                         // 12 Gold PCB Contact Pins
                         Row(
@@ -644,15 +1017,24 @@ fun CartridgeSlamOverlay(
                             .background(Color(0xFF0A0812))
                             .border(2.dp, accent, RoundedCornerShape(4.dp))
                             .padding(horizontal = 10.dp, vertical = 6.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = if (isInsert) "● BUS_LOCKED" else "○ UNMOUNTED",
-                            color = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 8.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .size(7.dp)
+                                    .clip(CircleShape)
+                                    .background(if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed)
+                            )
+                            Text(
+                                text = if (isInsert) "BUS_LOCKED" else "UNMOUNTED",
+                                color = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 8.sp
+                            )
+                        }
                         Text(
                             text = "SLOT // ${spec.romCode}",
                             color = Color.White.copy(alpha = 0.55f),
@@ -670,14 +1052,24 @@ fun CartridgeSlamOverlay(
                             .padding(12.dp),
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
-                        Text(
-                            text = if (isInsert) "⚡ [ ${spec.romCode} SLOTTED // ONLINE ] ⚡"
-                            else "⏏️ [ ${spec.romCode} EJECTED // OFFLINE ]",
-                            color = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 10.sp
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            MikaCyberIcon(
+                                type = if (isInsert) CyberIconType.BOLT_ACCEL else CyberIconType.EJECT,
+                                tint = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
+                                size = 12.dp
+                            )
+                            Text(
+                                text = if (isInsert) "[ ${spec.romCode} SLOTTED // ONLINE ]"
+                                else "[ ${spec.romCode} EJECTED // OFFLINE ]",
+                                color = if (isInsert) MikaColors.TerminalGreen else MikaColors.DangerRed,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 10.sp
+                            )
+                        }
                         Spacer(modifier = Modifier.height(4.dp))
                         Text(
                             text = if (isInsert) "// Voices mounted into active Cyberdeck bus."
@@ -856,17 +1248,23 @@ fun MikaVoiceDropdownSelector(
                 modifier = Modifier.weight(1f)
             )
             if (onRefreshAction != null) {
-                Text(
-                    text = "↻ REFRESH",
-                    color = MikaColors.NeonCyan,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.sp,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
                     modifier = Modifier
                         .clip(RoundedCornerShape(4.dp))
                         .clickable(onClick = onRefreshAction)
                         .padding(horizontal = 4.dp, vertical = 2.dp)
-                )
+                ) {
+                    MikaCyberIcon(type = CyberIconType.REFRESH, tint = MikaColors.NeonCyan, size = 10.dp)
+                    Text(
+                        text = "REFRESH",
+                        color = MikaColors.NeonCyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp
+                    )
+                }
             }
         }
 
@@ -897,7 +1295,7 @@ fun MikaVoiceDropdownSelector(
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Text(
-                                text = "[${selectedVoice.gender.tag.uppercase()} • ${selectedVoice.languageCode}]",
+                                text = "[${selectedVoice.gender.tag.uppercase()} | ${selectedVoice.languageCode}]",
                                 color = accent,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
@@ -908,7 +1306,7 @@ fun MikaVoiceDropdownSelector(
                                     .padding(horizontal = 5.dp, vertical = 1.dp)
                             )
                             Text(
-                                text = selectedVoice.nativeTags.take(2).joinToString(" • "),
+                                text = selectedVoice.nativeTags.take(2).joinToString(" / "),
                                 color = MikaColors.DimText,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 9.sp,
@@ -944,17 +1342,19 @@ fun MikaVoiceDropdownSelector(
                 ) {
                     if (selectedVoice != null) {
                         MikaTagPill(
-                            label = "▶ TEST",
+                            label = "TEST",
                             selected = true,
                             activeColor = MikaColors.NeonCyan,
+                            leadingIcon = CyberIconType.PLAY,
                             onClick = { onSampleVoice(selectedVoice) }
                         )
                     }
                     MikaTagPill(
-                        label = if (expanded) "▲ CLOSE" else "▼ CHANGE",
+                        label = if (expanded) "CLOSE" else "CHANGE",
                         selected = expanded,
                         activeColor = accent,
                         inactiveColor = accent,
+                        leadingIcon = if (expanded) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
                         onClick = { if (voices.isNotEmpty()) expanded = !expanded }
                     )
                 }
@@ -1076,11 +1476,12 @@ fun MikaVoiceDropdownSelector(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                                 ) {
-                                    Text(
-                                        text = if (isSelected) "●" else "○",
-                                        color = if (isSelected) accent else MikaColors.DimText,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 11.sp
+                                    Box(
+                                        modifier = Modifier
+                                            .size(8.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isSelected) accent else Color.Transparent)
+                                            .border(1.2.dp, if (isSelected) accent else MikaColors.DimText, CircleShape)
                                     )
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
@@ -1093,7 +1494,7 @@ fun MikaVoiceDropdownSelector(
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            text = "[${voice.languageCode}] ${voice.nativeTags.take(3).joinToString(" • ")}",
+                                            text = "[${voice.languageCode}] ${voice.nativeTags.take(3).joinToString(" / ")}",
                                             color = if (isSelected) accent else MikaColors.DimText,
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 9.sp,
@@ -1109,15 +1510,10 @@ fun MikaVoiceDropdownSelector(
                                         .background(MikaColors.NeonCyan.copy(alpha = 0.14f))
                                         .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
                                         .clickable { onSampleVoice(voice) }
-                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "▶",
-                                        color = MikaColors.NeonCyan,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontWeight = FontWeight.Black,
-                                        fontSize = 10.sp
-                                    )
+                                    MikaCyberIcon(type = CyberIconType.PLAY, tint = MikaColors.NeonCyan, size = 10.dp)
                                 }
                             }
                         }
@@ -1296,8 +1692,9 @@ fun MikaOsModuleIcon(
 }
 
 /**
- * Anchored Cyberdeck HUD Navigation Bar along the bottom of the screen:
- * VOICE | MODULES | CARTRIDGE BAY
+ * Floating GachaSwipe-inspired Glassmorphic Bottom HUD Navigation Capsule:
+ * Translucent see-through backdrop, compact input-bar profile above Android gesture pill,
+ * and icon-only custom vector buttons (Voice | Modules | Cartridge Bay).
  */
 @Composable
 fun MikaBottomHudBar(
@@ -1307,132 +1704,140 @@ fun MikaBottomHudBar(
     onSelectTab: (Int) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    data class HudItem(
-        val index: Int,
-        val title: String,
-        val badgeText: String,
-        val accent: Color
+    val tabAccents = listOf(
+        MikaColors.NeonCyan,
+        if (activeToolCount > 0) MikaColors.NeonPink else MikaColors.DimText,
+        if (slottedTtsCount > 0) MikaColors.TerminalGreen else MikaColors.MikaAmber
     )
 
-    val items = listOf(
-        HudItem(0, "VOICE", "01", MikaColors.NeonCyan),
-        HudItem(
-            1,
-            "MODULES",
-            if (activeToolCount > 0) "$activeToolCount ON" else "OFF",
-            if (activeToolCount > 0) MikaColors.NeonPink else MikaColors.DimText
-        ),
-        HudItem(2, "CARTRIDGE BAY", "$slottedTtsCount ROM", MikaColors.TerminalGreen)
-    )
-
-    Column(
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .background(
-                Brush.verticalGradient(
-                    colors = listOf(
-                        Color(0xFF0A0714).copy(alpha = 0.96f),
-                        Color(0xFF040208)
-                    )
-                )
-            )
-            .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.25f))
             .navigationBarsPadding()
+            .padding(start = 12.dp, end = 12.dp, bottom = 6.dp)
     ) {
-        // Hairline HUD scanner accent bar at the top edge
-        Row(modifier = Modifier.fillMaxWidth().height(2.dp)) {
-            items.forEach { item ->
-                val selected = activeTab == item.index
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(2.dp)
-                        .background(if (selected) item.accent else Color.Transparent)
-                )
-            }
-        }
-
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(54.dp)
+                .shadow(
+                    elevation = 12.dp,
+                    shape = RoundedCornerShape(16.dp),
+                    spotColor = MikaColors.NeonCyan.copy(alpha = 0.25f)
+                )
+                .clip(RoundedCornerShape(16.dp))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            Color(0xFF0E1622).copy(alpha = 0.64f),
+                            Color(0xFF060911).copy(alpha = 0.74f)
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.horizontalGradient(
+                        colors = listOf(
+                            MikaColors.NeonCyan.copy(alpha = 0.40f),
+                            MikaColors.NeonPink.copy(alpha = 0.28f),
+                            MikaColors.TerminalGreen.copy(alpha = 0.40f)
+                        )
+                    ),
+                    shape = RoundedCornerShape(16.dp)
+                )
                 .padding(horizontal = 8.dp, vertical = 6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            items.forEach { item ->
-                val selected = activeTab == item.index
-                Column(
+            tabAccents.forEachIndexed { index, accent ->
+                val selected = activeTab == index
+                Box(
                     modifier = Modifier
                         .weight(1f)
-                        .clip(RoundedCornerShape(6.dp))
+                        .height(40.dp)
+                        .clip(RoundedCornerShape(11.dp))
                         .background(
-                            if (selected) item.accent.copy(alpha = 0.16f)
-                            else Color(0xFF080510)
+                            if (selected) {
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        accent.copy(alpha = 0.24f),
+                                        Color(0xFF090D16).copy(alpha = 0.72f)
+                                    )
+                                )
+                            } else {
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color(0xFF05070D).copy(alpha = 0.40f),
+                                        Color(0xFF05070D).copy(alpha = 0.55f)
+                                    )
+                                )
+                            }
                         )
                         .border(
-                            width = if (selected) 1.5.dp else 1.dp,
-                            color = if (selected) item.accent else Color.White.copy(alpha = 0.12f),
-                            shape = RoundedCornerShape(6.dp)
+                            width = if (selected) 1.4.dp else 0.8.dp,
+                            color = if (selected) accent else MikaColors.NeonCyan.copy(alpha = 0.16f),
+                            shape = RoundedCornerShape(11.dp)
                         )
-                        .clickable { onSelectTab(item.index) }
-                        .padding(vertical = 7.dp, horizontal = 4.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                        .clickable { onSelectTab(index) },
+                    contentAlignment = Alignment.Center
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(5.dp)
-                    ) {
-                        // Mini Canvas HUD vector glyph
-                        Canvas(modifier = Modifier.size(13.dp)) {
-                            val w = size.width
-                            val h = size.height
-                            val c = if (selected) item.accent else Color.White.copy(alpha = 0.55f)
-                            val stroke = Stroke(width = 1.5.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-                            when (item.index) {
-                                0 -> {
-                                    // Voice waveform glyph
-                                    drawLine(c, Offset(w * 0.15f, h * 0.45f), Offset(w * 0.15f, h * 0.70f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
-                                    drawLine(c, Offset(w * 0.40f, h * 0.15f), Offset(w * 0.40f, h * 0.85f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
-                                    drawLine(c, Offset(w * 0.65f, h * 0.25f), Offset(w * 0.65f, h * 0.78f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
-                                    drawLine(c, Offset(w * 0.88f, h * 0.40f), Offset(w * 0.88f, h * 0.65f), strokeWidth = 1.6.dp.toPx(), cap = StrokeCap.Round)
-                                }
-                                1 -> {
-                                    // OS Modules 2x2 grid glyph
-                                    val box = w * 0.38f
-                                    drawRoundRect(c, Offset(0f, 0f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
-                                    drawRoundRect(c, Offset(w * 0.58f, 0f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
-                                    drawRoundRect(c, Offset(0f, h * 0.58f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
-                                    drawRoundRect(c, Offset(w * 0.58f, h * 0.58f), Size(box, box), CornerRadius(1.5.dp.toPx()), style = stroke)
-                                }
-                                else -> {
-                                    // ROM Cartridge Bay chip glyph
-                                    drawRoundRect(c, Offset(w * 0.12f, h * 0.08f), Size(w * 0.76f, h * 0.70f), CornerRadius(2.dp.toPx()), style = stroke)
-                                    drawLine(c, Offset(w * 0.28f, h * 0.88f), Offset(w * 0.28f, h), strokeWidth = 1.5.dp.toPx())
-                                    drawLine(c, Offset(w * 0.50f, h * 0.88f), Offset(w * 0.50f, h), strokeWidth = 1.5.dp.toPx())
-                                    drawLine(c, Offset(w * 0.72f, h * 0.88f), Offset(w * 0.72f, h), strokeWidth = 1.5.dp.toPx())
-                                }
+                    // Icon-only custom SVG/Canvas vector artwork
+                    Canvas(modifier = Modifier.size(22.dp)) {
+                        val w = size.width
+                        val h = size.height
+                        val c = if (selected) accent else MikaColors.CyanWhite.copy(alpha = 0.54f)
+                        val sw = 1.9.dp.toPx()
+                        val stroke = Stroke(width = sw, cap = StrokeCap.Round, join = StrokeJoin.Round)
+                        val thin = Stroke(width = 1.3.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+
+                        when (index) {
+                            0 -> {
+                                // Voice Tab Icon: Harmonic Waveform inside Precision Outer Arc
+                                drawArc(c.copy(alpha = if (selected) 0.5f else 0.28f), -50f, 100f, false, Offset(w * 0.06f, h * 0.08f), Size(w * 0.88f, h * 0.84f), style = thin)
+                                drawArc(c.copy(alpha = if (selected) 0.5f else 0.28f), 130f, 100f, false, Offset(w * 0.06f, h * 0.08f), Size(w * 0.88f, h * 0.84f), style = thin)
+                                drawLine(c, Offset(w * 0.24f, h * 0.42f), Offset(w * 0.24f, h * 0.62f), strokeWidth = sw, cap = StrokeCap.Round)
+                                drawLine(c, Offset(w * 0.42f, h * 0.20f), Offset(w * 0.42f, h * 0.80f), strokeWidth = sw, cap = StrokeCap.Round)
+                                drawLine(c, Offset(w * 0.60f, h * 0.28f), Offset(w * 0.60f, h * 0.72f), strokeWidth = sw, cap = StrokeCap.Round)
+                                drawLine(c, Offset(w * 0.76f, h * 0.38f), Offset(w * 0.76f, h * 0.64f), strokeWidth = sw, cap = StrokeCap.Round)
+                            }
+                            1 -> {
+                                // Modules Tab Icon: 2x2 Cyberdeck OS App Grid + Core Node
+                                val box = w * 0.36f
+                                drawRoundRect(c, Offset(w * 0.06f, h * 0.06f), Size(box, box), CornerRadius(3.dp.toPx()), style = stroke)
+                                drawRoundRect(c, Offset(w * 0.58f, h * 0.06f), Size(box, box), CornerRadius(3.dp.toPx()), style = stroke)
+                                drawRoundRect(c, Offset(w * 0.06f, h * 0.58f), Size(box, box), CornerRadius(3.dp.toPx()), style = stroke)
+                                drawRoundRect(c, Offset(w * 0.58f, h * 0.58f), Size(box, box), CornerRadius(3.dp.toPx()), style = stroke)
+                                drawCircle(
+                                    color = if (selected) accent else c.copy(alpha = 0.6f),
+                                    radius = 2.4.dp.toPx(),
+                                    center = Offset(w * 0.50f, h * 0.50f)
+                                )
+                            }
+                            else -> {
+                                // Cartridge Bay Tab Icon: Molded ROM Shell + Grip Lines + 4 Gold PCB Edge Pins
+                                drawRoundRect(c, Offset(w * 0.14f, h * 0.08f), Size(w * 0.72f, h * 0.68f), CornerRadius(3.dp.toPx()), style = stroke)
+                                drawLine(c.copy(alpha = 0.65f), Offset(w * 0.28f, h * 0.26f), Offset(w * 0.72f, h * 0.26f), strokeWidth = 1.4.dp.toPx(), cap = StrokeCap.Round)
+                                drawLine(c.copy(alpha = 0.65f), Offset(w * 0.28f, h * 0.42f), Offset(w * 0.72f, h * 0.42f), strokeWidth = 1.4.dp.toPx(), cap = StrokeCap.Round)
+                                val pinColor = if (selected) MikaColors.SsrGold else c
+                                drawLine(pinColor, Offset(w * 0.24f, h * 0.78f), Offset(w * 0.24f, h * 0.94f), strokeWidth = sw, cap = StrokeCap.Round)
+                                drawLine(pinColor, Offset(w * 0.41f, h * 0.78f), Offset(w * 0.41f, h * 0.94f), strokeWidth = sw, cap = StrokeCap.Round)
+                                drawLine(pinColor, Offset(w * 0.59f, h * 0.78f), Offset(w * 0.59f, h * 0.94f), strokeWidth = sw, cap = StrokeCap.Round)
+                                drawLine(pinColor, Offset(w * 0.76f, h * 0.78f), Offset(w * 0.76f, h * 0.94f), strokeWidth = sw, cap = StrokeCap.Round)
                             }
                         }
-
-                        Text(
-                            text = item.title,
-                            color = if (selected) item.accent else Color.White.copy(alpha = 0.72f),
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 9.5.sp,
-                            letterSpacing = 0.4.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
                     }
 
-                    Text(
-                        text = "[${item.badgeText}]",
-                        color = if (selected) item.accent.copy(alpha = 0.9f) else MikaColors.DimText,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 8.sp
-                    )
+                    if (selected) {
+                        Box(
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 3.dp)
+                                .width(20.dp)
+                                .height(2.5.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(accent)
+                        )
+                    }
                 }
             }
         }

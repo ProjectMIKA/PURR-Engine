@@ -32,7 +32,9 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.VoiceGender
+import com.projectmika.purrtts.ui.theme.CyberIconType
 import com.projectmika.purrtts.ui.theme.MikaColors
+import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 
 /**
@@ -186,16 +188,19 @@ fun VoiceCloneStudioSheet(
                         fontWeight = FontWeight.Bold,
                         fontSize = 10.sp
                     )
-                    Box(
+                    Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
                             .background(MikaColors.NeonPink.copy(alpha = 0.18f))
                             .border(1.dp, MikaColors.NeonPink, RoundedCornerShape(4.dp))
                             .clickable(enabled = !isRecording, onClick = onRecordFiveSeconds)
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
+                        MikaCyberIcon(type = CyberIconType.RECORD_DOT, tint = MikaColors.NeonPink, size = 10.dp)
                         Text(
-                            text = if (isRecording) "CAPTURING..." else "● REC_5S_WAV",
+                            text = if (isRecording) "CAPTURING..." else "REC_5S_WAV",
                             color = MikaColors.NeonPink,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,

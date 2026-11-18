@@ -738,7 +738,7 @@ object PurrDefaultPresets {
         PurrProfile(
             id = "gachaswipe_default",
             name = "GachaSwipe Default",
-            badgeTag = "★ MIKA PICK",
+            badgeTag = "MIKA PICK",
             summary = "Balanced slang expansion, MIKASTOP breaths & clean GachaSwipe studio taper.",
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,

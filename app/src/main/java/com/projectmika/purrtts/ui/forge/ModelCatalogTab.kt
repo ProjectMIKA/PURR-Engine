@@ -34,7 +34,9 @@ import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.ModelBundleState
 import com.projectmika.purrtts.core.purr.PurrForgeState
+import com.projectmika.purrtts.ui.theme.CyberIconType
 import com.projectmika.purrtts.ui.theme.MikaColors
+import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 
@@ -79,7 +81,7 @@ fun ModelCatalogTab(
         ) {
             val isTts = selectedCategory == CartridgeCategory.TTS
             val isTools = selectedCategory == CartridgeCategory.TOOLS
-            Box(
+            Row(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
@@ -87,10 +89,13 @@ fun ModelCatalogTab(
                     .border(1.5.dp, if (isTts) MikaColors.TerminalGreen else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                     .clickable { onSelectCategory(CartridgeCategory.TTS) }
                     .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                MikaCyberIcon(type = CyberIconType.MIC_WAVE, tint = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText, size = 12.dp)
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "🎤 TTS (${ttsCatalog.size})",
+                    text = "TTS (${ttsCatalog.size})",
                     color = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
@@ -98,7 +103,7 @@ fun ModelCatalogTab(
                     letterSpacing = 0.6.sp
                 )
             }
-            Box(
+            Row(
                 modifier = Modifier
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
@@ -106,10 +111,13 @@ fun ModelCatalogTab(
                     .border(1.5.dp, if (isTools) MikaColors.NeonPink else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
                     .clickable { onSelectCategory(CartridgeCategory.TOOLS) }
                     .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                MikaCyberIcon(type = CyberIconType.WRENCH_TOOL, tint = if (isTools) MikaColors.NeonPink else MikaColors.DimText, size = 12.dp)
+                Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "🛠️ TOOLS (${toolsCatalog.size})",
+                    text = "TOOLS (${toolsCatalog.size})",
                     color = if (isTools) MikaColors.NeonPink else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
@@ -126,20 +134,31 @@ fun ModelCatalogTab(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    val rackAccent = if (selectedCategory == CartridgeCategory.TTS) MikaColors.NeonCyan else MikaColors.NeonPink
+                    MikaCyberIcon(
+                        type = if (selectedCategory == CartridgeCategory.TTS) CyberIconType.BUS_PLUG else CyberIconType.WRENCH_TOOL,
+                        tint = rackAccent,
+                        size = 12.dp
+                    )
+                    Text(
+                        text = if (selectedCategory == CartridgeCategory.TTS) {
+                            "TTS_BUS // ${visibleCatalog.size}-BAY RACK"
+                        } else {
+                            "TOOL_BUS // ${visibleCatalog.size}-MODULE RACK"
+                        },
+                        color = rackAccent,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 10.sp,
+                        letterSpacing = 0.8.sp
+                    )
+                }
                 Text(
-                    text = if (selectedCategory == CartridgeCategory.TTS) {
-                        "🔌 TTS_BUS // ${visibleCatalog.size}-BAY RACK"
-                    } else {
-                        "🛠️ TOOL_BUS // ${visibleCatalog.size}-MODULE RACK"
-                    },
-                    color = if (selectedCategory == CartridgeCategory.TTS) MikaColors.NeonCyan else MikaColors.NeonPink,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 10.sp,
-                    letterSpacing = 0.8.sp
-                )
-                Text(
-                    text = "[ $slottedCount / ${visibleCatalog.size} SLOTTED • $busLoadPct% ]",
+                    text = "[ $slottedCount / ${visibleCatalog.size} SLOTTED | $busLoadPct% ]",
                     color = if (slottedCount > 0) MikaColors.TerminalGreen else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -243,9 +262,10 @@ fun ModelCatalogTab(
                 )
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     MikaTagPill(
-                        label = "🧬 CLONE STUDIO",
+                        label = "CLONE STUDIO",
                         selected = true,
                         activeColor = MikaColors.NeonPurple,
+                        leadingIcon = CyberIconType.DNA_CLONE,
                         onClick = onOpenCloneStudio
                     )
                     MikaTagPill(
@@ -306,7 +326,7 @@ fun ModelCatalogTab(
                                 .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            Text("⊕", color = Color.White.copy(alpha = 0.3f), fontSize = 8.sp)
+                            MikaCyberIcon(type = CyberIconType.SCREW_BOSS, tint = Color.White.copy(alpha = 0.35f), size = 9.dp)
                         }
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                             Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.12f)))
@@ -428,22 +448,26 @@ fun ModelCatalogTab(
                             )
 
                             if (spec.unlocksSummary.isNotBlank()) {
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .padding(top = 4.dp)
                                         .clip(RoundedCornerShape(4.dp))
                                         .background(accent.copy(alpha = 0.10f))
                                         .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
-                                        .padding(horizontal = 8.dp, vertical = 5.dp)
+                                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
+                                    MikaCyberIcon(type = CyberIconType.CHECK, tint = accent, size = 11.dp)
                                     Text(
-                                        text = "✓ ${spec.unlocksSummary}",
+                                        text = spec.unlocksSummary,
                                         color = if (isSlotted) Color.White else accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 9.5.sp,
-                                        lineHeight = 13.sp
+                                        lineHeight = 13.sp,
+                                        modifier = Modifier.weight(1f)
                                     )
                                 }
                             }
@@ -494,7 +518,7 @@ fun ModelCatalogTab(
                     ) {
                         when {
                             bundleState.state == DownloadState.DOWNLOADING -> {
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(5.dp))
@@ -502,13 +526,16 @@ fun ModelCatalogTab(
                                         .border(1.dp, MikaColors.MikaAmber, RoundedCornerShape(5.dp))
                                         .clickable { viewModel.pauseModelDownload(spec.id) }
                                         .padding(vertical = 9.dp),
-                                    contentAlignment = Alignment.Center
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("⏸ PAUSE DOWNLOAD", color = MikaColors.MikaAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                                    MikaCyberIcon(type = CyberIconType.PAUSE, tint = MikaColors.MikaAmber, size = 11.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("PAUSE DOWNLOAD", color = MikaColors.MikaAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
                                 }
                             }
                             !isInstalled -> {
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(5.dp))
@@ -516,10 +543,13 @@ fun ModelCatalogTab(
                                         .border(1.dp, accent, RoundedCornerShape(5.dp))
                                         .clickable { viewModel.startModelDownload(spec) }
                                         .padding(vertical = 9.dp),
-                                    contentAlignment = Alignment.Center
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = accent, size = 11.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
-                                        text = if (bundleState.downloadedBytes > 0L) "⬇ RESUME ROM DOWNLOAD" else "⬇ DOWNLOAD ROM CARTRIDGE",
+                                        text = if (bundleState.downloadedBytes > 0L) "RESUME ROM DOWNLOAD" else "DOWNLOAD ROM CARTRIDGE",
                                         color = accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Black,
@@ -528,7 +558,7 @@ fun ModelCatalogTab(
                                 }
                             }
                             isSlotted -> {
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(5.dp))
@@ -536,13 +566,16 @@ fun ModelCatalogTab(
                                         .border(1.dp, MikaColors.DangerRed.copy(alpha = 0.7f), RoundedCornerShape(5.dp))
                                         .clickable { viewModel.toggleCartridgeSlotted(spec, false) }
                                         .padding(vertical = 9.dp),
-                                    contentAlignment = Alignment.Center
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    MikaCyberIcon(type = CyberIconType.EJECT, tint = MikaColors.DangerRed, size = 11.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = when {
-                                            isToolCartridge -> "▲ EJECT MODULE (TURN OFF)"
-                                            spec.isBuiltInOsCartridge -> "▲ EJECT CARTRIDGE (DISABLE OS)"
-                                            else -> "▲ EJECT CARTRIDGE"
+                                            isToolCartridge -> "EJECT MODULE (TURN OFF)"
+                                            spec.isBuiltInOsCartridge -> "EJECT CARTRIDGE (DISABLE OS)"
+                                            else -> "EJECT CARTRIDGE"
                                         },
                                         color = MikaColors.DangerRed,
                                         fontFamily = FontFamily.Monospace,
@@ -550,7 +583,7 @@ fun ModelCatalogTab(
                                         fontSize = 10.sp
                                     )
                                 }
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(5.dp))
                                         .background(accent.copy(alpha = 0.18f))
@@ -558,20 +591,25 @@ fun ModelCatalogTab(
                                         .clickable {
                                             if (isToolCartridge) onOpenModulesTab() else onJumpToVoiceSelector(spec.id)
                                         }
-                                        .padding(horizontal = 12.dp, vertical = 9.dp),
-                                    contentAlignment = Alignment.Center
+                                        .padding(horizontal = 10.dp, vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    MikaCyberIcon(type = CyberIconType.WRENCH_TOOL, tint = accent, size = 11.dp)
+                                    Spacer(modifier = Modifier.width(5.dp))
                                     Text(
-                                        text = if (isToolCartridge) "⚙ MODULE ▸" else "⚙ VOICES ▸",
+                                        text = if (isToolCartridge) "MODULE" else "VOICES",
                                         color = accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Black,
                                         fontSize = 10.sp
                                     )
+                                    Spacer(modifier = Modifier.width(3.dp))
+                                    MikaCyberIcon(type = CyberIconType.CHEVRON_RIGHT, tint = accent, size = 10.dp)
                                 }
                             }
                             else -> {
-                                Box(
+                                Row(
                                     modifier = Modifier
                                         .weight(1f)
                                         .clip(RoundedCornerShape(5.dp))
@@ -579,13 +617,16 @@ fun ModelCatalogTab(
                                         .border(1.5.dp, accent, RoundedCornerShape(5.dp))
                                         .clickable { viewModel.toggleCartridgeSlotted(spec, true) }
                                         .padding(vertical = 9.dp),
-                                    contentAlignment = Alignment.Center
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
                                 ) {
+                                    MikaCyberIcon(type = CyberIconType.SLAM_IN, tint = accent, size = 11.dp)
+                                    Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = when {
-                                            isToolCartridge -> "▼ SLAM MODULE IN (ENABLE)"
-                                            spec.isBuiltInOsCartridge -> "▼ SLAM CARTRIDGE IN (ENABLE OS VOICES)"
-                                            else -> "▼ SLAM CARTRIDGE IN"
+                                            isToolCartridge -> "SLAM MODULE IN (ENABLE)"
+                                            spec.isBuiltInOsCartridge -> "SLAM CARTRIDGE IN (ENABLE OS)"
+                                            else -> "SLAM CARTRIDGE IN"
                                         },
                                         color = accent,
                                         fontFamily = FontFamily.Monospace,
@@ -622,24 +663,30 @@ fun ModelCatalogTab(
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             val subHeaderText = if (spec.id == "rom_piper") {
-                                "🧩 EXPANSION VOICE PACKS (${childSubs.size} EXTRA PIPER VOICES FOR ${spec.romCode})"
+                                "EXPANSION VOICE PACKS (${childSubs.size} EXTRA PIPER VOICES FOR ${spec.romCode})"
                             } else {
-                                "🧩 EXPANSION SUB-CARTRIDGES (OPTIONAL NPU & GPU FOR ${spec.romCode})"
+                                "EXPANSION SUB-CARTRIDGES (OPTIONAL NPU & GPU FOR ${spec.romCode})"
                             }
-                            Text(
-                                text = subHeaderText,
-                                color = accent,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Black,
-                                fontSize = 9.5.sp,
-                                letterSpacing = 0.5.sp
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                MikaCyberIcon(type = CyberIconType.CHIP_EXPANSION, tint = accent, size = 12.dp)
+                                Text(
+                                    text = subHeaderText,
+                                    color = accent,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 9.5.sp,
+                                    letterSpacing = 0.5.sp
+                                )
+                            }
                             if (spec.id == "rom_piper") {
                                 Text(
                                     text = if (isInstalled) {
                                         "// ${spec.romCode} Piper Bay is ready! Download any additional Piper voices below:"
                                     } else {
-                                        "💡 Pick Lessac US Base above OR download any individual Piper voice pack below — each works standalone!"
+                                        "// Pick Lessac US Base above OR download any individual Piper voice pack below - each works standalone!"
                                     },
                                     color = if (isInstalled) MikaColors.DimText else MikaColors.NeonCyan,
                                     fontFamily = FontFamily.Monospace,
@@ -647,13 +694,20 @@ fun ModelCatalogTab(
                                     lineHeight = 13.sp
                                 )
                             } else if (!isInstalled) {
-                                Text(
-                                    text = "⚠ Step 1 Required: Download & slam ${spec.romCode} (${spec.approximateSizeMb}MB Base) above first so these accelerators have Kokoro's 54 voices to drive.",
-                                    color = MikaColors.MikaAmber,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp,
-                                    lineHeight = 13.sp
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    MikaCyberIcon(type = CyberIconType.ALERT_TRIANGLE, tint = MikaColors.MikaAmber, size = 11.dp)
+                                    Text(
+                                        text = "Step 1 Required: Download & slam ${spec.romCode} (${spec.approximateSizeMb}MB Base) above first so these accelerators have Kokoro's 54 voices to drive.",
+                                        color = MikaColors.MikaAmber,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        lineHeight = 13.sp,
+                                        modifier = Modifier.weight(1f)
+                                    )
+                                }
                             } else {
                                 Text(
                                     text = "// ${spec.romCode} Base is ready! Optionally add hardware accelerator sub-chips below:",
@@ -710,19 +764,31 @@ fun ModelCatalogTab(
                         .padding(horizontal = 12.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
-                    Text(
-                        text = when {
-                            isToolCartridge && isSlotted -> "● MODULE ONLINE // ACTIVE"
-                            isToolCartridge -> "○ MODULE EJECTED // BYPASSED"
-                            isSlotted -> "● BUS_LOCKED // VOICES ONLINE"
-                            isInstalled -> "○ READY TO SLAM"
-                            else -> "○ BAY EMPTY"
-                        },
-                        color = if (isSlotted) MikaColors.TerminalGreen else if (isInstalled) MikaColors.MikaAmber else MikaColors.DimText,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 8.5.sp
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isSlotted) MikaColors.TerminalGreen else Color.Transparent)
+                                .border(1.dp, if (isSlotted) MikaColors.TerminalGreen else if (isInstalled) MikaColors.MikaAmber else MikaColors.DimText, CircleShape)
+                        )
+                        Text(
+                            text = when {
+                                isToolCartridge && isSlotted -> "MODULE ONLINE // ACTIVE"
+                                isToolCartridge -> "MODULE EJECTED // BYPASSED"
+                                isSlotted -> "BUS_LOCKED // VOICES ONLINE"
+                                isInstalled -> "READY TO SLAM"
+                                else -> "BAY EMPTY"
+                            },
+                            color = if (isSlotted) MikaColors.TerminalGreen else if (isInstalled) MikaColors.MikaAmber else MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 8.5.sp
+                        )
+                    }
                     Text(
                         text = when {
                             isToolCartridge -> "${spec.romCode} // TOOL MODULE"
@@ -767,27 +833,35 @@ private fun SubCartridgeCard(
             verticalAlignment = Alignment.CenterVertically
         ) {
             Text(
-                text = "${subSpec.romCode} // ${subSpec.badge} • ${subSpec.approximateSizeMb}MB",
+                text = "${subSpec.romCode} // ${subSpec.badge} | ${subSpec.approximateSizeMb}MB",
                 color = subAccent,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
                 fontSize = 9.sp
             )
-            Text(
-                text = when {
-                    isEnabled -> "[⚡ ACTIVE]"
-                    isInstalled -> "[INSTALLED • OFF]"
-                    else -> "[OPTIONAL ADD-ON]"
-                },
-                color = when {
-                    isEnabled -> MikaColors.TerminalGreen
-                    isInstalled -> MikaColors.MikaAmber
-                    else -> MikaColors.DimText
-                },
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 8.5.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                if (isEnabled) {
+                    MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = MikaColors.TerminalGreen, size = 10.dp)
+                }
+                Text(
+                    text = when {
+                        isEnabled -> "[ACTIVE]"
+                        isInstalled -> "[INSTALLED | OFF]"
+                        else -> "[OPTIONAL ADD-ON]"
+                    },
+                    color = when {
+                        isEnabled -> MikaColors.TerminalGreen
+                        isInstalled -> MikaColors.MikaAmber
+                        else -> MikaColors.DimText
+                    },
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.5.sp
+                )
+            }
         }
 
         Text(
@@ -804,14 +878,21 @@ private fun SubCartridgeCard(
             fontSize = 9.sp
         )
         if (subSpec.unlocksSummary.isNotBlank()) {
-            Text(
-                text = "⚡ ${subSpec.unlocksSummary}",
-                color = subAccent,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.sp,
-                lineHeight = 13.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = subAccent, size = 11.dp)
+                Text(
+                    text = subSpec.unlocksSummary,
+                    color = subAccent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    lineHeight = 13.sp,
+                    modifier = Modifier.weight(1f)
+                )
+            }
         }
 
         if (subState.state == DownloadState.DOWNLOADING ||
@@ -855,7 +936,7 @@ private fun SubCartridgeCard(
             val packNoun = if (subSpec.parentCartridgeId == "rom_piper") "VOICE PACK" else "SUB-CHIP"
             when {
                 subState.state == DownloadState.DOWNLOADING -> {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(4.dp))
@@ -863,13 +944,16 @@ private fun SubCartridgeCard(
                             .border(1.dp, MikaColors.MikaAmber, RoundedCornerShape(4.dp))
                             .clickable { viewModel.pauseModelDownload(subSpec.id) }
                             .padding(vertical = 7.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("⏸ PAUSE", color = MikaColors.MikaAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 9.sp)
+                        MikaCyberIcon(type = CyberIconType.PAUSE, tint = MikaColors.MikaAmber, size = 10.dp)
+                        Spacer(modifier = Modifier.width(5.dp))
+                        Text("PAUSE", color = MikaColors.MikaAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 9.sp)
                     }
                 }
                 !isInstalled -> {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(4.dp))
@@ -877,10 +961,13 @@ private fun SubCartridgeCard(
                             .border(1.dp, subAccent, RoundedCornerShape(4.dp))
                             .clickable { viewModel.startModelDownload(subSpec) }
                             .padding(vertical = 7.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = subAccent, size = 10.dp)
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = if (subState.downloadedBytes > 0L) "⬇ RESUME $packNoun (${subSpec.approximateSizeMb}MB)" else "⬇ DOWNLOAD $packNoun (${subSpec.approximateSizeMb}MB)",
+                            text = if (subState.downloadedBytes > 0L) "RESUME $packNoun (${subSpec.approximateSizeMb}MB)" else "DOWNLOAD $packNoun (${subSpec.approximateSizeMb}MB)",
                             color = subAccent,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
@@ -889,7 +976,7 @@ private fun SubCartridgeCard(
                     }
                 }
                 else -> {
-                    Box(
+                    Row(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(4.dp))
@@ -897,10 +984,17 @@ private fun SubCartridgeCard(
                             .border(1.dp, if (isEnabled) MikaColors.TerminalGreen else subAccent, RoundedCornerShape(4.dp))
                             .clickable { viewModel.toggleSubCartridgeEnabled(subSpec, !isEnabled) }
                             .padding(vertical = 7.dp),
-                        contentAlignment = Alignment.Center
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
+                        MikaCyberIcon(
+                            type = if (isEnabled) CyberIconType.BOLT_ACCEL else CyberIconType.SLAM_IN,
+                            tint = if (isEnabled) MikaColors.TerminalGreen else subAccent,
+                            size = 10.dp
+                        )
+                        Spacer(modifier = Modifier.width(5.dp))
                         Text(
-                            text = if (isEnabled) "⚡ ${packNoun} ACTIVE (TAP TO DISABLE)" else "○ ENABLE $packNoun",
+                            text = if (isEnabled) "${packNoun} ACTIVE (TAP TO DISABLE)" else "ENABLE $packNoun",
                             color = if (isEnabled) MikaColors.TerminalGreen else subAccent,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
