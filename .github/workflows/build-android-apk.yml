@@ -1,0 +1,89 @@
+name: Build & Release Signed PURR-TTS Android APK
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Release tag to attach APK builds to (e.g. v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Verify project manifests & structure
+        run: python3 scripts/verify_project.py
+
+      - name: Generate Release Signing Keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -alias purrtts \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass purrtts -keypass purrtts \
+            -dname "CN=Project MIKA, OU=PURR Engine, O=ProjectMIKA, L=Cyber, S=Matrix, C=US"
+
+      - name: Run JVM unit tests & build signed Release APK
+        run: gradle testDebugUnitTest assembleRelease --no-daemon --stacktrace
+
+      - name: Package & Verify Signed Release APKs
+        run: |
+          mkdir -p builds
+          APK_SRC="app/build/outputs/apk/release/app-release.apk"
+          if [ ! -f "$APK_SRC" ]; then
+            echo "Error: Release APK not found at $APK_SRC" >&2
+            exit 1
+          fi
+          cp "$APK_SRC" "builds/PURR-Engine_V1.0.0_Android.apk"
+          cp "$APK_SRC" "builds/PURR-TTS_V1.0.0.apk"
+          ls -lh builds/*.apk
+
+      - name: Upload Release APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PURR-TTS-Release-APKs
+          path: builds/*.apk
+
+      - name: Attach Signed APKs to GitHub Release
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.event.inputs.release_tag }}"
+          if [ -z "$TAG" ]; then
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          if [[ "$TAG" != v* ]]; then
+            TAG="v1.0.0"
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              builds/PURR-Engine_V1.0.0_Android.apk \
+              builds/PURR-TTS_V1.0.0.apk \
+              --clobber
+          else
+            echo "Release $TAG does not exist yet; skipping upload."
+          fi

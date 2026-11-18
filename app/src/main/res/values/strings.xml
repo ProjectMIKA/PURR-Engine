@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PURR-TTS // FORGE</string>
+    <string name="tts_service_label">PURR Neural TTS (Project M.I.K.A.)</string>
+    <string name="sample_text_en">O-oh! Wait... I finally have a system-wide neural voice across Android, Master! Nya~</string>
+    <string name="sample_text_ja">こんにちは、マスター。PURRニューラル音声エンジンがシステム全体で起動しました。</string>
+</resources>
