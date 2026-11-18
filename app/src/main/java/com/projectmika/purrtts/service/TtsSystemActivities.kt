@@ -46,7 +46,7 @@ class GetSampleTextActivity : Activity() {
         val resultIntent = Intent().apply {
             putExtra(TextToSpeech.Engine.EXTRA_SAMPLE_TEXT, sample)
         }
-        setResult(TextToSpeech.RESULT_OK, resultIntent)
+        setResult(RESULT_OK, resultIntent)
         finish()
     }
 }
