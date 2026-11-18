@@ -1,3 +1,28 @@
+# 🌌 PURR-TTS v1.3.1 // Glassmorphic Icon HUD, Phasing Transitions & Custom Cyberdeck SVG Icons
+
+### ✨ What's New since v1.3.0
+
+Master wanted the bottom HUD to capture **GachaSwipe's frosted glassmorphic bar**, replace every stock system emoji with custom cyberdeck vector artwork, add sleek phasing transitions between pages, and declutter the **Modules** desktop! 🐾
+
+* **🧊 GACHA-SWIPE GLASSMORPHIC ICON-ONLY BOTTOM HUD (`MikaBottomHudBar`)**:
+  * Redesigned as a floating `54dp` see-through frosted glassmorphic capsule anchored cleanly above the Android gesture navigation pill so scrolling terminal content flows visibly underneath.
+  * Removed bottom labels and numbers in favor of **pure custom Canvas SVG-style icons** (**Voice Waveform Reticle**, **2x2 OS Module Matrix**, and **ROM Cartridge + Gold Pins**) with neon glow rims when active.
+* **🌀 PHASING PAGE TRANSITIONS**:
+  * Switching tabs (`Voice` ↔ `Modules` ↔ `Cartridge Bay`) now runs a smooth directional phase animation combining soft scale (`0.965x → 1.0x`), fade, and micro-slide motion.
+* **🧹 CLEANER `MODULES` OS DESKTOP**:
+  * Removed the top `> CYBERDECK_OS // MODULE_LAUNCHER` header card and `+ TOOLS BAY` badge so your OS module tiles take center stage immediately.
+* **🎨 100% CUSTOM CYBERDECK VECTOR ICONS (`MikaCyberIcon` & `MikaOsModuleIcon`)**:
+  * Built a full 32-icon custom Canvas vector library replacing every stock emoji and Unicode symbol (`▶`, `■`, `⏸`, `🎤`, `🛠️`, `🧬`, `⚡`, `🎭`, `🛡️`, `🎧`, `🌊`, `🔗`, `🎚️`, `⬇`, `⚠`) across Voice, Modules, Cartridge Bay, and Clone Studio.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.3.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `5`) with the GachaSwipe glassmorphic icon HUD, phasing tab transitions, decluttered Modules desktop, and 100% custom vector icons.
+2. **`PURR-TTS_V1.3.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.3.0 // All-in-One Cyberdeck OS: KittenTTS, 6 Piper Packs, Bottom HUD & Audio Media Exporter
 
 ### ✨ What's New since v1.2.0

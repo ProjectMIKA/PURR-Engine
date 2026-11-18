@@ -61,7 +61,13 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.3.0 // KittenTTS, 6 Piper Voice Packs, Cyberdeck OS Modules & Audio Media Exporter)
+### 🌟 Latest Updates (v1.3.1 // Glassmorphic Icon HUD, Phasing Transitions & Custom Cyberdeck SVG Icons)
+
+* **GachaSwipe-Style Glassmorphic Icon HUD (`MikaBottomHudBar`):** Floating `54dp` translucent bottom capsule positioned neatly above the Android gesture bar so content scrolls underneath, with clean icon-only custom vector buttons (`Voice`, `Modules`, `Cartridge Bay`) and zero text/number clutter.
+* **Phasing Page Transitions & Decluttered `MODULES` Desktop:** Smooth scale + fade + slide phasing transitions between pages and removed the top `CYBERDECK_OS // MODULE_LAUNCHER` header card from `MODULES`.
+* **100% Custom Cyberdeck Vector Icons (`MikaCyberIcon`):** Replaced every stock emoji and Unicode icon across all screens, pills, toggles, sliders, and cartridge controls with crisp Canvas vector geometry.
+
+### 📦 Prior Releases (v1.3.0 // KittenTTS, 6 Piper Voice Packs, Cyberdeck OS Modules & Audio Media Exporter)
 
 * **New Tool — `AUDIO_MEDIA_EXPORTER` (`TOOL-05`, Default ON):** Render short messages or multi-page audiobook chapters into mastered 24kHz `.WAV` files exported directly to `Downloads/PURR-TTS/`, featuring paragraph-aware loose chunking, 18ms raised-cosine crossfade blending, DC removal, and RMS loudness leveling (with full P.U.R.R. & DSP integration when enabled).
 * **KittenTTS Nano + 6 Expandable Piper Voice Packs:** Added `ROM-03: KITTEN_TTS_NANO` (30MB, 8 expressive English voices) plus 6 downloadable Piper VITS expansion sub-cartridges (`Amy US`, `Ryan US`, `Cori GB`, `Alba GB`, `GLaDOS AI`, `Kristin US`) under `ROM-05`, and nested Hexagon NPU (`SUB-02A`) / Adreno GPU (`SUB-02B`) accelerator chips under `ROM-02`.

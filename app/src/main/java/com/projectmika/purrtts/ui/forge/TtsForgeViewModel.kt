@@ -232,7 +232,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             delay(1750L)
             _cartridgeAnim.value = null
         }
-        showToast(if (slotIn) "💾 Slotted [${spec.romCode}: ${spec.name}]" else "⏏️ Ejected [${spec.romCode}: ${spec.name}]")
+        showToast(if (slotIn) "[SLOTTED] ${spec.romCode}: ${spec.name}" else "[EJECTED] ${spec.romCode}: ${spec.name}")
     }
 
     fun toggleSubCartridgeEnabled(spec: ModelBundleSpec, enabled: Boolean) {
@@ -245,7 +245,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         if (!enabled) {
             viewModelScope.launch { backendRouter.evictAllVram() }
         }
-        showToast(if (enabled) "⚡ Activated [${spec.romCode}: ${spec.name}]" else "⏸ Bypassed [${spec.romCode}: ${spec.name}]")
+        showToast(if (enabled) "[ACTIVE] ${spec.romCode}: ${spec.name}" else "[BYPASSED] ${spec.romCode}: ${spec.name}")
     }
 
     fun addPhoneticRule(pattern: String, replacement: String, isRegex: Boolean, category: RuleCategory) {
@@ -652,8 +652,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 _exportProgressFraction.value = 1.0f
                 _exportStatusLabel.value = "READY // ${"%.1f".format(durationSec)}s (${renderedSpeechChunks} CHUNKS)"
                 showToast(
-                    if (publicDownloadLabel.isNotBlank()) "⬇ Saved $publicDownloadLabel!"
-                    else "⬇ Exported $fileName (${"%.1f".format(durationSec)}s)!"
+                    if (publicDownloadLabel.isNotBlank()) "[SAVED] $publicDownloadLabel"
+                    else "[EXPORTED] $fileName (${"%.1f".format(durationSec)}s)"
                 )
             } catch (err: Exception) {
                 _exportStatusLabel.value = "ERROR // ${err.message ?: "Export failed"}"
@@ -753,7 +753,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             val pathLabel = copyWavToPublicDownloads(wavFile, entry.fileName)
             if (pathLabel.isNotBlank()) {
                 repository.registerExportedAudio(entry.copy(publicDownloadPath = pathLabel))
-                showToast("⬇ Downloaded -> $pathLabel")
+                showToast("[SAVED] $pathLabel")
             } else {
                 showToast("Saved in app storage: ${wavFile.name}")
             }

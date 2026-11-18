@@ -19,6 +19,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.LinearProgressIndicator
@@ -60,8 +63,10 @@ import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SymbolShieldConfig
 import com.projectmika.purrtts.ui.theme.CyberDropdown
+import com.projectmika.purrtts.ui.theme.CyberIconType
 import com.projectmika.purrtts.ui.theme.ExpandableTerminalSection
 import com.projectmika.purrtts.ui.theme.MikaColors
+import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaOsModuleIcon
 import com.projectmika.purrtts.ui.theme.MikaTagPill
@@ -148,41 +153,6 @@ fun PurrRulebookTab(
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        // Cyberdeck OS Desktop Status Header
-        MikaGlowPanel(accent = MikaColors.NeonPink) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "> CYBERDECK_OS // MODULE_LAUNCHER",
-                        color = MikaColors.NeonPink,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 11.sp
-                    )
-                    Text(
-                        text = if (activeModules.isEmpty()) {
-                            "// No Tool Modules slotted in Cartridge Bay."
-                        } else {
-                            "// Tap any OS module icon to launch its configuration window."
-                        },
-                        color = MikaColors.DimText,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 9.5.sp
-                    )
-                }
-                MikaTagPill(
-                    label = "+ TOOLS BAY (${activeModules.size}/5)",
-                    selected = true,
-                    activeColor = MikaColors.TerminalGreen,
-                    onClick = onOpenCartridgeBayTools
-                )
-            }
-        }
-
         if (activeModules.isEmpty()) {
             MikaGlowPanel(accent = MikaColors.MikaAmber) {
                 Text(
@@ -286,11 +256,12 @@ fun PurrRulebookTab(
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                horizontalArrangement = Arrangement.spacedBy(7.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
+                                MikaCyberIcon(type = CyberIconType.WINDOW_FRAME, tint = targetModule.accent, size = 13.dp)
                                 Text(
-                                    text = "[ ❐ ${targetModule.title} ]",
+                                    text = targetModule.title,
                                     color = targetModule.accent,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
@@ -302,17 +273,19 @@ fun PurrRulebookTab(
 
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 MikaTagPill(
-                                    label = if (isPlayingPreview) "■ STOP" else "▶ TEST",
+                                    label = if (isPlayingPreview) "STOP" else "TEST",
                                     selected = true,
                                     activeColor = if (isPlayingPreview) MikaColors.DangerRed else MikaColors.TerminalGreen,
+                                    leadingIcon = if (isPlayingPreview) CyberIconType.STOP else CyberIconType.PLAY,
                                     onClick = {
                                         if (isPlayingPreview) viewModel.stopAudition() else viewModel.auditionText()
                                     }
                                 )
                                 MikaTagPill(
-                                    label = "✕ DESKTOP",
+                                    label = "DESKTOP",
                                     selected = true,
                                     activeColor = MikaColors.DangerRed,
+                                    leadingIcon = CyberIconType.CLOSE,
                                     onClick = { openedModule = null }
                                 )
                             }
@@ -421,13 +394,21 @@ private fun OsDesktopAppTile(
                 fontWeight = FontWeight.Bold,
                 fontSize = 8.sp
             )
-            Text(
-                text = "● RUN",
-                color = MikaColors.TerminalGreen,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 8.sp
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MikaColors.TerminalGreen)
+                )
+                Text(
+                    text = "RUN",
+                    color = MikaColors.TerminalGreen,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp
+                )
+            }
         }
 
         MikaOsModuleIcon(
@@ -537,13 +518,18 @@ private fun PurrEngineModuleWindowBody(
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = "${if (isActive) "✓ " else ""}${preset.name}",
-                            color = if (isActive) Color.White else MikaColors.WarmCream,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 12.sp
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            if (isActive) {
+                                MikaCyberIcon(type = CyberIconType.CHECK, tint = accent, size = 11.dp)
+                            }
+                            Text(
+                                text = preset.name,
+                                color = if (isActive) Color.White else MikaColors.WarmCream,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp
+                            )
+                        }
                         Text(
                             text = preset.badgeTag,
                             color = accent,
@@ -579,24 +565,27 @@ private fun PurrEngineModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(6.dp))
         SimplePurrToggle(
-            title = "💬 Slang, Honorifics & Stutters",
+            title = "Slang, Honorifics & Stutters",
             subtitle = "Expands 'omg', 'fr', '-senpai', 'nya~' & 'w-what' cleanly.",
             checked = activeProfile.enableSlangAndHonorifics,
             accent = MikaColors.TerminalGreen,
+            icon = CyberIconType.CHAT_SLANG,
             onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSlangAndHonorifics = v) } }
         )
         SimplePurrToggle(
-            title = "⏸️ MIKASTOP Natural Breath Pauses",
-            subtitle = "Splits '...', '—', and commas into clean silence gaps.",
+            title = "MIKASTOP Natural Breath Pauses",
+            subtitle = "Splits '...', em-dash, and commas into clean silence gaps.",
             checked = activeProfile.enableMikaStopPauses,
             accent = MikaColors.MikaAmber,
+            icon = CyberIconType.PAUSE,
             onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableMikaStopPauses = v) } }
         )
         SimplePurrToggle(
-            title = "🎭 Emotion & Archetype Acting",
+            title = "Emotion & Archetype Acting",
             subtitle = "Adapts speech speed & pitch to sentence emotion.",
             checked = activeProfile.sentimentConfig.enabled,
             accent = MikaColors.NeonPink,
+            icon = CyberIconType.DUAL_MASKS,
             onToggle = { v ->
                 viewModel.updateActiveProfile { it.copy(sentimentConfig = it.sentimentConfig.copy(enabled = v)) }
             }
@@ -632,7 +621,7 @@ private fun PurrEngineModuleWindowBody(
             onValueChange = { v -> viewModel.updateMikaStopConfig { it.copy(ellipsisPauseMs = v.roundToInt()) } }
         )
         TerminalSlider(
-            label = "EM_DASH (— / ~)",
+            label = "EM_DASH (-- / ~)",
             valueText = "${activeProfile.mikaStopConfig.emDashPauseMs} ms",
             value = activeProfile.mikaStopConfig.emDashPauseMs.toFloat(),
             valueRange = 80f..900f,
@@ -846,17 +835,19 @@ private fun DspRackModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(6.dp))
         SimplePurrToggle(
-            title = "🎧 Studio Audio Polish (24kHz DSP)",
+            title = "Studio Audio Polish (24kHz DSP)",
             subtitle = "GachaSwipe 80Hz sub-cut, chest warmth, 8.5kHz de-esser & glue compressor.",
             checked = activeProfile.enableDsp,
             accent = MikaColors.NeonCyan,
+            icon = CyberIconType.HEADPHONES_DSP,
             onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableDsp = v) } }
         )
         SimplePurrToggle(
-            title = "🌊 Sentence Tail Taper (GachaSwipe 120ms Fade)",
+            title = "Sentence Tail Taper (GachaSwipe 120ms Fade)",
             subtitle = "Smoothly tapers off the voice at the end of every sentence and gates tail clicks.",
             checked = activeProfile.dspConfig.enableSentenceTaper,
             accent = MikaColors.NeonPurple,
+            icon = CyberIconType.WAVE_TAPER,
             onToggle = { v ->
                 viewModel.updateActiveProfile { it.copy(dspConfig = it.dspConfig.copy(enableSentenceTaper = v)) }
             }
@@ -957,10 +948,11 @@ private fun SymbolShieldModuleWindowBody(
 ) {
     MikaGlowPanel(accent = MikaColors.TerminalGreen) {
         SimplePurrToggle(
-            title = "🛡️ Symbol & Punctuation Shield",
+            title = "Symbol & Punctuation Shield",
             subtitle = "Intercept quotes, commas & audiobook symbols in MIKA so TTS models never hallucinate.",
             checked = activeProfile.enableSymbolShield,
             accent = MikaColors.TerminalGreen,
+            icon = CyberIconType.SHIELD_GUARD,
             onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSymbolShield = v) } }
         )
 
@@ -1079,7 +1071,7 @@ private fun SymbolShieldModuleWindowBody(
 
     MikaGlowPanel(accent = MikaColors.TerminalGreen) {
         SimplePurrToggle(
-            title = "Strip Quotes (\" “ ” ‘ ’)",
+            title = "Strip Quotes (\" ')",
             subtitle = "Keep contractions like don't / I'm while removing dialogue quote marks.",
             checked = activeProfile.symbolShieldConfig.stripQuotationMarks,
             accent = MikaColors.TerminalGreen,
@@ -1127,9 +1119,10 @@ private fun SymbolShieldModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(6.dp))
         MikaTagPill(
-            label = "↺ RESET DEFAULT SYMBOLS",
+            label = "RESET DEFAULT SYMBOLS",
             selected = true,
             activeColor = MikaColors.MikaAmber,
+            leadingIcon = CyberIconType.REFRESH,
             onClick = {
                 viewModel.updateActiveProfile { p ->
                     p.copy(symbolShieldConfig = p.symbolShieldConfig.copy(customSkippedChars = SymbolShieldConfig().customSkippedChars))
@@ -1165,7 +1158,7 @@ private fun CloneStudioModuleWindowBody(
             lineHeight = 14.sp
         )
         Spacer(modifier = Modifier.height(10.dp))
-        Box(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
@@ -1173,10 +1166,13 @@ private fun CloneStudioModuleWindowBody(
                 .border(1.5.dp, MikaColors.NeonPurple, RoundedCornerShape(6.dp))
                 .clickable(onClick = onOpenCloneStudio)
                 .padding(vertical = 11.dp),
-            contentAlignment = Alignment.Center
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
         ) {
+            MikaCyberIcon(type = CyberIconType.DNA_CLONE, tint = MikaColors.NeonPurple, size = 14.dp)
+            Spacer(modifier = Modifier.width(8.dp))
             Text(
-                text = "🧬 LAUNCH 5S VOICE RECORDER & CLONE WORKSHOP",
+                text = "LAUNCH 5S VOICE RECORDER & CLONE WORKSHOP",
                 color = MikaColors.WarmCream,
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
@@ -1223,7 +1219,7 @@ private fun CloneStudioModuleWindowBody(
                                 fontSize = 11.sp
                             )
                             Text(
-                                text = "${clone.family.label} • ${clone.tags.take(3).joinToString(", ")}",
+                                text = "${clone.family.label} / ${clone.tags.take(3).joinToString(", ")}",
                                 color = MikaColors.NeonPurple,
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 9.sp
@@ -1383,7 +1379,7 @@ private fun AudioExporterModuleWindowBody(
 
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            text = "CHARS: ${exportBody.length} • WORDS: $estWords • EST_CHUNKS: ~$estChunks",
+            text = "CHARS: ${exportBody.length} | WORDS: $estWords | EST_CHUNKS: ~$estChunks",
             color = MikaColors.DimText,
             fontFamily = FontFamily.Monospace,
             fontSize = 9.sp
@@ -1426,17 +1422,19 @@ private fun AudioExporterModuleWindowBody(
             onValueChange = { v -> paragraphPauseMs = (v.roundToInt() / 50) * 50 }
         )
         SimplePurrToggle(
-            title = "🔗 Cosine Crossfade & Boundary De-Click",
+            title = "Cosine Crossfade & Boundary De-Click",
             subtitle = "18ms raised-cosine overlap blending & DC offset removal across chunks.",
             checked = smoothTransitions,
             accent = MikaColors.TerminalGreen,
+            icon = CyberIconType.CROSSFADE_LINK,
             onToggle = { smoothTransitions = it }
         )
         SimplePurrToggle(
-            title = "🎚️ Auto-Level Sentence Loudness (-18 dBFS RMS)",
+            title = "Auto-Level Sentence Loudness (-18 dBFS RMS)",
             subtitle = "Matches loudness evenly between sentences & paragraphs + soft master limiter.",
             checked = normalizeLoudness,
             accent = MikaColors.NeonCyan,
+            icon = CyberIconType.SLIDER_FADER,
             onToggle = { normalizeLoudness = it }
         )
 
@@ -1463,14 +1461,15 @@ private fun AudioExporterModuleWindowBody(
                     modifier = Modifier.weight(1f)
                 )
                 MikaTagPill(
-                    label = "✕ CANCEL",
+                    label = "CANCEL",
                     selected = true,
                     activeColor = MikaColors.DangerRed,
+                    leadingIcon = CyberIconType.CLOSE,
                     onClick = { viewModel.cancelAudioExport() }
                 )
             }
         } else {
-            Box(
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
@@ -1487,10 +1486,13 @@ private fun AudioExporterModuleWindowBody(
                         )
                     }
                     .padding(vertical = 12.dp),
-                contentAlignment = Alignment.Center
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
             ) {
+                MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.SsrGold, size = 14.dp)
+                Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "⬇ RENDER & DOWNLOAD .WAV MEDIA FILE",
+                    text = "RENDER & DOWNLOAD .WAV MEDIA FILE",
                     color = MikaColors.SsrGold,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
@@ -1547,7 +1549,7 @@ private fun AudioExporterModuleWindowBody(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = "${"%.1f".format(entry.durationSec)}s • $sizeText • ${entry.chunkCount} chunks • ${entry.voiceLabel}",
+                                    text = "${"%.1f".format(entry.durationSec)}s | $sizeText | ${entry.chunkCount} chunks | ${entry.voiceLabel}",
                                     color = MikaColors.SsrGold,
                                     fontFamily = FontFamily.Monospace,
                                     fontSize = 8.5.sp,
@@ -1555,29 +1557,37 @@ private fun AudioExporterModuleWindowBody(
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 if (entry.publicDownloadPath.isNotBlank()) {
-                                    Text(
-                                        text = "✓ ${entry.publicDownloadPath}",
-                                        color = MikaColors.TerminalGreen,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 8.5.sp
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        MikaCyberIcon(type = CyberIconType.CHECK, tint = MikaColors.TerminalGreen, size = 10.dp)
+                                        Text(
+                                            text = entry.publicDownloadPath,
+                                            color = MikaColors.TerminalGreen,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 8.5.sp
+                                        )
+                                    }
                                 }
                             }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             MikaTagPill(
-                                label = if (isPlayingPreview) "■ STOP" else "▶ PLAY",
+                                label = if (isPlayingPreview) "STOP" else "PLAY",
                                 selected = true,
                                 activeColor = MikaColors.TerminalGreen,
+                                leadingIcon = if (isPlayingPreview) CyberIconType.STOP else CyberIconType.PLAY,
                                 onClick = {
                                     if (isPlayingPreview) viewModel.stopAudition()
                                     else viewModel.playExportedAudioFile(entry)
                                 }
                             )
                             MikaTagPill(
-                                label = "⬇ SAVE TO DOWNLOADS",
+                                label = "SAVE TO DOWNLOADS",
                                 selected = true,
                                 activeColor = MikaColors.NeonCyan,
+                                leadingIcon = CyberIconType.DOWNLOAD,
                                 onClick = { viewModel.saveExportedFileToDownloads(entry) }
                             )
                             MikaTagPill(
@@ -1637,6 +1647,7 @@ private fun SimplePurrToggle(
     subtitle: String,
     checked: Boolean,
     accent: Color,
+    icon: CyberIconType? = null,
     onToggle: (Boolean) -> Unit
 ) {
     Row(
@@ -1647,13 +1658,21 @@ private fun SimplePurrToggle(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f).padding(end = 10.dp)) {
-            Text(
-                text = title,
-                color = if (checked) Color.White else MikaColors.DimText,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 11.sp
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (icon != null) {
+                    MikaCyberIcon(type = icon, tint = if (checked) accent else MikaColors.DimText, size = 13.dp)
+                }
+                Text(
+                    text = title,
+                    color = if (checked) Color.White else MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 11.sp
+                )
+            }
             Text(
                 text = subtitle,
                 color = MikaColors.DimText,
