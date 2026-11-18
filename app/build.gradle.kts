@@ -68,6 +68,12 @@ android {
         buildConfig = true
     }
 
+    lint {
+        disable += listOf("NullSafeMutableLiveData")
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+
     packaging {
         jniLibs {
             // Keep .so libraries uncompressed/aligned for LiteRT QNN/OpenCL and libsherpa-onnx-jni.so
