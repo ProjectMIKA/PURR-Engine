@@ -184,7 +184,7 @@ object PurrCloneAudioCleaner {
 
     // ---------- Biquad (self-contained 2-pole filter) ----------
 
-    internal data class Biquad(val b0: Double, val b1: Double, val b2: Double, val a1: Double, val a2: Double) {
+    data class Biquad(val b0: Double, val b1: Double, val b2: Double, val a1: Double, val a2: Double) {
         companion object {
             fun highPass(sampleRate: Double, freqHz: Double, q: Double = 0.707): Biquad {
                 val w0 = 2.0 * PI * freqHz / sampleRate
