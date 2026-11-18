@@ -1,3 +1,30 @@
+# 🌌 PURR-TTS v1.3.3 // The Unshifting Header
+
+### ✨ What's New since v1.3.2
+
+Master spotted the top hardware badge (`[CPU NEON]` etc.) resizing on every synthesis state change — re-measuring the pinned header, re-wrapping the title onto two lines, and shifting the entire page below. Fixed at the layout-contract level with a new **Fixed-Size Slot Law**! 🐾
+
+* **📐 FIXED-SIZE HEADER HUD (`TtsForgeScreen`)**:
+  * Header title shortened to **`> PURR_TTS // ENGINE`**, tuned to `14sp` + `1.0sp` tracking, and hard-capped at `maxLines = 1` with ellipsis overflow so it can never wrap onto a second line again.
+  * The pinned header row now declares `heightIn(min = 56.dp)` — constant header height regardless of content.
+* **🔧 FIXED-WIDTH HARDWARE BADGE SLOT (`MikaStatusBadge`)**:
+  * The badge now renders inside a fixed `112dp` slot sized for the longest label (`[NPU ACTIVE]`); `[IDLE]` → `[CORE_OS]` → `[CPU NEON]` swaps and the VRAM countdown appearing/disappearing can no longer change the pill's width or the title column's layout.
+  * Badge label + countdown texts render `maxLines = 1` and clip inside the slot instead of growing it.
+* **🧪 TEST SUITE EXPANSION (3 new pure-JVM suites)**:
+  * **`PurrSentimentScorerTest`** — five emotion axes, emoji boosts, forced archetype tones, the v1.3.2 pitch-lock law (pitch stays bit-exact `1.00x` for every tone at default base pitch), archetype pace overrides (ROBOT 0.98x / KUUDERE 0.97x / YANDERE ≤ 0.94x), ACTION narration multipliers, and prosody coercion bounds.
+  * **`PurrVoiceMatcherTest`** — blacklist/whitelist contracts, language & gender gates, tag scoring with Forge custom-tag bonus, primary-voice tiebreak, deterministic name-hash fallback, and built-in catalog integration.
+  * **`PurrDspProcessorTest`** — MIKASTOP silence byte contracts (PCM16 + Float32, custom sample rates, 0–5000ms clamp), IEEE little-endian float32 encoding, dithered PCM16 conversion roundtrips, and 32-band waveform telemetry bins.
+* **📚 WORKSPACE DOCTRINE**: Added `.clinerules/` (project overview, build & release, environment conventions) and three workspace skills (`.agents/skills/`: `purr-native-engine`, `purr-release`, `mika-compose-ui`) documenting the engine laws and the scar log.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.3.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `7`) with the fixed-size header HUD, fixed-width badge slot, and expanded pure-JVM test coverage.
+2. **`PURR-TTS_V1.3.3.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.3.2 // Crystal-Clear Audio, KittenTTS Fix & Full OOV Word Pronunciation
 
 ### ✨ What's New since v1.3.1

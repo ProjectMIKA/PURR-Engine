@@ -61,7 +61,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.3.2 // Crystal-Clear Audio, KittenTTS Fix & Full OOV Word Pronunciation)
+### 🌟 Latest Updates (v1.3.3 // The Unshifting Header)
+
+* **Fixed-Size Header HUD (`TtsForgeScreen`):** Header title is now `> PURR_TTS // ENGINE` at `14sp`/`1.0sp` tracking, hard-capped to a single line with ellipsis, and the pinned header row declares `heightIn(min = 56.dp)` — the header area can no longer change height when content above/below changes.
+* **Fixed-Width Hardware Badge Slot (`MikaStatusBadge`):** The `[CPU NEON]`/`[NPU ACTIVE]`/`[IDLE]` badge now renders inside a fixed `112dp` slot with `maxLines = 1` label + countdown, so synthesis state swaps and the VRAM countdown can never resize the pill or shift the whole UI.
+* **Test Suite Expansion:** Three new pure-JVM suites — `PurrSentimentScorerTest` (emotion axes, forced tones, pitch-lock law, prosody bounds), `PurrVoiceMatcherTest` (gates, tag scoring, deterministic fallback), and `PurrDspProcessorTest` (silence byte contracts, float32/PCM16 formats, waveform bins).
+* **Workspace Doctrine:** Added `.clinerules/` (overview, build & release, conventions) and workspace skills (`.agents/skills/`: `purr-native-engine`, `purr-release`, `mika-compose-ui`).
+
+### 📦 Prior Releases (v1.3.2 // Crystal-Clear Audio, KittenTTS Fix & Full OOV Word Pronunciation)
 
 * **Restored `espeak-ng` G2P (`sherpa-onnx v1.13.8`):** Fixes `ROM-03: KITTEN_TTS_NANO` speech synthesis (which relies exclusively on `espeak-ng-data`) and restores automatic `espeak-ng` Grapheme-to-Phoneme fallback in Kokoro/Piper so difficult, rare, and out-of-vocabulary (OOV) words are never skipped.
 * **Zero-Buzz Crystal-Clear Default Audio (`PurrDspProcessor` & `PurrSentimentScorer`):** Made `CLEAN_STUDIO` truly transparent (flat `0 dB` EQ, compressor bypass unless an effect preset is selected, `0.92` peak ceiling), stopped automatic sentiment from triggering pitch resampling when Pitch is `1.00x`, upgraded `resampleMono` (`22.05kHz → 24kHz`) to 4-point Catmull-Rom Cubic Hermite interpolation, and fixed `AudioTrack` silence buffer underruns.
