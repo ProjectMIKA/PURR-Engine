@@ -51,8 +51,8 @@ class PurrDspProcessorTest {
         // NOTE: compare via .toInt() — assertEquals(Int, Byte) boxes to Integer-vs-Byte and always fails.
         // 0.0f => 0x00000000
         assertEquals(0, bytes[0].toInt()); assertEquals(0, bytes[1].toInt()); assertEquals(0, bytes[2].toInt()); assertEquals(0, bytes[3].toInt())
-        // 0.5f => 0x3F800000 => LE 00 00 80 3F
-        assertEquals(0, bytes[4].toInt()); assertEquals(0, bytes[5].toInt()); assertEquals(0x80.toByte(), bytes[6]); assertEquals(0x3F.toByte(), bytes[7])
+        // 0.5f => 0x3F000000 (biased exp 126) => LE 00 00 00 3F
+        assertEquals(0, bytes[4].toInt()); assertEquals(0, bytes[5].toInt()); assertEquals(0, bytes[6].toInt()); assertEquals(0x3F.toByte(), bytes[7])
         // -1.0f => 0xBF800000 => LE 00 00 80 BF
         assertEquals(0, bytes[8].toInt()); assertEquals(0, bytes[9].toInt()); assertEquals(0x80.toByte(), bytes[10]); assertEquals(0xBF.toByte(), bytes[11])
         // 2.0f clamps to 1.0f => LE 00 00 80 3F
