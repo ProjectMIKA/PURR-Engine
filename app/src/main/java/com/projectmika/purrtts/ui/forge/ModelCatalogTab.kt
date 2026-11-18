@@ -39,9 +39,9 @@ import com.projectmika.purrtts.ui.theme.MikaTagPill
 /**
  * ✨ TAB 3: RETRO CYBERDECK ROM CARTRIDGE BAY (MODEL CATALOG) ✨
  * Mirrors GachaSwipe's `> EXPANSION_BAY // ROM_CARTRIDGES` design:
- * - 6-Bay Cyberdeck Motherboard Pin Rack Visualizer
- * - Physical Molded ROM Cartridge Cards (`ROM-01`..`ROM-06`)
- * - Download bundle -> Slam Cartridge In (mounts voices) or Eject Cartridge (evicts & hides)
+ * - ${modelCatalog.size}-Bay Cyberdeck Motherboard Pin Rack Visualizer
+ * - Physical Molded ROM Cartridge Cards (`ROM-01`..`ROM-08`)
+ * - Eject/Slam ROM-01 (System OS Voices) or Download -> Slam Offline NPU/GPU/Sherpa ROMs
  */
 @Composable
 fun ModelCatalogTab(
@@ -57,7 +57,7 @@ fun ModelCatalogTab(
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-        // 1. Cyberdeck 6-Bay Motherboard Pin Rack Visualizer
+        // 1. Cyberdeck 8-Bay Motherboard Pin Rack Visualizer
         MikaGlowPanel(accent = MikaColors.NeonCyan) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -65,7 +65,7 @@ fun ModelCatalogTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    text = "🔌 MOTHERBOARD_BUS // 6-BAY RACK",
+                    text = "🔌 MOTHERBOARD_BUS // ${modelCatalog.size}-BAY RACK",
                     color = MikaColors.NeonCyan,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
@@ -94,7 +94,7 @@ fun ModelCatalogTab(
                 horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 modelCatalog.forEachIndexed { idx, spec ->
-                    val isInstalled = forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED
+                    val isInstalled = spec.isBuiltInOsCartridge || forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED
                     val isSlotted = spec.id in forgeState.slottedCartridges
                     val accent = Color(spec.accentHex)
 
@@ -149,7 +149,7 @@ fun ModelCatalogTab(
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = "// CORE_OS (Built-in Device Speech) is soldered to the motherboard. Download & slam offline ROM Cartridges below to unlock Kokoro-82M, Supertonic 3, Piper, & Voice Cloning!",
+                text = "// ROM-01 (Device OS Speech) is pre-installed and ejectable to disable system voices. Download & slam ROM-02..ROM-08 for Hexagon NPU / Adreno GPU FP16, Kokoro-82M, Supertonic 3, Piper, & Voice Cloning!",
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 9.5.sp,
@@ -188,9 +188,10 @@ fun ModelCatalogTab(
         // 2. Physical Molded ROM Cartridge Cards
         modelCatalog.forEach { spec ->
             val bundleState = forgeState.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)
-            val isInstalled = bundleState.state == DownloadState.INSTALLED
+            val isInstalled = spec.isBuiltInOsCartridge || bundleState.state == DownloadState.INSTALLED
             val isSlotted = isInstalled && spec.id in forgeState.slottedCartridges
             val accent = Color(spec.accentHex)
+            val sizeLabel = if (spec.isBuiltInOsCartridge) "BUILT-IN" else "${spec.approximateSizeMb}MB"
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -281,7 +282,7 @@ fun ModelCatalogTab(
                                         .padding(horizontal = 5.dp, vertical = 1.dp)
                                 )
                                 Text(
-                                    text = "// ${spec.badge} • ${spec.approximateSizeMb}MB",
+                                    text = "// ${spec.badge} • $sizeLabel",
                                     color = if (isSlotted) MikaColors.VoidBg else Color.White.copy(alpha = 0.55f),
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
@@ -439,7 +440,13 @@ fun ModelCatalogTab(
                                         .padding(vertical = 9.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("▲ EJECT CARTRIDGE", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                                    Text(
+                                        text = if (spec.isBuiltInOsCartridge) "▲ EJECT CARTRIDGE (DISABLE OS)" else "▲ EJECT CARTRIDGE",
+                                        color = MikaColors.DangerRed,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp
+                                    )
                                 }
                                 Box(
                                     modifier = Modifier
@@ -464,18 +471,26 @@ fun ModelCatalogTab(
                                         .padding(vertical = 9.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text("▼ SLAM CARTRIDGE IN", color = accent, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                                    Text(
+                                        text = if (spec.isBuiltInOsCartridge) "▼ SLAM CARTRIDGE IN (ENABLE OS VOICES)" else "▼ SLAM CARTRIDGE IN",
+                                        color = accent,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp
+                                    )
                                 }
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(5.dp))
-                                        .background(MikaColors.DangerRed.copy(alpha = 0.10f))
-                                        .border(1.dp, MikaColors.DangerRed.copy(alpha = 0.5f), RoundedCornerShape(5.dp))
-                                        .clickable { viewModel.deleteModelBundle(spec) }
-                                        .padding(horizontal = 10.dp, vertical = 9.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("DEL", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                if (!spec.isBuiltInOsCartridge) {
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(5.dp))
+                                            .background(MikaColors.DangerRed.copy(alpha = 0.10f))
+                                            .border(1.dp, MikaColors.DangerRed.copy(alpha = 0.5f), RoundedCornerShape(5.dp))
+                                            .clickable { viewModel.deleteModelBundle(spec) }
+                                            .padding(horizontal = 10.dp, vertical = 9.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text("DEL", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, fontSize = 10.sp)
+                                    }
                                 }
                             }
                         }
@@ -521,7 +536,7 @@ fun ModelCatalogTab(
                         fontSize = 8.5.sp
                     )
                     Text(
-                        text = "SHA-256: ${spec.expectedSha256.take(10)}...",
+                        text = if (spec.isBuiltInOsCartridge) "${spec.romCode} // OS BINDER" else "SHA-256: ${spec.expectedSha256.take(10)}...",
                         color = MikaColors.DimText,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 8.5.sp

@@ -19,18 +19,25 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -47,6 +54,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -56,6 +64,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
+import com.projectmika.purrtts.core.purr.VoiceDescriptor
+import com.projectmika.purrtts.core.purr.VoiceGender
 import kotlinx.coroutines.delay
 
 /**
@@ -780,5 +790,332 @@ fun LiveWaveformMonitor(
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
+    }
+}
+
+/**
+ * Stylized Cyberdeck Expandable Voice Dropdown Selector:
+ * Displays the active voice card cleanly at the top, with an expandable searchable/filterable
+ * scrollable drawer of voices + inline audition buttons.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun MikaVoiceDropdownSelector(
+    label: String,
+    voices: List<VoiceDescriptor>,
+    selectedVoice: VoiceDescriptor?,
+    onSelectVoice: (VoiceDescriptor) -> Unit,
+    onSampleVoice: (VoiceDescriptor) -> Unit,
+    modifier: Modifier = Modifier,
+    accent: Color = MikaColors.TerminalGreen,
+    onRefreshAction: (() -> Unit)? = null,
+    emptyHint: String = "No voices available. Slam a cartridge in Tab 3!"
+) {
+    var expanded by remember(label) { mutableStateOf(false) }
+    var searchQuery by remember(label) { mutableStateOf("") }
+    var genderFilter by remember(label) { mutableStateOf<VoiceGender?>(null) }
+
+    val filteredVoices = remember(voices, searchQuery, genderFilter) {
+        voices.filter { v ->
+            if (genderFilter != null && v.gender != genderFilter) return@filter false
+            if (searchQuery.isNotBlank()) {
+                val q = searchQuery.trim().lowercase()
+                val matchName = v.displayName.lowercase().contains(q) || v.id.lowercase().contains(q)
+                val matchLang = v.languageCode.lowercase().contains(q)
+                val matchTag = v.nativeTags.any { it.lowercase().contains(q) }
+                if (!matchName && !matchLang && !matchTag) return@filter false
+            }
+            true
+        }
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        // Header row with label and optional Refresh trigger
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                color = accent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                letterSpacing = 0.6.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (onRefreshAction != null) {
+                Text(
+                    text = "↻ REFRESH",
+                    color = MikaColors.NeonCyan,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .clickable(onClick = onRefreshAction)
+                        .padding(horizontal = 4.dp, vertical = 2.dp)
+                )
+            }
+        }
+
+        // Stylized Selected Voice Trigger Box
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(8.dp))
+                .background(MikaColors.DeepWellBg)
+                .border(
+                    width = if (expanded) 1.5.dp else 1.dp,
+                    color = if (expanded) accent else accent.copy(alpha = 0.55f),
+                    shape = RoundedCornerShape(8.dp)
+                )
+                .clickable { if (voices.isNotEmpty()) expanded = !expanded }
+                .padding(11.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    if (selectedVoice != null) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "[${selectedVoice.gender.tag.uppercase()} • ${selectedVoice.languageCode}]",
+                                color = accent,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 9.sp,
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(3.dp))
+                                    .background(accent.copy(alpha = 0.14f))
+                                    .padding(horizontal = 5.dp, vertical = 1.dp)
+                            )
+                            Text(
+                                text = selectedVoice.nativeTags.take(2).joinToString(" • "),
+                                color = MikaColors.DimText,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            text = selectedVoice.displayName,
+                            color = Color.White,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 13.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    } else {
+                        Text(
+                            text = emptyHint,
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (selectedVoice != null) {
+                        MikaTagPill(
+                            label = "▶ TEST",
+                            selected = true,
+                            activeColor = MikaColors.NeonCyan,
+                            onClick = { onSampleVoice(selectedVoice) }
+                        )
+                    }
+                    MikaTagPill(
+                        label = if (expanded) "▲ CLOSE" else "▼ CHANGE",
+                        selected = expanded,
+                        activeColor = accent,
+                        inactiveColor = accent,
+                        onClick = { if (voices.isNotEmpty()) expanded = !expanded }
+                    )
+                }
+            }
+        }
+
+        // Expandable Cyberdeck Search + Filter + Scrollable Voice List Panel
+        AnimatedVisibility(visible = expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 6.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF06040C))
+                    .border(1.5.dp, accent.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    placeholder = {
+                        Text(
+                            "Search voice name, language, or vibe tag...",
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 10.sp,
+                            color = MikaColors.DimText
+                        )
+                    },
+                    singleLine = true,
+                    textStyle = TextStyle(
+                        color = accent,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = accent,
+                        unfocusedBorderColor = accent.copy(alpha = 0.35f),
+                        focusedContainerColor = MikaColors.PanelBg,
+                        unfocusedContainerColor = MikaColors.PanelBg
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        MikaTagPill(
+                            label = "ALL",
+                            selected = genderFilter == null,
+                            activeColor = accent,
+                            onClick = { genderFilter = null }
+                        )
+                        VoiceGender.entries.forEach { g ->
+                            MikaTagPill(
+                                label = g.tag.uppercase(),
+                                selected = genderFilter == g,
+                                activeColor = MikaColors.NeonCyan,
+                                onClick = { genderFilter = if (genderFilter == g) null else g }
+                            )
+                        }
+                    }
+                    Text(
+                        text = "[ ${filteredVoices.size} MATCH ]",
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 8.5.sp
+                    )
+                }
+
+                if (filteredVoices.isEmpty()) {
+                    Text(
+                        text = emptyHint,
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 10.sp,
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 260.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        items(filteredVoices, key = { it.id }) { voice ->
+                            val isSelected = selectedVoice?.id == voice.id
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(
+                                        if (isSelected) accent.copy(alpha = 0.16f)
+                                        else Color.White.copy(alpha = 0.03f)
+                                    )
+                                    .border(
+                                        width = if (isSelected) 1.dp else 0.5.dp,
+                                        color = if (isSelected) accent else Color.White.copy(alpha = 0.12f),
+                                        shape = RoundedCornerShape(6.dp)
+                                    )
+                                    .clickable {
+                                        onSelectVoice(voice)
+                                        expanded = false
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(
+                                    modifier = Modifier.weight(1f),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Text(
+                                        text = if (isSelected) "●" else "○",
+                                        color = if (isSelected) accent else MikaColors.DimText,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 11.sp
+                                    )
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            text = voice.displayName,
+                                            color = if (isSelected) Color.White else MikaColors.CyanWhite,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                        Text(
+                                            text = "[${voice.languageCode}] ${voice.nativeTags.take(3).joinToString(" • ")}",
+                                            color = if (isSelected) accent else MikaColors.DimText,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 9.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(MikaColors.NeonCyan.copy(alpha = 0.14f))
+                                        .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                                        .clickable { onSampleVoice(voice) }
+                                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "▶",
+                                        color = MikaColors.NeonCyan,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 10.sp
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }

@@ -95,13 +95,23 @@ class PurrProfileRepository(context: Context) {
     fun setCartridgeSlotted(cartridgeId: String, slotted: Boolean) {
         updateState { s ->
             val nextSlotted = if (slotted) s.slottedCartridges + cartridgeId else s.slottedCartridges - cartridgeId
-            // If active profile was using the ejected cartridge, cleanly drop back to CORE_OS
+            val fallbackCart = nextSlotted.firstOrNull()
+            val fallbackSpec = fallbackCart?.let { id ->
+                PurrDefaultPresets.modelCatalog().firstOrNull { it.id == id }
+            }
+            val availableVoices = PurrDefaultPresets.builtInVoices() + _discoveredSystemVoices.value
+            val fallbackVoice = if (fallbackCart != null) {
+                availableVoices.firstOrNull { it.cartridgeId == fallbackCart }
+            } else {
+                null
+            }
             val nextProfiles = s.profiles.map { p ->
-                if (!slotted && p.selectedCartridgeId == cartridgeId) {
+                if (!slotted && p.selectedCartridgeId == cartridgeId && fallbackCart != null) {
                     p.copy(
-                        selectedCartridgeId = "core_os",
-                        preferredBackend = BackendType.CORE_OS,
-                        primaryVoiceId = "core_os_auto"
+                        selectedCartridgeId = fallbackCart,
+                        preferredBackend = fallbackVoice?.engine ?: fallbackSpec?.backend ?: p.preferredBackend,
+                        sherpaFamily = fallbackSpec?.sherpaFamily ?: p.sherpaFamily,
+                        primaryVoiceId = fallbackVoice?.id ?: p.primaryVoiceId
                     )
                 } else {
                     p
@@ -112,7 +122,7 @@ class PurrProfileRepository(context: Context) {
     }
 
     fun isCartridgeSlotted(cartridgeId: String): Boolean =
-        cartridgeId == "core_os" || cartridgeId == "proxy_lan" || cartridgeId in _state.value.slottedCartridges
+        cartridgeId == "proxy_lan" || cartridgeId in _state.value.slottedCartridges
 
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
@@ -121,8 +131,8 @@ class PurrProfileRepository(context: Context) {
 
         updateActiveProfile { p ->
             when (cartridgeId) {
-                "core_os" -> p.copy(
-                    selectedCartridgeId = "core_os",
+                "rom_core_os", "core_os" -> p.copy(
+                    selectedCartridgeId = "rom_core_os",
                     preferredBackend = BackendType.CORE_OS,
                     primaryVoiceId = voicesForCart.firstOrNull()?.id ?: "core_os_auto"
                 )
@@ -279,7 +289,35 @@ class PurrProfileRepository(context: Context) {
         if (!stateFile.exists()) return PurrForgeState()
         return runCatching {
             val decoded = json.decodeFromString<PurrForgeState>(stateFile.readText())
-            if (decoded.profiles.isEmpty()) PurrForgeState() else decoded
+            if (decoded.profiles.isEmpty()) return@runCatching PurrForgeState()
+            val normalizedProfiles = decoded.profiles.map { p ->
+                if (p.selectedCartridgeId == "core_os") {
+                    p.copy(selectedCartridgeId = "rom_core_os")
+                } else {
+                    p
+                }
+            }
+            val coreOsState = ModelBundleState(
+                specId = "rom_core_os",
+                state = DownloadState.INSTALLED,
+                sha256Verified = true,
+                localPath = "android://system_tts"
+            )
+            val isLegacyState = !decoded.hasMigratedCoreOsCartridge || "rom_core_os" !in decoded.modelStates
+            val normalizedModelStates = decoded.modelStates.toMutableMap().apply {
+                put("rom_core_os", coreOsState)
+            }
+            val normalizedSlotted = if (isLegacyState) {
+                decoded.slottedCartridges + "rom_core_os"
+            } else {
+                decoded.slottedCartridges
+            }
+            decoded.copy(
+                profiles = normalizedProfiles,
+                modelStates = normalizedModelStates,
+                slottedCartridges = normalizedSlotted,
+                hasMigratedCoreOsCartridge = true
+            )
         }.getOrElse {
             PurrForgeState()
         }

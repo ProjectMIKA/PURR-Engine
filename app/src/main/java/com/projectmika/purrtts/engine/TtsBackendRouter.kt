@@ -7,6 +7,7 @@ import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrProfileRepository
+import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.engine.litert.LiteRtKokoroEngine
 import com.projectmika.purrtts.engine.proxy.ExternalProxyEngine
 import com.projectmika.purrtts.engine.sherpa.SherpaOnnxEngine
@@ -62,18 +63,63 @@ class TtsBackendRouter(
 
         var rawOutcome = when (selectedBackend) {
             BackendType.LITERT_NPU_GPU -> {
-                liteRtEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
+                var litertOut = liteRtEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
+                if (litertOut.pcmFloat24k.isEmpty() && sherpaEngine.isFamilyInstalled(SherpaModelFamily.KOKORO)) {
+                    val npuAwareOut = sherpaEngine.synthesizeChunk(
+                        text = chunk.text,
+                        voiceId = voiceId.substringAfter(':'),
+                        speakingRate = effectiveRate,
+                        pitch = effectivePitch,
+                        profile = profile.copy(
+                            preferredBackend = BackendType.SHERPA_ONNX,
+                            sherpaFamily = SherpaModelFamily.KOKORO
+                        )
+                    )
+                    if (npuAwareOut.pcmFloat24k.isNotEmpty()) {
+                        val badge = if (liteRtEngine.isNpuG2pReady) {
+                            HardwareStatusBadge.NPU_ACTIVE
+                        } else {
+                            HardwareStatusBadge.GPU_FP16
+                        }
+                        val summary = if (liteRtEngine.isNpuG2pReady) {
+                            "Hexagon NPU G2P + Kokoro-82M Neural"
+                        } else {
+                            "LiteRT Kokoro-82M Neural"
+                        }
+                        litertOut = npuAwareOut.copy(
+                            hardwareBadge = badge,
+                            engineSummary = summary
+                        )
+                    }
+                }
+                litertOut
             }
             BackendType.SHERPA_ONNX -> {
                 sherpaEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
             }
-            BackendType.CORE_OS, BackendType.EXTERNAL_PROXY -> {
+            BackendType.CORE_OS -> {
+                if (!repository.isCartridgeSlotted("rom_core_os")) {
+                    SynthesisOutcome(
+                        pcmFloat24k = FloatArray(0),
+                        sampleRateHz = PurrDspProcessor.SAMPLE_RATE_HZ,
+                        hardwareBadge = HardwareStatusBadge.IDLE,
+                        engineSummary = "System voices disabled (ROM-01 ejected)",
+                        isFallbackNeuralPreview = false
+                    )
+                } else {
+                    proxyEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
+                }
+            }
+            BackendType.EXTERNAL_PROXY -> {
                 proxyEngine.synthesizeChunk(chunk.text, voiceId, effectiveRate, effectivePitch, profile)
             }
         }
 
-        // Fail soft to real CORE_OS speech whenever a cartridge isn't downloaded or slotted yet
-        if (rawOutcome.pcmFloat24k.isEmpty() && selectedBackend != BackendType.CORE_OS) {
+        // Fail soft to real CORE_OS speech whenever a cartridge isn't downloaded or slotted yet (if ROM-01 is slotted)
+        if (rawOutcome.pcmFloat24k.isEmpty() &&
+            selectedBackend != BackendType.CORE_OS &&
+            repository.isCartridgeSlotted("rom_core_os")
+        ) {
             rawOutcome = proxyEngine.synthesizeChunk(
                 text = chunk.text,
                 voiceId = "core_os_auto",
@@ -160,8 +206,10 @@ class TtsBackendRouter(
         }
         return if (repository.isCartridgeSlotted(profile.selectedCartridgeId)) {
             profile.preferredBackend
-        } else {
+        } else if (repository.isCartridgeSlotted("rom_core_os")) {
             BackendType.CORE_OS
+        } else {
+            profile.preferredBackend
         }
     }
 }
