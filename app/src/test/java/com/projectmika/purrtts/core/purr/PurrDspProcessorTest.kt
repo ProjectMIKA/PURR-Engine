@@ -48,14 +48,15 @@ class PurrDspProcessorTest {
     fun `float32 byte array encodes little endian ieee bits exactly`() {
         val bytes = PurrDspProcessor.float32ToByteArrayLe(floatArrayOf(0.0f, 0.5f, -1.0f, 2.0f))
         assertEquals(16, bytes.size)
+        // NOTE: compare via .toInt() — assertEquals(Int, Byte) boxes to Integer-vs-Byte and always fails.
         // 0.0f => 0x00000000
-        assertEquals(0, bytes[0]); assertEquals(0, bytes[1]); assertEquals(0, bytes[2]); assertEquals(0, bytes[3])
+        assertEquals(0, bytes[0].toInt()); assertEquals(0, bytes[1].toInt()); assertEquals(0, bytes[2].toInt()); assertEquals(0, bytes[3].toInt())
         // 0.5f => 0x3F800000 => LE 00 00 80 3F
-        assertEquals(0, bytes[4]); assertEquals(0, bytes[5]); assertEquals(0x80.toByte(), bytes[6]); assertEquals(0x3F.toByte(), bytes[7])
+        assertEquals(0, bytes[4].toInt()); assertEquals(0, bytes[5].toInt()); assertEquals(0x80.toByte(), bytes[6]); assertEquals(0x3F.toByte(), bytes[7])
         // -1.0f => 0xBF800000 => LE 00 00 80 BF
-        assertEquals(0, bytes[8]); assertEquals(0, bytes[9]); assertEquals(0x80.toByte(), bytes[10]); assertEquals(0xBF.toByte(), bytes[11])
+        assertEquals(0, bytes[8].toInt()); assertEquals(0, bytes[9].toInt()); assertEquals(0x80.toByte(), bytes[10]); assertEquals(0xBF.toByte(), bytes[11])
         // 2.0f clamps to 1.0f => LE 00 00 80 3F
-        assertEquals(0, bytes[12]); assertEquals(0, bytes[13]); assertEquals(0x80.toByte(), bytes[14]); assertEquals(0x3F.toByte(), bytes[15])
+        assertEquals(0, bytes[12].toInt()); assertEquals(0, bytes[13].toInt()); assertEquals(0x80.toByte(), bytes[14]); assertEquals(0x3F.toByte(), bytes[15])
     }
 
     @Test
@@ -63,7 +64,8 @@ class PurrDspProcessorTest {
         val bytes = PurrDspProcessor.float32ToPcm16Le(floatArrayOf(0.0f, 0.5f, -1.0f))
         assertEquals(6, bytes.size)
         // Zero input: triangular dither magnitude < 1 LSB always truncates to integer 0.
-        assertEquals(0, bytes[0]); assertEquals(0, bytes[1])
+        // (Compare via .toInt() — assertEquals(Int, Byte) boxes to Integer-vs-Byte and always fails.)
+        assertEquals(0, bytes[0].toInt()); assertEquals(0, bytes[1].toInt())
 
         val decoded = PurrDspProcessor.pcm16LeToFloat32(bytes)
         assertEquals(3, decoded.size)
