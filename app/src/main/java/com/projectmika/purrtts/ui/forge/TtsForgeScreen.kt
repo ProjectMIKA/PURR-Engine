@@ -678,10 +678,20 @@ fun TtsForgeScreen(
         }
 
         if (showCloneStudio) {
+            val cloneImportStatus by viewModel.cloneImportStatus.collectAsState()
+            val isImportingClone by viewModel.isImportingClone.collectAsState()
+            val importedCloneWav by viewModel.importedCloneWavPath.collectAsState()
+            val cleanImportedAudio by viewModel.cleanImportedAudio.collectAsState()
             VoiceCloneStudioSheet(
                 isRecording = isRecordingClone,
                 recordingProgress = recordingProgress,
                 lastRecordedWavPath = lastRecordedWav,
+                isImporting = isImportingClone,
+                importStatus = cloneImportStatus,
+                importedWavPath = importedCloneWav,
+                cleanAudio = cleanImportedAudio,
+                onToggleCleanAudio = { viewModel.toggleCleanImportedAudio(it) },
+                onImportClip = { uri -> viewModel.importCloneClip(uri) },
                 onRecordFiveSeconds = { viewModel.recordFiveSecondReferenceSample() },
                 onRegisterClone = { name, family, gender, transcript, tags ->
                     viewModel.registerClonedVoice(name, family, gender, transcript, tags)

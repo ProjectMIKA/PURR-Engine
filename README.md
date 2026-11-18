@@ -93,7 +93,13 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.3.3 // The Unshifting Header)
+### 🌟 Latest Updates (v1.4.0 // The Imported Soul)
+
+* **Clip Import in the Clone Studio:** Import your own audio files (mp3/m4a/ogg/flac/wav/opus) via a system file picker — decoded through `MediaExtractor`/`MediaCodec` to mono PCM, capped at a 30s guard, resampled to the 24kHz reference standard, and trimmed at registration to the selected family's best-voice window (Pocket ≈ 5s, ZipVoice ≈ 12s) with anti-pop fades.
+* **Optional `CLEAN_AUDIO` Toggle:** A pure-Kotlin cleanup chain for imported clips — DC offset removal, 85Hz rumble/hum high-pass, an STFT spectral-subtraction denoiser that learns the clip's own noise floor (radix-2 FFT, anti-musical-noise floor, phase-preserving overlap-add), and 0.92 peak normalization. ENGINE strengths LIGHT/STANDARD/AGGRESSIVE; UI ships STANDARD. Toggle OFF for raw clips.
+* **Test Suite:** `PurrCloneAudioCleanerTest` — 11 new pure-JVM tests covering the whole cleanup chain with seeded, deterministic noise fixtures.
+
+### 📦 Prior Releases (v1.3.3 // The Unshifting Header)
 
 * **Fixed-Size Header HUD (`TtsForgeScreen`):** Header title is now `> PURR_TTS // ENGINE` at `14sp`/`1.0sp` tracking, hard-capped to a single line with ellipsis, and the pinned header row declares `heightIn(min = 56.dp)` — the header area can no longer change height when content above/below changes.
 * **Fixed-Width Hardware Badge Slot (`MikaStatusBadge`):** The `[CPU NEON]`/`[NPU ACTIVE]`/`[IDLE]` badge now renders inside a fixed `112dp` slot with `maxLines = 1` label + countdown, so synthesis state swaps and the VRAM countdown can never resize the pill or shift the whole UI.

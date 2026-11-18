@@ -1,3 +1,22 @@
+# 🌌 PURR-TTS v1.4.0 // The Imported Soul
+
+### ✨ What's New since v1.3.3
+
+The Clone Voice Studio can now clone from **your own audio files** — and clean them up first! 🐾
+
+* **📥 CLIP IMPORT (`IMPORT_CLIP`)**: The Clone Voice Studio gains a file picker that imports any audio document Android can decode — mp3, m4a/aac, ogg/opus, flac, wav — straight into the cloning pipeline via `MediaExtractor` + `MediaCodec`, downmixed to mono, capped at a 30-second capture guard, resampled to the 24kHz reference standard, and trimmed at registration to the selected family's best-voice window (Pocket TTS ≈ 5s, ZipVoice ≈ 12s) with anti-pop edge fades.
+* **🧹 OPTIONAL `CLEAN_AUDIO` TOGGLE**: One toggle runs a brand-new pure-Kotlin cleanup chain over imported clips: DC offset removal → 85Hz rumble/hum high-pass → **STFT spectral-subtraction denoiser** (a radix-2 FFT pipeline that learns the clip's own noise floor from its quietest frames, subtracts static/hiss with an anti-musical-noise spectral floor, and keeps the original phase) → 0.92 peak normalization. Three strengths (LIGHT / STANDARD / AGGRESSIVE) are exposed to the engine; the UI ships the recommended STANDARD pass. Flip it OFF to keep clips raw.
+* **🧪 +11 PURE-JVM TESTS**: New `PurrCloneAudioCleanerTest` guards the whole chain — bias stripping, rumble attenuation, noise-floor suppression vs voiced preservation (seeded, deterministic), silence trim, best-voice-window lock, family clip targets, anti-pop fades, passthrough config, and empty/tiny-input safety.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.4.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `8`) with clip import, the optional audio cleanup toggle, and the expanded pure-JVM test suite.
+2. **`PURR-TTS_V1.4.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.3.3 // The Unshifting Header
 
 ### ✨ What's New since v1.3.2

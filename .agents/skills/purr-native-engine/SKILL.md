@@ -82,6 +82,23 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - `resolveEffectiveProfile`: requested `voiceName` overrides profile only if the voice exists
   AND its cartridge is slotted.
 
+## Clone clip import & cleanup (v1.4.0)
+- `engine/CloneClipImporter.kt` — `MediaExtractor` + `MediaCodec` synchronous decode of any
+  platform-supported audio document (mp3/m4a/ogg/opus/flac/wav) → mono float PCM at source
+  rate. Hard 30s capture cap; stereo downmix by channel averaging; decoder errors fail loudly.
+- `core/purr/PurrCloneAudioCleaner.kt` — PURE import-path DSP: DC removal → 85Hz high-pass
+  biquad → **STFT spectral-subtraction denoiser** (1024/256 Hann STFT, radix-2 FFT, noise
+  profile from the quietest 12% of frames, `beta` over-subtraction with per-bin spectral
+  floor, phase-preserving overlap-add; strengths LIGHT/STANDARD/AGGRESSIVE) → 0.92 peak
+  normalize. `selectBestClip` trims silence then locks the highest-energy window to the
+  family target (`targetClipSeconds`: Pocket 5s, ZipVoice 12s) with 12ms anti-pop fades.
+- ViewModel flow: `importCloneClip(uri)` (SAF `OpenDocument`, mime `audio/*`) → cleaned
+  samples held in memory at 24kHz → `registerClonedVoice` trims per selected family, writes
+  `cloned_refs/import_*.wav`, and takes the existing `wavPathOverride` path. Recording path
+  unchanged. The `CLEAN_AUDIO` toggle defaults ON; OFF = raw passthrough config.
+- Scar law: noise-profile learning needs real noise frames — never build fixtures where
+  quiet regions are perfect zeros (the profile collapses to zero and subtraction no-ops).
+
 ## Model catalog (`ModelCatalogManager` + `PurrDefaultPresets.modelCatalog()`)
 - Resumable HTTP Range downloads into `filesDir/models/downloads`, streaming SHA-256 verify
   against `expectedSha256`, `.tar.bz2` unpack via commons-compress into `filesDir/models/…`.
