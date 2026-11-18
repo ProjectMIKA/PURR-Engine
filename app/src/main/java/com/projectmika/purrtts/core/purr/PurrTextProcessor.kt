@@ -382,7 +382,7 @@ object PurrTextProcessor {
         while (i < chunks.size) {
             val current = chunks[i]
             if (current is PurrChunk.Speech) {
-                var acc = current
+                var acc: PurrChunk.Speech = current
                 var j = i + 1
                 while (j < chunks.size) {
                     val nextItem = chunks[j]
