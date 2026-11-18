@@ -270,7 +270,10 @@ object PurrCloneAudioCleaner {
         for (k in noiseMag.indices) noiseMag[k] /= profileCount
 
         // 3. Subtract with spectral floor, keep phase, overlap-add.
-        val norm = DoubleArray(FFT_SIZE)
+        //    NOTE: norm is indexed by GLOBAL output position — frames overlap, so every
+        //    output sample accumulates the summed squared-window gain of ALL frames that
+        //    cover it (Hann @ hop 256 => 1.5 in the interior, win² at the clip edges).
+        val norm = DoubleArray(samples.size)
         val out = DoubleArray(samples.size)
         for (f in 0 until frameCount) {
             val offset = f * HOP_SIZE
@@ -305,7 +308,7 @@ object PurrCloneAudioCleaner {
                 val pos = offset + i
                 if (pos < samples.size) {
                     out[pos] += real[i] * window[i]
-                    norm[i] += window[i] * window[i]
+                    norm[pos] += window[i] * window[i]
                 }
             }
         }
