@@ -139,6 +139,12 @@ fun MikaTerminalStage(
 
 /**
  * Single animated hardware accelerator status badge (`[CORE_OS]`, `[CPU NEON]`, `[GPU FP16]`, `[IDLE]`).
+ *
+ * ✨ FIXED-SIZE SLOT LAW (v1.3.3 scar): callers MUST pass a fixed `modifier` width (the header
+ * uses `Modifier.width(112.dp)` — sized for the longest label `[NPU ACTIVE]`). The badge never
+ * sizes itself to its text, because label swaps (`[IDLE]` → `[CPU NEON]`) and the VRAM countdown
+ * appearing/disappearing would re-measure the parent row and shift the whole layout. Label and
+ * countdown render `maxLines = 1` and clip inside the slot instead of growing it.
  */
 @Composable
 fun MikaStatusBadge(
@@ -187,7 +193,8 @@ fun MikaStatusBadge(
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
             fontSize = 10.sp,
-            letterSpacing = 0.8.sp
+            letterSpacing = 0.8.sp,
+            maxLines = 1
         )
         if (vramCountdownSec > 0 && badge != HardwareStatusBadge.IDLE) {
             val mins = vramCountdownSec / 60
@@ -196,7 +203,8 @@ fun MikaStatusBadge(
                 text = " ${mins}:%02d".format(secs),
                 color = badgeColor.copy(alpha = 0.72f),
                 fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp
+                fontSize = 9.sp,
+                maxLines = 1
             )
         }
     }

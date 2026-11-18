@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
@@ -142,11 +143,16 @@ fun TtsForgeScreen(
     MikaTerminalStage {
         Box(modifier = Modifier.fillMaxSize()) {
             Column(modifier = Modifier.fillMaxSize()) {
-                // Pinned Top HUD Header across the entire Cyberdeck OS
+                // Pinned Top HUD Header across the entire Cyberdeck OS.
+                // ✨ FIXED-SIZE SLOT LAW (v1.3.3 scar): every dynamic element in this header
+                // (hardware badge labels `[IDLE]..[NPU ACTIVE]` + VRAM countdown) must live in a
+                // fixed-width slot and single-line text, or the title column re-wraps and the
+                // whole page below shifts on every synthesis state change.
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .statusBarsPadding()
+                        .heightIn(min = 56.dp)
                         .background(MikaColors.PanelBg.copy(alpha = 0.92f))
                         .padding(horizontal = 14.dp, vertical = 10.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -154,26 +160,31 @@ fun TtsForgeScreen(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "> PURR_TTS // SYSTEM ENGINE",
+                            text = "> PURR_TTS // ENGINE",
                             color = MikaColors.TerminalGreen,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
-                            fontSize = 15.sp,
-                            letterSpacing = 1.2.sp
+                            fontSize = 14.sp,
+                            letterSpacing = 1.0.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                         val purrActive = "tool_purr_engine" in forgeState.slottedCartridges
                         Text(
                             text = if (purrActive) "// Preset: ${activeProfile.name}" else "// PURR Engine: OFF (Bypassed)",
                             color = if (purrActive) MikaColors.TerminalGreen.copy(alpha = 0.65f) else MikaColors.DimText,
                             fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         MikaStatusBadge(
                             badge = telemetry.badge,
-                            vramCountdownSec = vramSec
+                            vramCountdownSec = vramSec,
+                            modifier = Modifier.width(112.dp)
                         )
                         Box(
                             modifier = Modifier
