@@ -112,26 +112,36 @@ class PurrCloneAudioCleanerTest {
 
     @Test
     fun `spectral subtraction suppresses noise floor far more than voiced regions`() {
-        // White noise across the WHOLE clip (so the learned noise profile is the true
-        // floor), with a 440Hz tone only in the middle second (the voiced region).
-        val input = PurrCloneAudioCleaner.seededNoise(rate * 3, 42L, 0.06f)
-        for (i in rate until rate * 2) {
-            input[i] += 0.4f * sin(2.0 * PI * 440.0 * i / rate).toFloat()
+        // Deterministic fixture: stationary 60Hz mains hum across the WHOLE clip (the classic
+        // static/hum cleanup case) plus a 440Hz voice burst only in the middle second. The
+        // quietest frames are hum-only, so the learned profile is the hum spectrum itself —
+        // subtraction must crush the hum while the voice bins (magnitudes far above the floor)
+        // survive. No RNG: the result is identical on every machine and seed.
+        val input = FloatArray(rate * 3) { i ->
+            val hum = 0.15f * sin(2.0 * PI * 60.0 * i / rate).toFloat()
+            val voice = if (i in rate until rate * 2) {
+                0.4f * sin(2.0 * PI * 440.0 * i / rate).toFloat()
+            } else 0f
+            hum + voice
         }
 
         val cleaned = PurrCloneAudioCleaner.spectralSubtract(
             input, rate, beta = 1.5f, floor = 0.07f
         )
 
-        // Noise-only region (first half-second) vs voiced region (middle half-second).
-        val noiseBefore = rms(input.copyOfRange(0, rate / 2))
-        val noiseAfter = rms(cleaned.copyOfRange(0, rate / 2))
+        // Hum-only region (first half-second) vs voiced region (middle half-second).
+        val humBefore = rms(input.copyOfRange(0, rate / 2))
+        val humAfter = rms(cleaned.copyOfRange(0, rate / 2))
         val voicedBefore = rms(input.copyOfRange(rate + rate / 4, rate + rate / 2))
         val voicedAfter = rms(cleaned.copyOfRange(rate + rate / 4, rate + rate / 2))
 
+        // Diagnostic: Gradle prints test stdout into the failure report — keeps CI debuggable.
+        println("[SPEC_TEST] hum $humBefore -> $humAfter (ratio ${humAfter / humBefore}) | " +
+            "voiced $voicedBefore -> $voicedAfter (ratio ${voicedAfter / voicedBefore})")
+
         assertTrue(
-            "noiseBefore=$noiseBefore noiseAfter=$noiseAfter",
-            noiseAfter < noiseBefore * 0.9 // material reduction — guaranteed by the 0.07 spectral floor
+            "humBefore=$humBefore humAfter=$humAfter",
+            humAfter < humBefore * 0.5 // stationary hum is learned exactly: ~0.07 floor expected
         )
         assertTrue("voicedBefore=$voicedBefore voicedAfter=$voicedAfter", voicedAfter > voicedBefore * 0.6)
     }
