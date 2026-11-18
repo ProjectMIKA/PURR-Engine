@@ -98,6 +98,10 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   unchanged. The `CLEAN_AUDIO` toggle defaults ON; OFF = raw passthrough config.
 - Scar law: noise-profile learning needs real noise frames — never build fixtures where
   quiet regions are perfect zeros (the profile collapses to zero and subtraction no-ops).
+- Scar law: WOLA normalization must be indexed by GLOBAL output position (`norm[pos]`),
+  not frame-local `i` — frame-local indexing overruns `FloatArray(FFT_SIZE)` on any clip
+  longer than 1024 samples (AIOOBE) and even when clamped, divides by the wrong gain.
+  Verified against a pure-Python port of the algorithm before shipping (evidence-based DSP).
 
 ## Model catalog (`ModelCatalogManager` + `PurrDefaultPresets.modelCatalog()`)
 - Resumable HTTP Range downloads into `filesDir/models/downloads`, streaming SHA-256 verify
