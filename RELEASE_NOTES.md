@@ -1,3 +1,29 @@
+# 🌌 PURR-TTS v1.3.2 // Crystal-Clear Audio, KittenTTS Fix & Full OOV Word Pronunciation
+
+### ✨ What's New since v1.3.1
+
+Master noticed three subtle neural synthesis issues during live testing — **KittenTTS Nano (`ROM-03`)** failing to generate audio, difficult/rare words occasionally being skipped in **Kokoro/Piper**, and a low-level **buzzing/muffled artifact** on default voices — all tracked down and fixed cleanly in **v1.3.2**! 🐾
+
+* **🐱 KITTEN_TTS_NANO (`ROM-03`) FIXED & `espeak-ng` G2P RESTORED (`sherpa-onnx v1.13.8`)**:
+  * Pinned the bundled `sherpa-onnx` native runtime to **`v1.13.8`**, restoring full **`espeak-ng` + `piper-phonemize` G2P** support removed in `v2.0.0`.
+  * **`ROM-03: KITTEN_TTS_NANO`** now initializes cleanly with `model.int8.onnx`, `voices.bin`, `tokens.txt`, and `espeak-ng-data` without requiring an external lexicon.
+* **📖 NO MORE SKIPPED DIFFICULT / RARE WORDS (`espeak-ng` OOV Fallback + Unicode Protection)**:
+  * **Kokoro (`ROM-02`)** and **Piper (`ROM-05`)** now fall back automatically to **`espeak-ng`** phonetic transcription whenever encountering rare, compound, or out-of-vocabulary (OOV) words not present in `lexicon-us-en.txt`, plus deterministic lexicon ordering and `*.fst` normalization rules.
+  * Updated `PurrTextProcessor` boundary regexes to full Unicode (`\p{L}`) so accented words (`café`, `naïve`) are never stripped at sentence edges.
+* **🔊 CRYSTAL-CLEAR ZERO-BUZZ DEFAULT VOICE DSP (`PurrDspProcessor` & `PurrSentimentScorer`)**:
+  * **Transparent `CLEAN_STUDIO` Path:** Default presets (`GachaSwipe Default`, `Audiobook / Light Novel`, etc.) now run flat (`0 dB` shelf/warmth), bypassing the 80Hz high-pass, `-4 dB` high-shelf attenuation, and `-20 dBFS` glue compressor unless an effect preset or EQ curve is intentionally enabled — eliminating intermodulation buzz while keeping the smooth 25ms anti-pop fade-in and 120ms tail taper.
+  * **No Unintended Per-Sentence Pitch Resampling:** Default automatic sentiment acting now modulates speech pacing only, keeping pitch bit-exact (`1.00x`) unless you manually adjust the Pitch slider or activate a pitch-altering effect.
+  * **4-Point Catmull-Rom Cubic Hermite Resampler & Gapless `AudioTrack`:** Upgraded `PurrDspProcessor.resampleMono` (`22.05kHz → 24kHz`) to 4-point Cubic Hermite spline interpolation to eliminate aliasing buzz, smoothed compressor ballistics (`25ms` attack / `250ms` release / `-12 dBFS`), raised the peak ceiling from `0.78` to `0.92`, and removed the blocking `delay()` inside `AudioTrack` silence streaming to prevent chunk-seam underruns.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.3.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `6`) with restored `espeak-ng` G2P (`KittenTTS` + difficult/OOV word pronunciation) and zero-buzz crystal-clear default DSP.
+2. **`PURR-TTS_V1.3.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.3.1 // Glassmorphic Icon HUD, Phasing Transitions & Custom Cyberdeck SVG Icons
 
 ### ✨ What's New since v1.3.0

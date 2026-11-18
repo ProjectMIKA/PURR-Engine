@@ -339,8 +339,12 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                         is PurrChunk.Silence -> {
                             backendRouter.emitSilenceTelemetry(chunk.durationMs, chunk.reason)
                             val silenceBytes = PurrDspProcessor.createSilencePcm16Le(sampleRate, chunk.durationMs)
-                            audioTrack.write(silenceBytes, 0, silenceBytes.size)
-                            delay(chunk.durationMs.toLong())
+                            var offset = 0
+                            while (offset < silenceBytes.size && isActive) {
+                                val step = minOf(4096, silenceBytes.size - offset)
+                                audioTrack.write(silenceBytes, offset, step)
+                                offset += step
+                            }
                         }
                         is PurrChunk.Speech -> {
                             val outcome = backendRouter.synthesizeSpeechChunk(chunk, effectiveProfile)

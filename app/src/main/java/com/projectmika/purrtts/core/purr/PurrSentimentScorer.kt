@@ -172,15 +172,17 @@ object PurrSentimentScorer {
                 (sentiment.sadness * curve.sadnessPitchDelta) +
                 (sentiment.flustered * curve.flusteredPitchDelta)
 
-            // Subtle GachaSwipe archetype overrides
+            // Subtle GachaSwipe archetype pace overrides (keep pitch unshifted when basePitch == 1.0f
+            // so default neural synthesis never incurs pitch-resampling artifacts)
+            val pitchOffsetAllowed = profile.basePitch !in 0.995f..1.005f
             when (curve.toneOverride) {
                 ArchetypeTone.YANDERE_ANGER, ArchetypeTone.YANDERE_LOVE -> {
                     rate = min(rate, 0.94f)
-                    pitch -= 0.02f
+                    if (pitchOffsetAllowed) pitch -= 0.02f
                 }
                 ArchetypeTone.DOMINANT_LOVE -> {
                     rate = min(rate, 0.95f)
-                    pitch -= 0.025f
+                    if (pitchOffsetAllowed) pitch -= 0.025f
                 }
                 ArchetypeTone.ROBOT -> {
                     rate = 0.98f
@@ -188,7 +190,7 @@ object PurrSentimentScorer {
                 }
                 ArchetypeTone.KUUDERE, ArchetypeTone.KUUDERE_ANGER -> {
                     rate = 0.97f
-                    pitch -= 0.01f
+                    if (pitchOffsetAllowed) pitch -= 0.01f
                 }
                 else -> Unit
             }

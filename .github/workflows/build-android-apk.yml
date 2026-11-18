@@ -34,12 +34,12 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Fetch Prebuilt sherpa-onnx Android JNI AAR (v2.0.1)
+      - name: Fetch Prebuilt sherpa-onnx Android JNI AAR (v1.13.8 with espeak-ng G2P)
         run: |
           mkdir -p app/libs
-          curl -fSL -o app/libs/sherpa-onnx-2.0.1.aar \
-            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar"
-          ls -lh app/libs/sherpa-onnx-2.0.1.aar
+          curl -fSL -o app/libs/sherpa-onnx-1.13.8.aar \
+            "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar"
+          ls -lh app/libs/sherpa-onnx-1.13.8.aar
 
       - name: Verify project manifests & structure
         run: python3 scripts/verify_project.py

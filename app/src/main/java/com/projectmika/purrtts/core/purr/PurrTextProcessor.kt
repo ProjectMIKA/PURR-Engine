@@ -170,8 +170,8 @@ object PurrTextProcessor {
     private val MIXED_BANG_REGEX = Regex("[?!]+")
     private val MULTI_DOT_REGEX = Regex("\\.{2,}")
     private val TRAILING_DASH_REGEX = Regex("[\\-—–~]+$")
-    private val LEADING_GARBAGE_REGEX = Regex("^[^a-zA-Z0-9(¿¡]+")
-    private val DANGLING_QUOTE_REGEX = Regex("([.!?,;:])([^a-zA-Z0-9]+)$")
+    private val LEADING_GARBAGE_REGEX = Regex("^[^\\p{L}0-9(¿¡]+")
+    private val DANGLING_QUOTE_REGEX = Regex("([.!?,;:])([^\\p{L}0-9]+)$")
 
     fun normalizeTypography(text: String): String {
         return text
@@ -762,7 +762,7 @@ object PurrTextProcessor {
             Regex("[.!?]$")
         }
         if (!terminalRegex.containsMatchIn(chunk)) {
-            chunk = chunk.replace(Regex("[^a-zA-Z0-9]$"), "") + "."
+            chunk = chunk.replace(Regex("[^\\p{L}0-9]$"), "") + "."
         }
 
         if (chunk == "." || chunk == "," || chunk == "!" || chunk == "?") return ""

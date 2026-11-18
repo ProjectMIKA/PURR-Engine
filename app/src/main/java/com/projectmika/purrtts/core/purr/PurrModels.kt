@@ -151,23 +151,23 @@ data class SentimentCurveConfig(
     val enabled: Boolean = true,
     val toneOverride: ArchetypeTone = ArchetypeTone.AUTO,
     val joyRateDelta: Float = 0.04f,
-    val joyPitchDelta: Float = 0.025f,
+    val joyPitchDelta: Float = 0.0f,
     val loveRateDelta: Float = -0.05f,
-    val lovePitchDelta: Float = 0.015f,
+    val lovePitchDelta: Float = 0.0f,
     val angerRateDelta: Float = 0.05f,
-    val angerPitchDelta: Float = 0.020f,
+    val angerPitchDelta: Float = 0.0f,
     val sadnessRateDelta: Float = -0.08f,
-    val sadnessPitchDelta: Float = -0.025f,
+    val sadnessPitchDelta: Float = 0.0f,
     val flusteredRateDelta: Float = 0.06f,
-    val flusteredPitchDelta: Float = 0.035f,
+    val flusteredPitchDelta: Float = 0.0f,
     val stutterIntensity: Float = 0.15f,
     val vowelStretchIntensity: Float = 0.15f
 )
 
 @Serializable
 data class DspConfig(
-    val warmthEqDb: Float = 2.0f,
-    val presenceEqDb: Float = -4.0f,
+    val warmthEqDb: Float = 0.0f,
+    val presenceEqDb: Float = 0.0f,
     val reverbWetMix: Float = 0.0f,
     val effectPreset: AcousticEffectPreset = AcousticEffectPreset.NONE,
     val enableSentenceTaper: Boolean = true,
@@ -762,8 +762,8 @@ object PurrDefaultPresets {
                 vowelStretchIntensity = 0.10f
             ),
             dspConfig = DspConfig(
-                warmthEqDb = 2.0f,
-                presenceEqDb = -4.0f,
+                warmthEqDb = 0.0f,
+                presenceEqDb = 0.0f,
                 reverbWetMix = 0.0f,
                 effectPreset = AcousticEffectPreset.NONE,
                 enableSentenceTaper = true,
@@ -798,8 +798,8 @@ object PurrDefaultPresets {
                 vowelStretchIntensity = 0.0f
             ),
             dspConfig = DspConfig(
-                warmthEqDb = 1.5f,
-                presenceEqDb = -3.5f,
+                warmthEqDb = 0.0f,
+                presenceEqDb = 0.0f,
                 reverbWetMix = 0.0f,
                 effectPreset = AcousticEffectPreset.NONE,
                 enableSentenceTaper = true,
@@ -832,8 +832,8 @@ object PurrDefaultPresets {
                 vowelStretchIntensity = 0.05f
             ),
             dspConfig = DspConfig(
-                warmthEqDb = 1.5f,
-                presenceEqDb = -3.0f,
+                warmthEqDb = 0.0f,
+                presenceEqDb = 0.0f,
                 reverbWetMix = 0.0f,
                 effectPreset = AcousticEffectPreset.NONE,
                 enableSentenceTaper = true,
@@ -868,8 +868,8 @@ object PurrDefaultPresets {
                 vowelStretchIntensity = 0.22f
             ),
             dspConfig = DspConfig(
-                warmthEqDb = 3.0f,
-                presenceEqDb = -4.5f,
+                warmthEqDb = 0.0f,
+                presenceEqDb = 0.0f,
                 reverbWetMix = 0.0f,
                 effectPreset = AcousticEffectPreset.NONE,
                 enableSentenceTaper = true,
@@ -902,8 +902,8 @@ object PurrDefaultPresets {
                 vowelStretchIntensity = 0.08f
             ),
             dspConfig = DspConfig(
-                warmthEqDb = 2.0f,
-                presenceEqDb = -3.0f,
+                warmthEqDb = 0.0f,
+                presenceEqDb = 0.0f,
                 reverbWetMix = 0.0f,
                 effectPreset = AcousticEffectPreset.NONE,
                 enableSentenceTaper = true,

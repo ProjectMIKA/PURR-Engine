@@ -98,7 +98,19 @@ class PurrTextProcessorTest {
         val sadMod = PurrSentimentScorer.computeProsodyModulation(sad, defaultProfile, SegmentRole.DIALOGUE)
         val flusteredMod = PurrSentimentScorer.computeProsodyModulation(flustered, defaultProfile, SegmentRole.DIALOGUE)
         assertTrue(flusteredMod.speakingRate > sadMod.speakingRate)
-        assertTrue(flusteredMod.pitch > sadMod.pitch)
+        // Default basePitch = 1.0f avoids unintended per-sentence pitch resampling artifacts
+        assertEquals(1.0f, flusteredMod.pitch, 0.0001f)
+        assertEquals(1.0f, sadMod.pitch, 0.0001f)
+
+        val customPitchProfile = defaultProfile.copy(
+            sentimentConfig = defaultProfile.sentimentConfig.copy(
+                flusteredPitchDelta = 0.03f,
+                sadnessPitchDelta = -0.02f
+            )
+        )
+        val flusteredCustom = PurrSentimentScorer.computeProsodyModulation(flustered, customPitchProfile, SegmentRole.DIALOGUE)
+        val sadCustom = PurrSentimentScorer.computeProsodyModulation(sad, customPitchProfile, SegmentRole.DIALOGUE)
+        assertTrue(flusteredCustom.pitch > sadCustom.pitch)
     }
 
     @Test
@@ -330,5 +342,51 @@ class PurrTextProcessorTest {
         val overlapSamples = (sampleRate * 0.018f).toInt()
         assertEquals(seg1.pcmFloat24k.size + gap.pcmFloat24k.size + seg2.pcmFloat24k.size + seg3.pcmFloat24k.size - overlapSamples, stitched.size)
         assertTrue(stitched.all { abs(it) <= 0.90f })
+    }
+
+    @Test
+    fun `cubic hermite resampler and difficult oov words preserve fidelity`() {
+        // 1. Verify Clean Studio keeps pure midrange tone free of compressor buzz or HF loss
+        val sampleRate = 24000
+        val input = FloatArray(sampleRate / 4) { i ->
+            0.35f * sin(2.0 * PI * 1000.0 * i / sampleRate).toFloat()
+        }
+        val cleanProcessed = PurrDspProcessor.process(
+            input = input,
+            sampleRate = sampleRate,
+            config = DspConfig(
+                warmthEqDb = 0f,
+                presenceEqDb = 0f,
+                reverbWetMix = 0f,
+                effectPreset = AcousticEffectPreset.NONE,
+                enableSentenceTaper = false,
+                antiPopFadeInMs = 0
+            ),
+            volumeGain = 1.0f,
+            dspEnabled = true
+        )
+        for (i in input.indices) {
+            assertEquals(input[i], cleanProcessed[i], 1e-4f)
+        }
+
+        // 2. Verify 4-point Cubic Hermite resampler (22050Hz -> 24000Hz) produces clean, finite samples
+        val src22k = FloatArray(22050 / 2) { i ->
+            0.5f * sin(2.0 * PI * 440.0 * i / 22050.0).toFloat()
+        }
+        val resampled24k = PurrDspProcessor.resampleMono(src22k, fromRate = 22050, toRate = 24000)
+        assertTrue(abs(resampled24k.size - 12000) <= 2)
+        assertTrue(resampled24k.all { it.isFinite() && abs(it) <= 1.0f })
+
+        // 3. Verify difficult, accented, and compound words survive PURR text processing intact
+        val readerProfile = PurrDefaultPresets.builtInProfiles()
+            .first { it.id == "light_novel_reader" }
+            .copy(enableDualVoiceSplit = false)
+        val trickyInput = "Antidisestablishmentarianism and state-of-the-art café techniques wouldn't fail."
+        val chunks = PurrTextProcessor.process(trickyInput, readerProfile)
+        val rendered = chunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        assertTrue(rendered.contains("Antidisestablishmentarianism", ignoreCase = true))
+        assertTrue(rendered.contains("state of the art", ignoreCase = true))
+        assertTrue(rendered.contains("café", ignoreCase = true))
+        assertTrue(rendered.contains("wouldn't", ignoreCase = true))
     }
 }
