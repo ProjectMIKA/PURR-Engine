@@ -77,7 +77,13 @@ class LiteRtKokoroEngine(
     val g2pModelFile: File
         get() = File(modelDir, "dp_g2p_litert.tflite")
 
+    val isNpuG2pReady: Boolean
+        get() = g2pModelFile.exists() && g2pModelFile.length() > 1024L
+
     override val isModelReady: Boolean
+        get() = (kokoroModelFile.exists() && kokoroModelFile.length() > 1024L) || isNpuG2pReady
+
+    private val isKokoroLmFileReady: Boolean
         get() = kokoroModelFile.exists() && kokoroModelFile.length() > 1024L
 
     override suspend fun warmup(profile: PurrProfile) {
@@ -94,12 +100,16 @@ class LiteRtKokoroEngine(
         pitch: Float,
         profile: PurrProfile
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
-        if (!isModelReady) {
+        if (!isKokoroLmFileReady) {
             return@withContext SynthesisOutcome(
                 pcmFloat24k = FloatArray(0),
                 sampleRateHz = SAMPLE_RATE_HZ,
                 hardwareBadge = HardwareStatusBadge.IDLE,
-                engineSummary = "LiteRT GPU cartridge not installed",
+                engineSummary = if (isNpuG2pReady) {
+                    "Hexagon NPU G2P active — routing waveform via Sherpa Kokoro"
+                } else {
+                    "LiteRT GPU cartridge not installed"
+                },
                 isFallbackNeuralPreview = true
             )
         }
@@ -109,12 +119,13 @@ class LiteRtKokoroEngine(
         engineMutex.withLock {
             ensureInitializedLocked()
 
+            val cleanVoiceId = voiceId.substringAfter(':')
             val speakerIndex = PurrDefaultPresets.kokoroVoices("rom_kokoro_litert", BackendType.LITERT_NPU_GPU)
-                .firstOrNull { it.id == voiceId }?.speakerIndex ?: 0
+                .firstOrNull { it.id == cleanVoiceId }?.speakerIndex ?: 0
 
             val phonemeTokens = runG2pPhonemizer(text)
 
-            val mpSamples = trySynthesizeViaMediaPipeTasks(text, voiceId, speakingRate)
+            val mpSamples = trySynthesizeViaMediaPipeTasks(text, cleanVoiceId, speakingRate)
             if (mpSamples != null && mpSamples.isNotEmpty()) {
                 _statusFlow.value = HardwareStatusBadge.GPU_FP16
                 return@withContext SynthesisOutcome(
@@ -189,7 +200,7 @@ class LiteRtKokoroEngine(
             }
         }
 
-        if (kokoroEngineHandle == null && isModelReady) {
+        if (kokoroEngineHandle == null && isKokoroLmFileReady) {
             val gpuEngine = tryInitLiteRtLmEngine(
                 modelPath = kokoroModelFile.absolutePath,
                 cachePath = cachePath,
@@ -215,7 +226,7 @@ class LiteRtKokoroEngine(
             }
         }
 
-        if (mediaPipeTtsHandle == null && isModelReady) {
+        if (mediaPipeTtsHandle == null && isKokoroLmFileReady) {
             mediaPipeTtsHandle = tryInitMediaPipeTts(kokoroModelFile.absolutePath)
         }
     }

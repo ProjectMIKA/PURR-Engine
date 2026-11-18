@@ -298,8 +298,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                                     audioTrack.write(pcmBytes, offset, step)
                                     offset += step
                                 }
-                            } else {
-                                // Direct speaker fallback when OEM TTS blocks synthesizeToFile
+                            } else if (repository.isCartridgeSlotted("rom_core_os")) {
+                                // Direct speaker fallback when OEM TTS blocks synthesizeToFile and ROM-01 is slotted
                                 val pulseBins = FloatArray(32) { i -> 0.25f + 0.55f * abs(sin(i * 0.45f)) }
                                 backendRouter.emitSpeechTelemetry(
                                     label = "[${chunk.role.name}] ${chunk.text.take(40)}",
@@ -319,6 +319,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                                     showToast("Install Google Speech Services or a ROM Cartridge in Tab 3!")
                                     break
                                 }
+                            } else {
+                                showToast("No active voice cartridge ready — slam a cartridge in Tab 3!")
+                                break
                             }
                         }
                     }

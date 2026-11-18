@@ -161,7 +161,7 @@ data class PurrProfile(
     val name: String,
     val badgeTag: String = "CUSTOM",
     val summary: String = "Custom PURR speech preset",
-    val selectedCartridgeId: String = "core_os",
+    val selectedCartridgeId: String = "rom_core_os",
     val preferredBackend: BackendType = BackendType.CORE_OS,
     val sherpaFamily: SherpaModelFamily = SherpaModelFamily.KOKORO,
     val primaryVoiceId: String = "core_os_auto",
@@ -218,7 +218,7 @@ data class VoiceDescriptor(
     val id: String,
     val displayName: String,
     val engine: BackendType,
-    val cartridgeId: String = "core_os",
+    val cartridgeId: String = "rom_core_os",
     val sherpaFamily: SherpaModelFamily? = null,
     val gender: VoiceGender = VoiceGender.FEMALE,
     val languageCode: String = "en-US",
@@ -265,7 +265,8 @@ data class ModelBundleSpec(
     val expectedSha256: String,
     val approximateSizeMb: Int,
     val isArchiveTarBz2: Boolean = false,
-    val hardwareAccelNote: String
+    val hardwareAccelNote: String,
+    val isBuiltInOsCartridge: Boolean = false
 )
 
 @Serializable
@@ -288,8 +289,16 @@ data class PurrForgeState(
     val profiles: List<PurrProfile> = PurrDefaultPresets.builtInProfiles(),
     val customPhoneticRules: List<PhoneticRule> = PurrDefaultPresets.defaultCustomRules(),
     val clonedVoices: List<ClonedVoiceProfile> = emptyList(),
-    val modelStates: Map<String, ModelBundleState> = emptyMap(),
-    val slottedCartridges: Set<String> = emptySet()
+    val modelStates: Map<String, ModelBundleState> = mapOf(
+        "rom_core_os" to ModelBundleState(
+            specId = "rom_core_os",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "android://system_tts"
+        )
+    ),
+    val slottedCartridges: Set<String> = setOf("rom_core_os"),
+    val hasMigratedCoreOsCartridge: Boolean = true
 )
 
 object PurrDefaultPresets {
@@ -325,7 +334,12 @@ object PurrDefaultPresets {
         "bm_daniel" to listOf("male", "british", "mature", "deep")
     )
 
-    fun kokoroVoices(cartridgeId: String, backend: BackendType): List<VoiceDescriptor> {
+    fun kokoroVoices(
+        cartridgeId: String,
+        backend: BackendType,
+        idPrefix: String = "",
+        displaySuffix: String = ""
+    ): List<VoiceDescriptor> {
         val kokoroIds = listOf(
             "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore",
             "af_nicole", "af_nova", "af_river", "af_sarah", "af_sky",
@@ -359,10 +373,10 @@ object PurrDefaultPresets {
             }
             val prettyName = id.split('_').joinToString(" ") { p ->
                 p.replaceFirstChar { it.uppercase() }
-            }
+            } + displaySuffix
             val tags = GACHASWIPE_TTS_PRESETS[id] ?: listOf(gender.tag, lang.lowercase(), "kokoro")
             VoiceDescriptor(
-                id = id,
+                id = "$idPrefix$id",
                 displayName = prettyName,
                 engine = backend,
                 cartridgeId = cartridgeId,
@@ -381,13 +395,25 @@ object PurrDefaultPresets {
                 id = "core_os_auto",
                 displayName = "Android Device Default Voice",
                 engine = BackendType.CORE_OS,
-                cartridgeId = "core_os",
+                cartridgeId = "rom_core_os",
                 gender = VoiceGender.ANDROGYNOUS,
                 languageCode = "en-US",
                 nativeTags = listOf("built-in", "coherent", "always-ready")
             )
         )
 
+        val kokoroLiteRt = kokoroVoices(
+            cartridgeId = "rom_kokoro_litert",
+            backend = BackendType.LITERT_NPU_GPU,
+            idPrefix = "litert:",
+            displaySuffix = " [NPU/GPU]"
+        )
+        val kokoroNpuG2p = kokoroVoices(
+            cartridgeId = "rom_kokoro_npu_g2p",
+            backend = BackendType.LITERT_NPU_GPU,
+            idPrefix = "npu:",
+            displaySuffix = " [Hexagon NPU]"
+        )
         val kokoroSherpa = kokoroVoices("rom_kokoro_sherpa", BackendType.SHERPA_ONNX)
 
         val sherpaSpecialized = listOf(
@@ -460,7 +486,7 @@ object PurrDefaultPresets {
             )
         )
 
-        return coreOsVoices + kokoroSherpa + sherpaSpecialized + proxyVoices
+        return coreOsVoices + kokoroLiteRt + kokoroNpuG2p + kokoroSherpa + sherpaSpecialized + proxyVoices
     }
 
     /**
@@ -472,7 +498,7 @@ object PurrDefaultPresets {
             name = "GachaSwipe Default",
             badgeTag = "★ MIKA PICK",
             summary = "Balanced slang expansion, MIKASTOP breaths & expressive sentiment acting.",
-            selectedCartridgeId = "core_os",
+            selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_bella",
@@ -505,7 +531,7 @@ object PurrDefaultPresets {
             name = "Audiobook / Light Novel",
             badgeTag = "READER",
             summary = "Clean book prose, dual-voice dialogue split ready & steady breath pauses.",
-            selectedCartridgeId = "core_os",
+            selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_bella",
@@ -538,7 +564,7 @@ object PurrDefaultPresets {
             name = "Tsundere / Bratty",
             badgeTag = "SPICY",
             summary = "Punchy exclamations, flustered stutters & snappy comedic pacing.",
-            selectedCartridgeId = "core_os",
+            selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_alloy",
@@ -569,7 +595,7 @@ object PurrDefaultPresets {
             name = "Yandere / Obsessive",
             badgeTag = "DEVOTED",
             summary = "Slow sultry breath pauses, subtle vowel stretch & intimate warm reverb.",
-            selectedCartridgeId = "core_os",
+            selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_bella",
@@ -602,7 +628,7 @@ object PurrDefaultPresets {
             name = "Shy / Dandere",
             badgeTag = "SOFT",
             summary = "Gentle hesitant stutters, airy EQ & tender soft-spoken pauses.",
-            selectedCartridgeId = "core_os",
+            selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_nicole",
@@ -633,7 +659,7 @@ object PurrDefaultPresets {
             name = "Clean & Fast",
             badgeTag = "SYSTEM",
             summary = "Zero drama filters or reverb — fast, crystal-clear everyday OS reading.",
-            selectedCartridgeId = "core_os",
+            selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
             dialogueVoiceId = "af_kore",
@@ -683,16 +709,66 @@ object PurrDefaultPresets {
     )
 
     /**
-     * 6 Physical ROM Cartridge Bundles in Tab 3 (`> CARTRIDGE BAY`).
-     * Download -> Slam Cartridge In -> Voices appear ready in Tab 1 (`> VOICE & ENGINE`).
+     * 8 Physical ROM Cartridge Bundles in Tab 3 (`> CARTRIDGE BAY`).
+     * ROM-01 (System Speech) is pre-installed and ejectable to disable OS voices.
+     * ROM-02..ROM-08: Download -> Slam Cartridge In -> Voices appear ready in Tab 1 (`> VOICE & ENGINE`).
      */
     fun modelCatalog(): List<ModelBundleSpec> = listOf(
         ModelBundleSpec(
-            id = "rom_kokoro_sherpa",
+            id = "rom_core_os",
             romCode = "ROM-01",
+            badge = "SYSTEM_TTS",
+            accentHex = 0xFF00E5FF,
+            name = "ANDROID_OS_SPEECH",
+            subtitle = "Built-in Device Speech Engine • 0MB Download • Eject to Disable",
+            description = "Bridges PURR middleware & 24kHz DSP to your phone's built-in Android TTS voices. Eject this cartridge anytime to completely disable system voices.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "android://system_tts",
+            fileName = "system_tts.rom",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Android OS Binder Bridge • Ejectable",
+            isBuiltInOsCartridge = true
+        ),
+        ModelBundleSpec(
+            id = "rom_kokoro_litert",
+            romCode = "ROM-02",
+            badge = "NPU_GPU_FP16",
+            accentHex = 0xFFFF9100,
+            name = "KOKORO_82M_NPU_GPU",
+            subtitle = "litert-community/Kokoro-82M • 54 Voices • NPU / Adreno GPU FP16",
+            description = "Primary hardware-accelerated Google AI Edge LiteRT-LM bundle (kokoro_int8_gpu_fp16.litertlm) with persistent OpenCL/QNN shader cache & 5-minute VRAM eviction.",
+            backend = BackendType.LITERT_NPU_GPU,
+            downloadUrl = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm",
+            fileName = "kokoro_int8_gpu_fp16.litertlm",
+            expectedSha256 = "1ef178b127ec48c737daf17eabb4cea5f6b3ffbc510aced270fe5c267bbeac52",
+            approximateSizeMb = 281,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Adreno GPU FP16 + Hexagon NPU Ready"
+        ),
+        ModelBundleSpec(
+            id = "rom_kokoro_npu_g2p",
+            romCode = "ROM-03",
+            badge = "HEXAGON_NPU",
+            accentHex = 0xFF00FF9D,
+            name = "KOKORO_G2P_HEXAGON_NPU",
+            subtitle = "litert-community/Kokoro-G2P-en-US • Snapdragon Hexagon NPU / QAIRT",
+            description = "Snapdragon Hexagon NPU / QNN HTP accelerated Grapheme-to-Phoneme model (dp_g2p_litert.tflite). Unlocks [NPU ACTIVE] G2P acceleration for all 54 Kokoro voices.",
+            backend = BackendType.LITERT_NPU_GPU,
+            downloadUrl = "https://huggingface.co/litert-community/Kokoro-G2P-en-US/resolve/main/dp_g2p_litert.tflite",
+            fileName = "dp_g2p_litert.tflite",
+            expectedSha256 = "f8d6bbd16197b2468f53273de13f971a0e1e8657709d7f4285f2cd1c31f26620",
+            approximateSizeMb = 49,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Snapdragon Hexagon NPU / QNN HTP Delegate"
+        ),
+        ModelBundleSpec(
+            id = "rom_kokoro_sherpa",
+            romCode = "ROM-04",
             badge = "54_VOICES",
             accentHex = 0xFF00FF41,
-            name = "KOKORO_82M_NEURAL",
+            name = "KOKORO_82M_SHERPA",
             subtitle = "k2-fsa/sherpa-onnx • 54 Multi-Lang Voices • 24kHz INT8 ONNX",
             description = "The flagship GachaSwipe voice pack (af_bella, af_sarah, am_adam, bf_emma & 50 more). Runs completely offline via bundled sherpa-onnx JNI.",
             backend = BackendType.SHERPA_ONNX,
@@ -706,9 +782,9 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "rom_supertonic3",
-            romCode = "ROM-02",
+            romCode = "ROM-05",
             badge = "LOW_LATENCY",
-            accentHex = 0xFF00E5FF,
+            accentHex = 0xFF38BDF8,
             name = "SUPERTONIC_3_TTS",
             subtitle = "k2-fsa/sherpa-onnx • Ultra-Fast Natural Conversational Speech",
             description = "Snappy multilingual neural synthesis optimized for rapid chat turn-taking and low battery draw.",
@@ -723,7 +799,7 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "rom_piper",
-            romCode = "ROM-03",
+            romCode = "ROM-06",
             badge = "NARRATOR",
             accentHex = 0xFFFFD700,
             name = "PIPER_VITS_LESSAC",
@@ -740,7 +816,7 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "rom_pocket_tts",
-            romCode = "ROM-04",
+            romCode = "ROM-07",
             badge = "5S_CLONE",
             accentHex = 0xFFB533FF,
             name = "POCKET_TTS_CLONER",
@@ -757,7 +833,7 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "rom_zipvoice",
-            romCode = "ROM-05",
+            romCode = "ROM-08",
             badge = "FLOW_CLONE",
             accentHex = 0xFFFF107A,
             name = "ZIPVOICE_FLOW_CLONE",
@@ -771,22 +847,6 @@ object PurrDefaultPresets {
             approximateSizeMb = 104,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "ONNX Runtime INT8 + Vocos"
-        ),
-        ModelBundleSpec(
-            id = "rom_kokoro_litert",
-            romCode = "ROM-06",
-            badge = "GPU_FP16",
-            accentHex = 0xFFFF9100,
-            name = "KOKORO_LITERT_GPU",
-            subtitle = "litert-community/Kokoro-82M • Adreno GPU FP16 (.litertlm)",
-            description = "Experimental Google AI Edge LiteRT-LM single-file GPU FP16 bundle with persistent --cache_dir and 5-minute VRAM eviction.",
-            backend = BackendType.LITERT_NPU_GPU,
-            downloadUrl = "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm",
-            fileName = "kokoro_int8_gpu_fp16.litertlm",
-            expectedSha256 = "1ef178b127ec48c737daf17eabb4cea5f6b3ffbc510aced270fe5c267bbeac52",
-            approximateSizeMb = 281,
-            isArchiveTarBz2 = false,
-            hardwareAccelNote = "Adreno GPU FP16 + OpenCL Cache"
         )
     )
 }

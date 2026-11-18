@@ -354,12 +354,13 @@ class SherpaOnnxEngine(
     }
 
     private fun resolveSpeakerId(voiceId: String, family: SherpaModelFamily): Int {
+        val cleanVoiceId = voiceId.substringAfter(':')
         if (family == SherpaModelFamily.KOKORO) {
             return PurrDefaultPresets.kokoroVoices("rom_kokoro_sherpa", BackendType.SHERPA_ONNX)
-                .firstOrNull { it.id == voiceId }?.speakerIndex ?: 0
+                .firstOrNull { it.id == cleanVoiceId }?.speakerIndex ?: 0
         }
         return when {
-            voiceId.endsWith("m1") -> 1
+            cleanVoiceId.endsWith("m1") -> 1
             else -> 0
         }
     }
@@ -398,13 +399,16 @@ class SherpaOnnxEngine(
         }.getOrElse { FloatArray(0) }
     }
 
-    private fun inferFamilyFromVoice(voiceId: String, defaultFamily: SherpaModelFamily): SherpaModelFamily = when {
-        voiceId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) -> SherpaModelFamily.KOKORO
-        voiceId.contains("supertonic", ignoreCase = true) -> SherpaModelFamily.SUPERTONIC_3
-        voiceId.contains("pocket", ignoreCase = true) -> SherpaModelFamily.POCKET_TTS
-        voiceId.contains("zipvoice", ignoreCase = true) -> SherpaModelFamily.ZIPVOICE
-        voiceId.contains("piper", ignoreCase = true) -> SherpaModelFamily.PIPER
-        else -> defaultFamily
+    private fun inferFamilyFromVoice(voiceId: String, defaultFamily: SherpaModelFamily): SherpaModelFamily {
+        val cleanId = voiceId.substringAfter(':')
+        return when {
+            cleanId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) -> SherpaModelFamily.KOKORO
+            cleanId.contains("supertonic", ignoreCase = true) -> SherpaModelFamily.SUPERTONIC_3
+            cleanId.contains("pocket", ignoreCase = true) -> SherpaModelFamily.POCKET_TTS
+            cleanId.contains("zipvoice", ignoreCase = true) -> SherpaModelFamily.ZIPVOICE
+            cleanId.contains("piper", ignoreCase = true) -> SherpaModelFamily.PIPER
+            else -> defaultFamily
+        }
     }
 
     private fun applyPitchShift(samples: FloatArray, pitch: Float): FloatArray {

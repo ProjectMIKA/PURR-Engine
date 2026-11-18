@@ -118,7 +118,7 @@ class ExternalProxyEngine(
                     id = "$SYS_VOICE_PREFIX${v.name}",
                     displayName = "System (${v.locale.displayLanguage}) // $shortLabel",
                     engine = BackendType.CORE_OS,
-                    cartridgeId = "core_os",
+                    cartridgeId = "rom_core_os",
                     gender = gender,
                     languageCode = tag,
                     nativeTags = listOf("built-in", "coherent", v.locale.language.lowercase())

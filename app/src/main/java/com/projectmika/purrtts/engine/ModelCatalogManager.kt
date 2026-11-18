@@ -57,6 +57,18 @@ class ModelCatalogManager(
     }
 
     fun startOrResumeDownload(spec: ModelBundleSpec) {
+        if (spec.isBuiltInOsCartridge) {
+            repository.updateModelState(
+                spec.id,
+                ModelBundleState(
+                    specId = spec.id,
+                    state = DownloadState.INSTALLED,
+                    sha256Verified = true,
+                    localPath = "android://system_tts"
+                )
+            )
+            return
+        }
         if (activeJobs[spec.id]?.isActive == true) return
         val job = scope.launch {
             downloadAndInstall(spec)
@@ -101,6 +113,19 @@ class ModelCatalogManager(
     }
 
     fun deleteModelBundle(spec: ModelBundleSpec) {
+        if (spec.isBuiltInOsCartridge) {
+            repository.updateModelState(
+                spec.id,
+                ModelBundleState(
+                    specId = spec.id,
+                    state = DownloadState.INSTALLED,
+                    sha256Verified = true,
+                    localPath = "android://system_tts"
+                )
+            )
+            repository.setCartridgeSlotted(spec.id, false)
+            return
+        }
         activeJobs.remove(spec.id)?.cancel()
         runCatching { File(downloadsTempDir, "${spec.fileName}.part").delete() }
         runCatching { resolveDestinationFile(spec).delete() }
