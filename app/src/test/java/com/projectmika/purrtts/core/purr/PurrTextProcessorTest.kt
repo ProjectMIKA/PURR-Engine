@@ -31,7 +31,6 @@ class PurrTextProcessorTest {
 
         val silences = chunks.filterIsInstance<PurrChunk.Silence>()
         assertEquals(2, silences.size)
-        // Ellipsis (450ms) + explicit [pause:500ms] coalesce cleanly to 950ms
         assertEquals(defaultProfile.mikaStopConfig.ellipsisPauseMs + 500, silences[0].durationMs)
         assertEquals(defaultProfile.mikaStopConfig.emDashPauseMs, silences[1].durationMs)
     }
@@ -39,13 +38,12 @@ class PurrTextProcessorTest {
     @Test
     fun `exact 24khz pcm16 silence byte length matches durationMs`() {
         val silenceBytes = PurrDspProcessor.createSilencePcm16Le(sampleRate = 24000, durationMs = 500)
-        // 24000 samples/sec * 0.5 sec * 2 bytes/sample = 24000 bytes
         assertEquals(24000, silenceBytes.size)
         assertTrue(silenceBytes.all { it == 0.toByte() })
     }
 
     @Test
-    fun `action blocks and dialogue route cleanly across modes`() {
+    fun `action blocks and optional dual voice routing behave cleanly`() {
         val input = "*she leans closer* \"Did you miss me?\" she whispered."
 
         val stripProfile = defaultProfile.copy(actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS)
@@ -54,16 +52,36 @@ class PurrTextProcessorTest {
         assertFalse(strippedSpeech.contains("leans closer", ignoreCase = true))
         assertTrue(strippedSpeech.contains("Did you miss me", ignoreCase = true))
 
-        val dualProfile = defaultProfile.copy(
-            actionHandlingMode = ActionHandlingMode.DUAL_VOICE_ROUTING,
+        // When optional dual voice split is OFF, both narration & dialogue stay on primaryVoiceId
+        val singleProfile = defaultProfile.copy(
+            enableDualVoiceSplit = false,
+            actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             primaryVoiceId = "af_sky",
             dialogueVoiceId = "af_bella"
         )
+        val singleSpeech = PurrTextProcessor.process(input, singleProfile).filterIsInstance<PurrChunk.Speech>()
+        assertTrue(singleSpeech.all { it.targetVoiceId == "af_sky" })
+
+        // When optional dual voice split is ON, dialogue switches to dialogueVoiceId
+        val dualProfile = singleProfile.copy(enableDualVoiceSplit = true)
         val dualSpeech = PurrTextProcessor.process(input, dualProfile).filterIsInstance<PurrChunk.Speech>()
         val actionChunk = dualSpeech.first { it.role == SegmentRole.ACTION }
         val dialogueChunk = dualSpeech.first { it.role == SegmentRole.DIALOGUE }
         assertEquals("af_sky", actionChunk.targetVoiceId)
         assertEquals("af_bella", dialogueChunk.targetVoiceId)
+    }
+
+    @Test
+    fun `disabling slang and mikastop toggles respects simple mode`() {
+        val cleanProfile = defaultProfile.copy(
+            enableSlangAndHonorifics = false,
+            enableMikaStopPauses = false
+        )
+        val chunks = PurrTextProcessor.process("omg wait... right now", cleanProfile)
+        val silences = chunks.filterIsInstance<PurrChunk.Silence>()
+        val speechText = chunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        assertEquals(0, silences.size)
+        assertFalse(speechText.contains("oh my god", ignoreCase = true))
     }
 
     @Test

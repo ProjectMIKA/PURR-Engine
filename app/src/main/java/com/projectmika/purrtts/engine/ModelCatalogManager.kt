@@ -286,6 +286,7 @@ class ModelCatalogManager(
     }
 
     private fun resolveSherpaExtractDir(family: SherpaModelFamily): File = when (family) {
+        SherpaModelFamily.KOKORO -> File(context.filesDir, "models/sherpa/kokoro")
         SherpaModelFamily.SUPERTONIC_3 -> File(context.filesDir, "models/sherpa/supertonic3")
         SherpaModelFamily.POCKET_TTS -> File(context.filesDir, "models/sherpa/pocket_tts")
         SherpaModelFamily.ZIPVOICE -> File(context.filesDir, "models/sherpa/zipvoice")

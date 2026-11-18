@@ -10,9 +10,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
- * ✨ MIKA'S PURR PROFILE & CONFIG REPOSITORY ✨
+ * ✨ MIKA'S PURR PROFILE, CARTRIDGE BUS & VOICE REPOSITORY ✨
  * Thread-safe JSON persistence backed by `filesDir/purr_forge_state.json`.
- * Shared synchronously between the background TextToSpeechService and Compose Forge UI.
+ * Tracks active vibe presets, slotted ROM cartridges, discovered device OS voices, and cloned voices.
  */
 class PurrProfileRepository(context: Context) {
 
@@ -26,6 +26,9 @@ class PurrProfileRepository(context: Context) {
     private val _state = MutableStateFlow(loadInitialState())
     val state: StateFlow<PurrForgeState> = _state.asStateFlow()
 
+    private val _discoveredSystemVoices = MutableStateFlow<List<VoiceDescriptor>>(emptyList())
+    val discoveredSystemVoices: StateFlow<List<VoiceDescriptor>> = _discoveredSystemVoices.asStateFlow()
+
     val currentProfile: PurrProfile
         get() {
             val s = _state.value
@@ -34,7 +37,31 @@ class PurrProfileRepository(context: Context) {
 
     fun selectProfile(profileId: String) {
         updateState { s ->
-            if (s.profiles.any { it.id == profileId }) s.copy(activeProfileId = profileId) else s
+            if (s.profiles.any { it.id == profileId }) {
+                // Preserve user's selected engine/voice choice when switching PURR vibe presets
+                val prev = s.profiles.firstOrNull { it.id == s.activeProfileId }
+                val updatedProfiles = if (prev != null) {
+                    s.profiles.map { p ->
+                        if (p.id == profileId) {
+                            p.copy(
+                                selectedCartridgeId = prev.selectedCartridgeId,
+                                preferredBackend = prev.preferredBackend,
+                                sherpaFamily = prev.sherpaFamily,
+                                primaryVoiceId = prev.primaryVoiceId,
+                                dialogueVoiceId = prev.dialogueVoiceId,
+                                enableDualVoiceSplit = prev.enableDualVoiceSplit
+                            )
+                        } else {
+                            p
+                        }
+                    }
+                } else {
+                    s.profiles
+                }
+                s.copy(activeProfileId = profileId, profiles = updatedProfiles)
+            } else {
+                s
+            }
         }
     }
 
@@ -52,12 +79,70 @@ class PurrProfileRepository(context: Context) {
         if (cleanName.isEmpty()) return
         val newId = "custom_${cleanName.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${System.currentTimeMillis() % 10000}"
         updateState { s ->
-            val clone = currentProfile.copy(id = newId, name = cleanName)
+            val clone = currentProfile.copy(
+                id = newId,
+                name = cleanName,
+                badgeTag = "CUSTOM",
+                summary = "User-saved PURR profile"
+            )
             s.copy(
                 activeProfileId = newId,
                 profiles = s.profiles + clone
             )
         }
+    }
+
+    fun setCartridgeSlotted(cartridgeId: String, slotted: Boolean) {
+        updateState { s ->
+            val nextSlotted = if (slotted) s.slottedCartridges + cartridgeId else s.slottedCartridges - cartridgeId
+            // If active profile was using the ejected cartridge, cleanly drop back to CORE_OS
+            val nextProfiles = s.profiles.map { p ->
+                if (!slotted && p.selectedCartridgeId == cartridgeId) {
+                    p.copy(
+                        selectedCartridgeId = "core_os",
+                        preferredBackend = BackendType.CORE_OS,
+                        primaryVoiceId = "core_os_auto"
+                    )
+                } else {
+                    p
+                }
+            }
+            s.copy(slottedCartridges = nextSlotted, profiles = nextProfiles)
+        }
+    }
+
+    fun isCartridgeSlotted(cartridgeId: String): Boolean =
+        cartridgeId == "core_os" || cartridgeId == "proxy_lan" || cartridgeId in _state.value.slottedCartridges
+
+    fun selectEngineCartridge(cartridgeId: String) {
+        val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
+        val voicesForCart = allAvailableVoices().filter { it.cartridgeId == cartridgeId }
+        val defaultVoice = voicesForCart.firstOrNull()
+
+        updateActiveProfile { p ->
+            when (cartridgeId) {
+                "core_os" -> p.copy(
+                    selectedCartridgeId = "core_os",
+                    preferredBackend = BackendType.CORE_OS,
+                    primaryVoiceId = voicesForCart.firstOrNull()?.id ?: "core_os_auto"
+                )
+                "proxy_lan" -> p.copy(
+                    selectedCartridgeId = "proxy_lan",
+                    preferredBackend = BackendType.EXTERNAL_PROXY,
+                    primaryVoiceId = "proxy_openai_endpoint"
+                )
+                else -> p.copy(
+                    selectedCartridgeId = cartridgeId,
+                    preferredBackend = spec?.backend ?: BackendType.SHERPA_ONNX,
+                    sherpaFamily = spec?.sherpaFamily ?: p.sherpaFamily,
+                    primaryVoiceId = defaultVoice?.id ?: p.primaryVoiceId
+                )
+            }
+        }
+    }
+
+    fun updateDiscoveredSystemVoices(voices: List<VoiceDescriptor>) {
+        _discoveredSystemVoices.value = voices
     }
 
     fun toggleVoiceWhitelist(voiceId: String, whitelisted: Boolean) {
@@ -80,15 +165,9 @@ class PurrProfileRepository(context: Context) {
         updateActiveProfile { profile ->
             val idSet = voiceIds.toSet()
             if (whitelisted) {
-                profile.copy(
-                    whitelist = profile.whitelist + idSet,
-                    blacklist = profile.blacklist - idSet
-                )
+                profile.copy(whitelist = profile.whitelist + idSet, blacklist = profile.blacklist - idSet)
             } else {
-                profile.copy(
-                    whitelist = profile.whitelist - idSet,
-                    blacklist = profile.blacklist + idSet
-                )
+                profile.copy(whitelist = profile.whitelist - idSet, blacklist = profile.blacklist + idSet)
             }
         }
     }
@@ -127,12 +206,13 @@ class PurrProfileRepository(context: Context) {
     }
 
     fun registerClonedVoice(voice: ClonedVoiceProfile) {
+        val targetCart = if (voice.family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
         updateState { s ->
             val updatedClones = s.clonedVoices.filterNot { it.id == voice.id } + voice
             val updatedProfiles = s.profiles.map { p ->
                 if (p.id == s.activeProfileId) {
                     p.copy(
-                        whitelist = p.whitelist + voice.id,
+                        selectedCartridgeId = targetCart,
                         primaryVoiceId = voice.id,
                         preferredBackend = BackendType.SHERPA_ONNX,
                         sherpaFamily = voice.family
@@ -141,7 +221,11 @@ class PurrProfileRepository(context: Context) {
                     p
                 }
             }
-            s.copy(clonedVoices = updatedClones, profiles = updatedProfiles)
+            s.copy(
+                clonedVoices = updatedClones,
+                profiles = updatedProfiles,
+                slottedCartridges = s.slottedCartridges + targetCart
+            )
         }
     }
 
@@ -155,17 +239,25 @@ class PurrProfileRepository(context: Context) {
         updateState { s ->
             val nextMap = s.modelStates.toMutableMap()
             nextMap[specId] = bundleState
-            s.copy(modelStates = nextMap)
+            val nextSlotted = if (bundleState.state == DownloadState.INSTALLED) {
+                s.slottedCartridges + specId
+            } else {
+                s.slottedCartridges
+            }
+            s.copy(modelStates = nextMap, slottedCartridges = nextSlotted)
         }
     }
 
     fun allAvailableVoices(): List<VoiceDescriptor> {
         val base = PurrDefaultPresets.builtInVoices()
+        val sysVoices = _discoveredSystemVoices.value
         val cloned = _state.value.clonedVoices.map { c ->
+            val cartId = if (c.family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
             VoiceDescriptor(
                 id = c.id,
                 displayName = "Clone (${c.family.label}) // ${c.displayName}",
                 engine = BackendType.SHERPA_ONNX,
+                cartridgeId = cartId,
                 sherpaFamily = c.family,
                 gender = c.gender,
                 languageCode = c.languageCode,
@@ -173,7 +265,7 @@ class PurrProfileRepository(context: Context) {
                 isCloned = true
             )
         }
-        return cloned + base
+        return sysVoices + cloned + base
     }
 
     private fun updateState(block: (PurrForgeState) -> PurrForgeState) {

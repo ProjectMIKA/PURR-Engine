@@ -27,12 +27,12 @@ import kotlinx.coroutines.runBlocking
 /**
  * ✨ SYSTEM-WIDE ANDROID PURR-TTS SERVICE (`android.speech.tts.TextToSpeechService`) ✨
  *
- * Exposes the GachaSwipe P.U.R.R. pipeline (slang/phonetic expansion, `*action*` vs `"dialogue"`
- * routing, deterministic MIKASTOP PCM silence injection, sentiment-driven prosody, and 24kHz DSP)
- * to every Android application via Android's standard TTS binder contract.
- *
- * Streams 24,000 Hz mono PCM16-LE (or Float32-LE when `useFloat32Callback` is enabled) buffers
- * respecting `callback.maxBufferSize` and instant `onStop()` cancellation.
+ * Crash-safe implementation:
+ * - Initializes [repository] and [backendRouter] BEFORE calling `super.onCreate()` (AOSP
+ *   invokes `onLoadLanguage` inside `super.onCreate()`!).
+ * - Overrides `onLoadVoice(voiceName)` so Android OS voice switches succeed cleanly instead of
+ *   rejecting custom voice IDs as malformed Locale tags.
+ * - Guards all Locale ISO3 / language conversions and never leaks uncaught exceptions on Binder threads.
  */
 class PurrTtsService : TextToSpeechService() {
 
@@ -41,8 +41,11 @@ class PurrTtsService : TextToSpeechService() {
         const val SAMPLE_RATE_HZ = 24000
     }
 
-    private lateinit var repository: PurrProfileRepository
-    private lateinit var backendRouter: TtsBackendRouter
+    @Volatile
+    private var repository: PurrProfileRepository? = null
+
+    @Volatile
+    private var backendRouter: TtsBackendRouter? = null
 
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
@@ -55,12 +58,19 @@ class PurrTtsService : TextToSpeechService() {
     @Volatile
     private var currentLocale: Locale = Locale.US
 
-    override fun onCreate() {
-        super.onCreate()
-        val app = applicationContext as PurrApplication
+    private fun ensureDependencies(): Boolean {
+        if (repository != null && backendRouter != null) return true
+        val app = applicationContext as? PurrApplication ?: return false
         repository = app.repository
         backendRouter = app.backendRouter
-        Log.i(TAG, "[BOOT] PURR-TTS system service initialized.")
+        return true
+    }
+
+    override fun onCreate() {
+        // Must run BEFORE super.onCreate() because AOSP calls onLoadLanguage synchronously inside super.onCreate()
+        ensureDependencies()
+        super.onCreate()
+        Log.i(TAG, "[BOOT] PURR-TTS system service initialized cleanly.")
     }
 
     override fun onDestroy() {
@@ -71,106 +81,128 @@ class PurrTtsService : TextToSpeechService() {
     }
 
     override fun onIsLanguageAvailable(lang: String?, country: String?, variant: String?): Int {
+        ensureDependencies()
+        val repo = repository ?: return TextToSpeech.LANG_AVAILABLE
         val code = normalizeLangTag(lang, country)
-        val hasExact = repository.allAvailableVoices().any { it.languageCode.equals(code, ignoreCase = true) }
-        val hasLang = repository.allAvailableVoices().any {
+        val voices = repo.allAvailableVoices()
+        val hasExact = voices.any { it.languageCode.equals(code, ignoreCase = true) }
+        val hasLang = voices.any {
             it.languageCode.substringBefore('-').equals(code.substringBefore('-'), ignoreCase = true)
         }
         return when {
+            hasExact && !variant.isNullOrBlank() -> TextToSpeech.LANG_COUNTRY_VAR_AVAILABLE
             hasExact -> TextToSpeech.LANG_COUNTRY_AVAILABLE
             hasLang -> TextToSpeech.LANG_AVAILABLE
-            else -> TextToSpeech.LANG_NOT_SUPPORTED
+            else -> TextToSpeech.LANG_AVAILABLE // Allow English fallback cleanly for OS callers
         }
     }
 
     override fun onGetLanguage(): Array<String> {
-        return arrayOf(
-            currentLocale.isO3Language,
-            currentLocale.isO3Country,
-            currentLocale.variant
-        )
+        val lang = runCatching { currentLocale.isO3Language }.getOrDefault("eng")
+        val country = runCatching { currentLocale.isO3Country }.getOrDefault("USA")
+        return arrayOf(lang, country, currentLocale.variant.orEmpty())
     }
 
     override fun onLoadLanguage(lang: String?, country: String?, variant: String?): Int {
+        ensureDependencies()
         val status = onIsLanguageAvailable(lang, country, variant)
         if (status >= TextToSpeech.LANG_AVAILABLE) {
-            currentLocale = Locale.forLanguageTag(normalizeLangTag(lang, country))
+            currentLocale = runCatching {
+                Locale.forLanguageTag(normalizeLangTag(lang, country))
+            }.getOrDefault(Locale.US)
         }
         return status
     }
 
     override fun onGetVoices(): List<Voice> {
-        val profile = repository.currentProfile
-        val voices = repository.allAvailableVoices()
-            .filterNot { it.id in profile.blacklist }
-            .let { list ->
-                if (profile.whitelist.isNotEmpty()) {
-                    list.filter { it.id in profile.whitelist }.ifEmpty { list }
-                } else {
-                    list
-                }
-            }
+        if (!ensureDependencies()) return emptyList()
+        val repo = repository ?: return emptyList()
+        val profile = repo.currentProfile
 
-        return voices.map { v ->
-            val locale = Locale.forLanguageTag(v.languageCode)
-            val customTags = profile.customVoiceTags[v.id].orEmpty()
-            val features = (v.nativeTags + customTags + listOf("purr-engine", v.engine.name.lowercase())).toSet()
-            Voice(
-                v.id,
-                locale,
-                Voice.QUALITY_VERY_HIGH,
-                Voice.LATENCY_VERY_LOW,
-                false,
-                features
-            )
+        // Only expose voices belonging to CORE_OS or currently SLOTTED ROM cartridges
+        val eligible = repo.allAvailableVoices().filter { v ->
+            repo.isCartridgeSlotted(v.cartridgeId)
+        }
+        val voices = eligible.ifEmpty { repo.allAvailableVoices().take(1) }
+
+        return voices.mapNotNull { v ->
+            runCatching {
+                val locale = Locale.forLanguageTag(v.languageCode)
+                val customTags = profile.customVoiceTags[v.id].orEmpty()
+                val features = (v.nativeTags + customTags + listOf("purr-engine", v.engine.name.lowercase())).toSet()
+                Voice(
+                    v.id,
+                    locale,
+                    Voice.QUALITY_VERY_HIGH,
+                    Voice.LATENCY_VERY_LOW,
+                    false,
+                    features
+                )
+            }.getOrNull()
         }
     }
 
     override fun onIsValidVoiceName(voiceName: String?): Int {
-        if (voiceName.isNullOrBlank()) return TextToSpeech.ERROR
-        val exists = repository.allAvailableVoices().any { it.id == voiceName }
+        if (!ensureDependencies() || voiceName.isNullOrBlank()) return TextToSpeech.ERROR
+        val exists = repository?.allAvailableVoices()?.any { it.id == voiceName } == true
         return if (exists) TextToSpeech.SUCCESS else TextToSpeech.ERROR
     }
 
+    override fun onLoadVoice(voiceName: String?): Int {
+        if (!ensureDependencies() || voiceName.isNullOrBlank()) return TextToSpeech.ERROR
+        val voice = repository?.allAvailableVoices()?.firstOrNull { it.id == voiceName }
+            ?: return TextToSpeech.ERROR
+        currentLocale = runCatching { Locale.forLanguageTag(voice.languageCode) }.getOrDefault(Locale.US)
+        return TextToSpeech.SUCCESS
+    }
+
     override fun onGetDefaultVoiceNameFor(lang: String?, country: String?, variant: String?): String {
-        val profile = repository.currentProfile
+        if (!ensureDependencies()) return "core_os_auto"
+        val repo = repository ?: return "core_os_auto"
+        val profile = repo.currentProfile
+        if (profile.primaryVoiceId.isNotBlank()) return profile.primaryVoiceId
         val targetLang = normalizeLangTag(lang, country).substringBefore('-')
         val matched = PurrVoiceMatcher.assignVoice(
-            voices = repository.allAvailableVoices(),
+            voices = repo.allAvailableVoices().filter { repo.isCartridgeSlotted(it.cartridgeId) },
             profile = profile,
             preferredLanguage = targetLang
         )
-        return matched?.id ?: profile.primaryVoiceId
+        return matched?.id ?: "core_os_auto"
     }
 
     override fun onStop() {
         isStopped = true
         activeSynthesisJob?.cancel()
-        backendRouter.markIdle()
+        backendRouter?.markIdle()
     }
 
     override fun onSynthesizeText(request: SynthesisRequest?, callback: SynthesisCallback?) {
-        if (request == null || callback == null) {
-            callback?.error()
+        if (callback == null) return
+        if (request == null || !ensureDependencies()) {
+            runCatching { callback.error() }
             return
         }
 
+        val repo = repository ?: run { callback.error(); return }
+        val router = backendRouter ?: run { callback.error(); return }
+
         val rawText = request.charSequenceText?.toString().orEmpty()
         if (rawText.isBlank()) {
-            callback.start(SAMPLE_RATE_HZ, AudioFormat.ENCODING_PCM_16BIT, 1)
-            callback.done()
+            if (callback.start(SAMPLE_RATE_HZ, AudioFormat.ENCODING_PCM_16BIT, 1) == TextToSpeech.SUCCESS) {
+                callback.done()
+            }
             return
         }
 
         isStopped = false
-        val profile = resolveEffectiveProfile(request)
+        val profile = resolveEffectiveProfile(repo, request)
         val osRateMultiplier = (request.speechRate.coerceIn(25, 400) / 100.0f)
         val osPitchMultiplier = (request.pitch.coerceIn(25, 400) / 100.0f)
 
         val chunks = PurrTextProcessor.process(
             rawText = rawText,
             profile = profile,
-            customRules = repository.state.value.customPhoneticRules
+            customRules = repo.state.value.customPhoneticRules
         )
 
         val useFloat32 = profile.dspConfig.useFloat32Callback
@@ -185,17 +217,21 @@ class PurrTtsService : TextToSpeechService() {
             return
         }
 
+        if (chunks.isEmpty()) {
+            callback.done()
+            return
+        }
+
         try {
             runBlocking(serviceScope.coroutineContext) {
-                val job = coroutineContext[Job]
-                activeSynthesisJob = job
+                activeSynthesisJob = coroutineContext[Job]
 
                 for (chunk in chunks) {
                     if (isStopped) break
 
                     when (chunk) {
                         is PurrChunk.Silence -> {
-                            backendRouter.emitSilenceTelemetry(chunk.durationMs, chunk.reason)
+                            router.emitSilenceTelemetry(chunk.durationMs, chunk.reason)
                             val silenceBytes = if (useFloat32) {
                                 PurrDspProcessor.createSilenceFloat32Le(SAMPLE_RATE_HZ, chunk.durationMs)
                             } else {
@@ -205,7 +241,7 @@ class PurrTtsService : TextToSpeechService() {
                         }
 
                         is PurrChunk.Speech -> {
-                            val outcome = backendRouter.synthesizeSpeechChunk(
+                            val outcome = router.synthesizeSpeechChunk(
                                 chunk = chunk,
                                 profile = profile,
                                 osRateMultiplier = osRateMultiplier,
@@ -213,30 +249,27 @@ class PurrTtsService : TextToSpeechService() {
                             )
                             if (isStopped) break
 
-                            val pcmBytes = if (useFloat32) {
-                                PurrDspProcessor.float32ToByteArrayLe(outcome.pcmFloat24k)
-                            } else {
-                                PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
+                            if (outcome.pcmFloat24k.isNotEmpty()) {
+                                val pcmBytes = if (useFloat32) {
+                                    PurrDspProcessor.float32ToByteArrayLe(outcome.pcmFloat24k)
+                                } else {
+                                    PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
+                                }
+                                streamToCallback(pcmBytes, callback)
                             }
-                            streamToCallback(pcmBytes, callback)
                         }
                     }
                 }
             }
-
-            if (!isStopped) {
-                callback.done()
-            } else {
-                callback.done()
-            }
-        } catch (_: CancellationException) {
             callback.done()
+        } catch (_: CancellationException) {
+            runCatching { callback.done() }
         } catch (err: Exception) {
-            Log.e(TAG, "[SYNTH_ERR] Failed synthesis: ${err.message}", err)
-            callback.error()
+            Log.e(TAG, "[SYNTH_ERR] Synthesis failed cleanly: ${err.message}", err)
+            runCatching { callback.error() }
         } finally {
             activeSynthesisJob = null
-            backendRouter.markIdle()
+            router.markIdle()
         }
     }
 
@@ -255,13 +288,17 @@ class PurrTtsService : TextToSpeechService() {
         }
     }
 
-    private fun resolveEffectiveProfile(request: SynthesisRequest): PurrProfile {
-        val base = repository.currentProfile
+    private fun resolveEffectiveProfile(repo: PurrProfileRepository, request: SynthesisRequest): PurrProfile {
+        val base = repo.currentProfile
         val requestedVoice = request.voiceName
         if (!requestedVoice.isNullOrBlank() && requestedVoice != base.primaryVoiceId) {
-            val known = repository.allAvailableVoices().any { it.id == requestedVoice }
-            if (known) {
-                return base.copy(primaryVoiceId = requestedVoice)
+            val match = repo.allAvailableVoices().firstOrNull { it.id == requestedVoice }
+            if (match != null && repo.isCartridgeSlotted(match.cartridgeId)) {
+                return base.copy(
+                    primaryVoiceId = requestedVoice,
+                    preferredBackend = match.engine,
+                    selectedCartridgeId = match.cartridgeId
+                )
             }
         }
         return base
@@ -277,7 +314,7 @@ class PurrTtsService : TextToSpeechService() {
             "hin", "hi" -> "hi"
             "ita", "it" -> "it"
             "por", "pt" -> "pt"
-            else -> lang?.take(2)?.lowercase() ?: "en"
+            else -> lang?.take(2)?.lowercase()?.takeIf { it.all(Char::isLetter) } ?: "en"
         }
         val iso2Country = when (country?.uppercase()) {
             "USA", "US" -> "US"

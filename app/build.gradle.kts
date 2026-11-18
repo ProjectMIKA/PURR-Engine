@@ -13,8 +13,8 @@ android {
         applicationId = "com.projectmika.purrtts"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -76,8 +76,14 @@ android {
 
     packaging {
         jniLibs {
-            // Keep .so libraries uncompressed/aligned for LiteRT QNN/OpenCL and libsherpa-onnx-jni.so
+            // Keep .so libraries uncompressed/aligned for LiteRT & sherpa-onnx JNI
             useLegacyPackaging = true
+            pickFirsts += listOf(
+                "lib/arm64-v8a/libc++_shared.so",
+                "lib/x86_64/libc++_shared.so",
+                "lib/arm64-v8a/libonnxruntime.so",
+                "lib/x86_64/libonnxruntime.so"
+            )
         }
         resources {
             excludes += listOf(
@@ -94,6 +100,7 @@ android {
 }
 
 dependencies {
+    implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)

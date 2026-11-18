@@ -3,16 +3,14 @@ package com.projectmika.purrtts.core.purr
 import kotlin.random.Random
 
 /**
- * ✨ MIKA'S P.U.R.R. TEXT PROCESSOR (OMNI-SYNTHESIS + MIKASTOP TOKENIZER) ✨
+ * ✨ MIKA'S P.U.R.R. TEXT PROCESSOR (GACHA-SWIPE TRIED & TRUE OMNI-SYNTHESIS + MIKASTOP) ✨
  *
- * Pre-synthesis pipeline executed before any text reaches LiteRT, Sherpa-ONNX, or Proxy:
- * 1. Scores chunk sentiment before stripping emojis.
- * 2. Splits `*action blocks*` vs `"dialogue"` vs plain narration according to ActionHandlingMode.
- * 3. Expands texting slang (~100 entries), anime honorifics, custom phonetic rules, and stutters.
- * 4. Tokenizes ellipses (`...`), em-dashes (`—`), `[pause:Nms]`, sentences, and clauses into
- *    deterministic `MIKASTOP` chunk boundaries mapped to exact 24kHz PCM silence buffers.
- * 5. Shreds hallucination triggers (multiple dots, stray brackets, unpronounceable symbols) and
- *    guarantees clean terminal punctuation per chunk.
+ * Ports GachaSwipe's complete battle-tested `renderVoiceNote` pipeline (App.jsx):
+ * 1. Sentiment & Tone Override Drama Matrix (`tsundere`, `yandere`, `shy`, `kuudere`, `genki`, `dominant`, `robot`).
+ * 2. Optional `*action blocks*` vs `"dialogue"` splitting & optional Dual-Voice Routing.
+ * 3. ~100-entry Texting Slang Translator + Anime Honorifics + Organic Stutter Translator (`w-what` -> `wuh-what`).
+ * 4. MIKASTOP Pause Tokenizer (`...`, `—`, `[pause:Nms]`, sentences, breath commas) -> 24kHz silence chunks.
+ * 5. Hallucination Shredder, Acronym Assassin & Punctuation Protector (commas kept as breath marks).
  */
 object PurrTextProcessor {
 
@@ -30,7 +28,7 @@ object PurrTextProcessor {
         "th" to "thuh", "sh" to "shh", "ch" to "chuh", "ph" to "fuh", "wh" to "wuh", "qu" to "quh"
     )
 
-    private val SLANG_DICTIONARY: Map<String, String> = linkedMapOf(
+    val SLANG_DICTIONARY: Map<String, String> = linkedMapOf(
         "omfg" to "oh my fucking god",
         "omg" to "oh my god",
         "lmfao" to "laughing my ass off",
@@ -127,6 +125,14 @@ object PurrTextProcessor {
         "sorta" to "sort of"
     )
 
+    val HONORIFIC_RULES_PREVIEW: List<Pair<String, String>> = listOf(
+        "-san / -chan / -kun" to "sahn / chahn / koon",
+        "-sama / -senpai / -sensei" to "sah-mah / sen-pie / sen-say",
+        "nya~ / nyaa~" to "nyaah",
+        "tch / ara-ara / fufu" to "tssk / ah-rah ah-rah / foo-foo",
+        "w-what / b-baka" to "wuh-what / buh-baka (organic stutters)"
+    )
+
     private val ACRONYM_WHITELIST = setOf(
         "NASA", "DNA", "FBI", "CIA", "USA", "UK", "OK", "TV", "AI", "ID",
         "UFO", "HUD", "OS", "TTS", "NPU", "GPU", "CPU", "PCM", "DSP", "VIP", "SSR"
@@ -174,11 +180,15 @@ object PurrTextProcessor {
                 toneOverride = profile.sentimentConfig.toneOverride
             )
 
-            // If STRIP_ACTIONS converted `*action*` into an explicit MIKASTOP token, handle it directly.
+            // If STRIP_ACTIONS converted `*action*` into an explicit MIKASTOP pause
             val processedWithRules = if (segment.role == SegmentRole.ACTION &&
                 profile.actionHandlingMode == ActionHandlingMode.STRIP_ACTIONS
             ) {
-                "[[MIKASTOP:${profile.mikaStopConfig.actionStripPauseMs}:ACTION_STRIP]]"
+                if (profile.enableMikaStopPauses) {
+                    "[[MIKASTOP:${profile.mikaStopConfig.actionStripPauseMs}:ACTION_STRIP]]"
+                } else {
+                    ""
+                }
             } else {
                 applyPhoneticAndSlangPipeline(
                     text = segment.text,
@@ -189,8 +199,15 @@ object PurrTextProcessor {
                 )
             }
 
+            if (processedWithRules.isBlank()) continue
+
             // 2. Tokenize punctuation & explicit pauses into deterministic MIKASTOP boundaries.
-            val tokenized = tokenizeWithMikaStop(processedWithRules, profile.mikaStopConfig)
+            val tokenized = if (profile.enableMikaStopPauses) {
+                tokenizeWithMikaStop(processedWithRules, profile.mikaStopConfig)
+            } else {
+                // Even when punctuation slicing is turned off, preserve explicit [pause:Nms] tags
+                processedWithRules
+            }
 
             // 3. Emit alternating Speech and Silence chunks.
             val prosody = PurrSentimentScorer.computeProsodyModulation(
@@ -231,7 +248,6 @@ object PurrTextProcessor {
             }
         }
 
-        // Drop trailing silence so Android SynthesisCallback finishes crisply after the last word.
         while (output.lastOrNull() is PurrChunk.Silence) {
             output.removeAt(output.lastIndex)
         }
@@ -260,7 +276,6 @@ object PurrTextProcessor {
                     segments += RawRoleSegment(inner, SegmentRole.ACTION)
                 }
             } else {
-                // Quoted dialogue ("..." or “...”)
                 val inner = token.substring(1, token.length - 1).trim()
                 if (inner.isNotEmpty()) {
                     segments += RawRoleSegment(inner, SegmentRole.DIALOGUE)
@@ -294,12 +309,12 @@ object PurrTextProcessor {
             " [[MIKASTOP:$ms:TAG_PAUSE]] "
         }
 
-        // Vaporize emojis & percent/ampersand symbols
+        // Vaporize emojis & percent/ampersand symbols (tried & true GachaSwipe rule)
         clean = EMOJI_VAPORIZER_REGEX.replace(clean, " ")
         clean = clean.replace("%", " percent ")
         clean = clean.replace("&", " and ")
 
-        // Apply user-configured PhoneticRule entries from PURR Rulebook
+        // User-configured custom PhoneticRule entries from PURR Rulebook
         for (rule in customRules) {
             if (!rule.enabled || rule.pattern.isBlank()) continue
             val options = if (rule.ignoreCase) setOf(RegexOption.IGNORE_CASE) else emptySet()
@@ -310,32 +325,35 @@ object PurrTextProcessor {
             clean = regex.replace(clean) { rule.replacement }
         }
 
-        // Organic Stutter Translator: `w-what` -> `wuh-what`, `th-that` -> `thuh-that`
-        // (Run before honorific syllable hyphenation so `ah-rah` / `sah-mah` stay untouched.)
-        clean = ORGANIC_STUTTER_REGEX.replace(clean) { m ->
-            val prefix = m.groupValues[1].lowercase()
-            val sound = PHONETIC_STUTTER_MAP[prefix] ?: PHONETIC_STUTTER_MAP[prefix.take(1)]
-            if (sound != null) "$sound-" else m.value
+        if (profile.enableSlangAndHonorifics) {
+            // Organic Stutter Translator: `w-what` -> `wuh-what`, `th-that` -> `thuh-that`
+            clean = ORGANIC_STUTTER_REGEX.replace(clean) { m ->
+                val prefix = m.groupValues[1].lowercase()
+                val sound = PHONETIC_STUTTER_MAP[prefix] ?: PHONETIC_STUTTER_MAP[prefix.take(1)]
+                if (sound != null) "$sound-" else m.value
+            }
+
+            // Anime honorifics & vocalisms (applied before em-dash/tilde split so `nya~` becomes `nyaah`)
+            clean = applyAnimeHonorificsAndVocalisms(clean)
+
+            // ~100 GachaSwipe texting slang expansions
+            for ((slang, expanded) in SLANG_DICTIONARY) {
+                val wordRegex = Regex("\\b${Regex.escape(slang)}\\b", RegexOption.IGNORE_CASE)
+                clean = wordRegex.replace(clean) { expanded }
+            }
         }
 
-        // Anime honorifics & vocalisms (applied before em-dash/tilde split so `nya~` becomes `nyaah`)
-        clean = applyAnimeHonorificsAndVocalisms(clean)
-
-        // Apply ~100 GachaSwipe texting slang expansions
-        for ((slang, expanded) in SLANG_DICTIONARY) {
-            val wordRegex = Regex("\\b${Regex.escape(slang)}\\b", RegexOption.IGNORE_CASE)
-            clean = wordRegex.replace(clean) { expanded }
-        }
-
-        // Drama Matrix optional stutter / vowel stretch (with strict "mika" immunity)
+        // GachaSwipe Drama Matrix optional stutter / vowel stretch (with strict "mika" immunity)
         val tone = profile.sentimentConfig.toneOverride
-        if (profile.sentimentConfig.enabled) {
-            if ((tone == ArchetypeTone.SHY || tone == ArchetypeTone.SHY_LOVE || tone == ArchetypeTone.TSUNDERE_LOVE) &&
+        if (profile.sentimentConfig.enabled && tone != ArchetypeTone.NORMAL) {
+            if ((tone == ArchetypeTone.SHY || tone == ArchetypeTone.SHY_LOVE ||
+                    tone == ArchetypeTone.TSUNDERE_LOVE || tone == ArchetypeTone.SHY_SADNESS) &&
                 profile.sentimentConfig.stutterIntensity > 0.01f
             ) {
                 clean = applyStutter(clean, profile.sentimentConfig.stutterIntensity, rng)
             }
-            if ((tone == ArchetypeTone.YANDERE_LOVE || tone == ArchetypeTone.DOMINANT_LOVE) &&
+            if ((tone == ArchetypeTone.YANDERE_LOVE || tone == ArchetypeTone.YANDERE_ANGER ||
+                    tone == ArchetypeTone.DOMINANT_LOVE) &&
                 profile.sentimentConfig.vowelStretchIntensity > 0.01f
             ) {
                 clean = stretchVowels(clean, profile.sentimentConfig.vowelStretchIntensity, rng)
@@ -391,7 +409,7 @@ object PurrTextProcessor {
     fun tokenizeWithMikaStop(input: String, config: MikaStopConfig): String {
         var out = input
 
-        // Normalize bare MIKASTOP keywords
+        // Normalize bare MIKASTOP keywords without touching [[MIKASTOP:...]]
         out = BARE_MIKASTOP_REGEX.replace(out, " [[MIKASTOP:${config.sentencePauseMs}:MIKASTOP]] ")
 
         // Protect ellipses with a temporary sentinel so sentence-end matching does not double-count pauses
@@ -507,7 +525,7 @@ object PurrTextProcessor {
 
     private fun resolveTargetVoiceId(role: SegmentRole, profile: PurrProfile): String {
         return if (role == SegmentRole.DIALOGUE &&
-            profile.actionHandlingMode == ActionHandlingMode.DUAL_VOICE_ROUTING &&
+            profile.enableDualVoiceSplit &&
             profile.dialogueVoiceId.isNotBlank()
         ) {
             profile.dialogueVoiceId
