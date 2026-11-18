@@ -1,5 +1,8 @@
 package com.projectmika.purrtts.ui.forge
 
+import android.net.Uri
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -39,18 +42,32 @@ import com.projectmika.purrtts.ui.theme.MikaTagPill
 
 /**
  * ✨ ZERO-SHOT VOICE CLONING STUDIO DIALOG (POCKET TTS / ZIPVOICE) ✨
- * Captures a 5-second 24kHz mono WAV reference via `AudioRecord` (or uses an imported WAV)
- * and registers the zero-shot cloned speaker immediately into the Forge roster.
+ * Two reference sources:
+ * 1. `REC_5S_WAV` — captures a 5-second 24kHz mono WAV via `AudioRecord`.
+ * 2. `IMPORT_CLIP` — imports any audio file (mp3/m4a/ogg/flac/wav/opus) from the device,
+ *    with an optional CLEAN_AUDIO toggle that runs the spectral noise/static cleanup
+ *    chain before the clip becomes the clone reference.
+ * Registering trims the import to the selected family's best-voice window and inserts
+ * the zero-shot cloned speaker into the Forge roster.
  */
 @Composable
 fun VoiceCloneStudioSheet(
     isRecording: Boolean,
     recordingProgress: Float,
     lastRecordedWavPath: String?,
+    isImporting: Boolean,
+    importStatus: String?,
+    importedWavPath: String?,
+    cleanAudio: Boolean,
+    onToggleCleanAudio: (Boolean) -> Unit,
+    onImportClip: (Uri) -> Unit,
     onRecordFiveSeconds: () -> Unit,
     onRegisterClone: (String, SherpaModelFamily, VoiceGender, String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
+    val importLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? -> uri?.let(onImportClip) }
     var displayName by remember { mutableStateOf("MIKA_CLONE_01") }
     var selectedFamily by remember { mutableStateOf(SherpaModelFamily.POCKET_TTS) }
     var selectedGender by remember { mutableStateOf(VoiceGender.FEMALE) }
@@ -165,6 +182,103 @@ fun VoiceCloneStudioSheet(
                 ),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            // ✨ CLIP IMPORT + CLEAN AUDIO (v1.4.0)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MikaColors.DeepWellBg)
+                    .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                    .padding(10.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "IMPORT_AUDIO_CLIP // MP3 M4A OGG FLAC WAV",
+                        color = MikaColors.NeonCyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MikaColors.NeonCyan.copy(alpha = 0.18f))
+                            .border(1.dp, MikaColors.NeonCyan, RoundedCornerShape(4.dp))
+                            .clickable(enabled = !isImporting) {
+                                importLauncher.launch(arrayOf("audio/*"))
+                            }
+                            .padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonCyan, size = 10.dp)
+                        Text(
+                            text = if (isImporting) "DECODING..." else "IMPORT_CLIP",
+                            color = MikaColors.NeonCyan,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "🧹 CLEAN_AUDIO // DE_NOISE + DE_STATIC",
+                        color = MikaColors.TerminalGreen,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 10.sp
+                    )
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(MikaColors.TerminalGreen.copy(alpha = if (cleanAudio) 0.22f else 0.08f))
+                            .border(
+                                1.dp,
+                                if (cleanAudio) MikaColors.TerminalGreen else MikaColors.DimText.copy(alpha = 0.5f),
+                                RoundedCornerShape(4.dp)
+                            )
+                            .clickable { onToggleCleanAudio(!cleanAudio) }
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = if (cleanAudio) "ON (RECOMMENDED)" else "OFF (KEEP RAW)",
+                            color = if (cleanAudio) MikaColors.TerminalGreen else MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 10.sp
+                        )
+                    }
+                }
+
+                if (importStatus != null) {
+                    Text(
+                        text = importStatus,
+                        color = if (importStatus.startsWith("READY")) MikaColors.TerminalGreen else MikaColors.NeonCyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp
+                    )
+                }
+                if (!importedWavPath.isNullOrBlank()) {
+                    Text(
+                        text = "READY: ${importedWavPath.substringAfterLast('/')}",
+                        color = MikaColors.TerminalGreen,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.sp
+                    )
+                }
+            }
 
             // 5-Second Reference Capture Control
             Column(

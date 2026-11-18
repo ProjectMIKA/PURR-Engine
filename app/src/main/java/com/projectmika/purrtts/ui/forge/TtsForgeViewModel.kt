@@ -8,6 +8,7 @@ import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.AudioTrack
 import android.media.MediaRecorder
+import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
@@ -23,6 +24,7 @@ import com.projectmika.purrtts.core.purr.MikaStopConfig
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.PhoneticRule
 import com.projectmika.purrtts.core.purr.PurrChunk
+import com.projectmika.purrtts.core.purr.PurrCloneAudioCleaner
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
@@ -31,6 +33,7 @@ import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
+import com.projectmika.purrtts.engine.CloneClipImporter
 import com.projectmika.purrtts.engine.TtsBackendRouter
 import java.io.File
 import java.io.FileInputStream
@@ -106,6 +109,22 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     private val _lastRecordedWavPath = MutableStateFlow<String?>(null)
     val lastRecordedWavPath: StateFlow<String?> = _lastRecordedWavPath.asStateFlow()
+
+    // ✨ CLONE CLIP IMPORT (v1.4.0): user-imported audio → cleaned 24kHz reference
+    private val _cleanImportedAudio = MutableStateFlow(true)
+    val cleanImportedAudio: StateFlow<Boolean> = _cleanImportedAudio.asStateFlow()
+
+    private val _isImportingClone = MutableStateFlow(false)
+    val isImportingClone: StateFlow<Boolean> = _isImportingClone.asStateFlow()
+
+    private val _cloneImportStatus = MutableStateFlow<String?>(null)
+    val cloneImportStatus: StateFlow<String?> = _cloneImportStatus.asStateFlow()
+
+    private val _importedCloneWavPath = MutableStateFlow<String?>(null)
+    val importedCloneWavPath: StateFlow<String?> = _importedCloneWavPath.asStateFlow()
+
+    /** Cleaned full-length import held in memory (24kHz mono); trimmed per-family at registration. */
+    private var importedCloneSamples: FloatArray? = null
 
     private val _isExportingAudio = MutableStateFlow(false)
     val isExportingAudio: StateFlow<Boolean> = _isExportingAudio.asStateFlow()
@@ -490,6 +509,52 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    /**
+     * ✨ CLONE CLIP IMPORT (v1.4.0): decodes any user-selected audio document (mp3/m4a/ogg/
+     * flac/wav/opus) into a cleaned 24kHz mono reference held in memory. At registration the
+     * clip is trimmed to the selected family's best-voice window (Pocket ≈ 5s, ZipVoice ≈ 12s).
+     * The optional CLEAN_AUDIO toggle runs the pure-Kotlin denoise chain: DC removal → 85Hz
+     * rumble high-pass → STFT spectral-subtraction (learns the clip's own noise floor) →
+     * peak normalization.
+     */
+    fun importCloneClip(uri: Uri) {
+        if (_isImportingClone.value) return
+        viewModelScope.launch(Dispatchers.IO) {
+            _isImportingClone.value = true
+            try {
+                _cloneImportStatus.value = "> DECODING_AUDIO_CLIP..."
+                val decoded = CloneClipImporter.decodeToMonoPcm(app, uri)
+                    ?: throw IllegalStateException("No decodable audio track in that file")
+
+                _cloneImportStatus.value = "> RESAMPLING ${decoded.sampleRateHz}HZ -> 24KHZ..."
+                val mono24k = PurrDspProcessor.resampleMono(decoded.samples, decoded.sampleRateHz, 24000)
+
+                val cleaned = if (_cleanImportedAudio.value) {
+                    _cloneImportStatus.value = "> CLEANING_NOISE // SPECTRAL_SUBTRACT..."
+                    PurrCloneAudioCleaner.cleanClip(mono24k, 24000)
+                } else {
+                    mono24k
+                }
+
+                importedCloneSamples = cleaned
+                _importedCloneWavPath.value = null
+                val seconds = cleaned.size / 24000.0
+                val suffix = if (_cleanImportedAudio.value) " • CLEANED" else " • RAW"
+                _cloneImportStatus.value = "READY: %.1fs @ 24kHz%s".format(seconds, suffix)
+                showToast("Imported clone clip (%.1fs)".format(seconds))
+            } catch (err: Exception) {
+                _cloneImportStatus.value = "IMPORT FAILED: ${err.message}"
+                showToast("Import failed: ${err.message}")
+            } finally {
+                _isImportingClone.value = false
+            }
+        }
+    }
+
+    fun toggleCleanImportedAudio(enabled: Boolean) {
+        _cleanImportedAudio.value = enabled
+    }
+
     fun registerClonedVoice(
         displayName: String,
         family: SherpaModelFamily,
@@ -499,7 +564,26 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         wavPathOverride: String? = null
     ) {
         val cleanName = displayName.trim().ifEmpty { "Mika Clone" }
-        val wavPath = wavPathOverride ?: _lastRecordedWavPath.value ?: createSyntheticPlaceholderRefWav(cleanName)
+        val wavPath = when {
+            // Imported clip: trim to the selected family's best-voice window and write the WAV.
+            importedCloneSamples != null -> {
+                val targetSeconds = PurrCloneAudioCleaner.targetClipSeconds(family)
+                val trimmed = PurrCloneAudioCleaner.selectBestClip(
+                    importedCloneSamples!!, 24000, targetSeconds
+                )
+                val outDir = File(app.filesDir, "cloned_refs").apply { mkdirs() }
+                val file = File(outDir, "import_${System.currentTimeMillis()}.wav")
+                val pcm16 = PurrDspProcessor.float32ToPcm16Le(trimmed)
+                writePcm16MonoWav(file, pcm16, pcm16.size, 24000)
+                importedCloneSamples = null
+                _importedCloneWavPath.value = file.absolutePath
+                _cloneImportStatus.value = null
+                showToast("Reference trimmed to ${targetSeconds}s (${family.label})")
+                file.absolutePath
+            }
+            wavPathOverride != null -> wavPathOverride
+            else -> _lastRecordedWavPath.value ?: createSyntheticPlaceholderRefWav(cleanName)
+        }
         val parsedTags = tagsRaw.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
             .ifEmpty { listOf("cloned", "custom", gender.tag) }
         val voiceId = "clone_${cleanName.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${System.currentTimeMillis() % 10000}"
