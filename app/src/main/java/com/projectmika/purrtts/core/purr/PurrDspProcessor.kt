@@ -39,35 +39,43 @@ object PurrDspProcessor {
         // 1. GachaSwipe Envelope Stage: 25ms Anti-Pop Fade-In + 120ms Sentence Tail Taper
         buffer = applyEnvelopeTaper(buffer, sampleRate, config)
 
-        if (dspEnabled) {
-            // 2. Clean 80Hz High-Pass filter removes sub-bass mud without thinning the voice
+        val isEffectActive = config.effectPreset != AcousticEffectPreset.NONE
+        val isWarmPreset = config.effectPreset == AcousticEffectPreset.WARM_STUDIO
+        val effectiveWarmthDb = if (isWarmPreset) max(config.warmthEqDb, 2.0f).toDouble() else config.warmthEqDb.toDouble()
+        val effectivePresenceDb = if (isWarmPreset) min(config.presenceEqDb, -1.5f).toDouble() else config.presenceEqDb.toDouble()
+        val needsEqOrDynamics = isEffectActive ||
+            abs(effectiveWarmthDb) > 0.05 ||
+            abs(effectivePresenceDb) > 0.05 ||
+            config.reverbWetMix > 0.01f
+
+        if (dspEnabled && needsEqOrDynamics) {
+            // 2. Clean 80Hz High-Pass filter removes sub-bass mud only when EQ/effect shaping is active
             buffer = applyBiquadFilter(
                 samples = buffer,
                 coeffs = BiquadCoeffs.highPass(sampleRate.toDouble(), 80.0, 0.707)
             )
 
-            // 3. Dynamic Emotion / Chest Warmth + De-Esser (RoleplayRenderer.jsx lines 130-152)
-            val isWarmPreset = config.effectPreset == AcousticEffectPreset.WARM_STUDIO
-            val warmthFreq = if (isWarmPreset) 180.0 else 250.0
-            val warmthGainDb = if (isWarmPreset) max(config.warmthEqDb, 3.5f).toDouble() else config.warmthEqDb.toDouble()
-            val deEsserFreq = if (isWarmPreset) 7500.0 else 8500.0
-            val deEsserGainDb = if (isWarmPreset) min(config.presenceEqDb, -4.5f).toDouble() else config.presenceEqDb.toDouble()
+            // 3. Dynamic Emotion / Chest Warmth + De-Esser
+            val warmthFreq = if (isWarmPreset) 200.0 else 250.0
+            val deEsserFreq = if (isWarmPreset) 8000.0 else 8500.0
 
-            if (abs(deEsserGainDb) > 0.05) {
+            if (abs(effectivePresenceDb) > 0.05) {
                 buffer = applyBiquadFilter(
                     samples = buffer,
-                    coeffs = BiquadCoeffs.highShelf(sampleRate.toDouble(), deEsserFreq, 0.707, deEsserGainDb)
+                    coeffs = BiquadCoeffs.highShelf(sampleRate.toDouble(), deEsserFreq, 0.707, effectivePresenceDb)
                 )
             }
-            if (abs(warmthGainDb) > 0.05) {
+            if (abs(effectiveWarmthDb) > 0.05) {
                 buffer = applyBiquadFilter(
                     samples = buffer,
-                    coeffs = BiquadCoeffs.peaking(sampleRate.toDouble(), warmthFreq, 1.5, warmthGainDb)
+                    coeffs = BiquadCoeffs.peaking(sampleRate.toDouble(), warmthFreq, 1.4, effectiveWarmthDb)
                 )
             }
 
-            // 4. Dynamic Glue Compressor (-20dB threshold, 2.5:1 ratio, gentle makeup)
-            buffer = applyGlueCompressor(buffer, sampleRate)
+            // 4. Smooth Glue Compressor (only on non-Clean presets so Clean Studio stays 100% transparent)
+            if (isEffectActive) {
+                buffer = applyGlueCompressor(buffer, sampleRate)
+            }
 
             // 5. Optional subtle room ambience (0% by default so Clean Studio stays dry & crystal clear)
             if (config.reverbWetMix > 0.01f &&
@@ -87,17 +95,17 @@ object PurrDspProcessor {
             buffer = applyEffectPreset(buffer, sampleRate, config)
         }
 
-        // 7. Volume multiplier + Master Limiter (-1 dBFS soft-knee ceiling)
+        // 7. Volume multiplier + High-Threshold Transparent Peak Ceiling (-0.7 dBFS)
         for (i in buffer.indices) {
             val scaled = buffer[i] * volumeGain.coerceIn(0.1f, 2.5f)
             val absS = abs(scaled)
-            buffer[i] = if (absS <= 0.78f) {
+            buffer[i] = if (absS <= 0.92f) {
                 scaled
             } else {
-                val excess = absS - 0.78f
-                val limited = 0.78f + 0.14f * tanh((excess / 0.14f).toDouble()).toFloat()
+                val excess = absS - 0.92f
+                val limited = 0.92f + 0.05f * tanh((excess / 0.05f).toDouble()).toFloat()
                 if (scaled < 0f) -limited else limited
-            }.coerceIn(-0.96f, 0.96f)
+            }.coerceIn(-0.97f, 0.97f)
         }
 
         return buffer
@@ -144,10 +152,10 @@ object PurrDspProcessor {
 
     private fun applyGlueCompressor(samples: FloatArray, sampleRate: Int): FloatArray {
         val out = FloatArray(samples.size)
-        val attackCoeff = exp(-1.0 / (0.010 * sampleRate)).toFloat()
-        val releaseCoeff = exp(-1.0 / (0.200 * sampleRate)).toFloat()
-        val threshold = 0.10f // -20 dBFS
-        val invRatio = 1.0 / 2.5
+        val attackCoeff = exp(-1.0 / (0.025 * sampleRate)).toFloat()
+        val releaseCoeff = exp(-1.0 / (0.250 * sampleRate)).toFloat()
+        val threshold = 0.25f // -12 dBFS (prevents low-level intermodulation buzz)
+        val invRatio = 1.0 / 1.8
         var env = 0f
 
         for (i in samples.indices) {
@@ -165,7 +173,7 @@ object PurrDspProcessor {
             } else {
                 1.0f
             }
-            out[i] = x * gain * 1.12f
+            out[i] = x * gain * 1.04f
         }
         return out
     }
@@ -332,19 +340,41 @@ object PurrDspProcessor {
     }
 
     /**
-     * Linear / cubic resampler so 16kHz / 22.05kHz Sherpa-ONNX models align cleanly to 24kHz.
+     * 4-point Catmull-Rom Cubic Hermite resampler so 16kHz / 22.05kHz Sherpa-ONNX models align cleanly
+     * to 24kHz without linear-interpolation aliasing buzz.
      */
     fun resampleMono(samples: FloatArray, fromRate: Int, toRate: Int = SAMPLE_RATE_HZ): FloatArray {
         if (samples.isEmpty() || fromRate == toRate || fromRate <= 0) return samples
+        if (samples.size < 4) {
+            val ratio = fromRate.toDouble() / toRate.toDouble()
+            val outLen = max(1, (samples.size / ratio).toInt())
+            return FloatArray(outLen) { i ->
+                val srcPos = i * ratio
+                val idx0 = srcPos.toInt().coerceIn(0, samples.lastIndex)
+                val idx1 = min(samples.lastIndex, idx0 + 1)
+                val frac = (srcPos - idx0).toFloat()
+                samples[idx0] + (samples[idx1] - samples[idx0]) * frac
+            }
+        }
         val ratio = fromRate.toDouble() / toRate.toDouble()
         val outLen = max(1, (samples.size / ratio).toInt())
         val out = FloatArray(outLen)
+        val lastIdx = samples.lastIndex
         for (i in 0 until outLen) {
             val srcPos = i * ratio
-            val idx0 = srcPos.toInt().coerceIn(0, samples.lastIndex)
-            val idx1 = min(samples.lastIndex, idx0 + 1)
-            val frac = (srcPos - idx0).toFloat()
-            out[i] = samples[idx0] + (samples[idx1] - samples[idx0]) * frac
+            val i1 = srcPos.toInt().coerceIn(0, lastIdx)
+            val t = (srcPos - i1).toFloat()
+            val y0 = samples[(i1 - 1).coerceAtLeast(0)]
+            val y1 = samples[i1]
+            val y2 = samples[(i1 + 1).coerceAtMost(lastIdx)]
+            val y3 = samples[(i1 + 2).coerceAtMost(lastIdx)]
+
+            val a0 = -0.5f * y0 + 1.5f * y1 - 1.5f * y2 + 0.5f * y3
+            val a1 = y0 - 2.5f * y1 + 2.0f * y2 - 0.5f * y3
+            val a2 = -0.5f * y0 + 0.5f * y2
+            val a3 = y1
+
+            out[i] = (((a0 * t + a1) * t + a2) * t + a3).coerceIn(-1.0f, 1.0f)
         }
         return out
     }

@@ -265,6 +265,17 @@ class SherpaOnnxEngine(
         val tokensPath = files.firstOrNull { it.name == "tokens.txt" }?.absolutePath.orEmpty()
         val dataDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }?.absolutePath.orEmpty()
         val lexicons = files.filter { it.name.startsWith("lexicon") && it.extension == "txt" }
+            .sortedBy { f ->
+                when (f.name) {
+                    "lexicon-us-en.txt" -> 0
+                    "lexicon-gb-en.txt" -> 1
+                    "lexicon-zh.txt" -> 2
+                    else -> 3
+                }
+            }
+            .joinToString(",") { it.absolutePath }
+        val ruleFsts = files.filter { it.extension.equals("fst", ignoreCase = true) }
+            .sortedBy { it.name }
             .joinToString(",") { it.absolutePath }
 
         val modelConfig = when (family) {
@@ -287,15 +298,17 @@ class SherpaOnnxEngine(
             SherpaModelFamily.KITTEN_TTS -> {
                 val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
-                if (onnx.isEmpty() || voices.isEmpty()) return
+                if (onnx.isEmpty() || voices.isEmpty() || tokensPath.isEmpty() || dataDir.isEmpty()) {
+                    Log.w(TAG, "KittenTTS missing required asset (onnx=$onnx, voices=$voices, tokens=$tokensPath, dataDir=$dataDir)")
+                    return
+                }
                 OfflineTtsModelConfig(
                     kitten = OfflineTtsKittenModelConfig(
                         model = onnx,
                         voices = voices,
                         tokens = tokensPath,
                         dataDir = dataDir,
-                        lengthScale = 1.0f,
-                        lexicon = lexicons
+                        lengthScale = 1.0f
                     ),
                     numThreads = 4,
                     provider = "cpu"
@@ -381,7 +394,10 @@ class SherpaOnnxEngine(
         }
 
         runCatching {
-            val config = OfflineTtsConfig(model = modelConfig)
+            val config = OfflineTtsConfig(
+                model = modelConfig,
+                ruleFsts = if (family == SherpaModelFamily.KOKORO) ruleFsts else ""
+            )
             activeOfflineTts = OfflineTts(assetManager = null, config = config)
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
             Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")

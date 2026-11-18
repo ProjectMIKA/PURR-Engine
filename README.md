@@ -61,7 +61,12 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.3.1 // Glassmorphic Icon HUD, Phasing Transitions & Custom Cyberdeck SVG Icons)
+### 🌟 Latest Updates (v1.3.2 // Crystal-Clear Audio, KittenTTS Fix & Full OOV Word Pronunciation)
+
+* **Restored `espeak-ng` G2P (`sherpa-onnx v1.13.8`):** Fixes `ROM-03: KITTEN_TTS_NANO` speech synthesis (which relies exclusively on `espeak-ng-data`) and restores automatic `espeak-ng` Grapheme-to-Phoneme fallback in Kokoro/Piper so difficult, rare, and out-of-vocabulary (OOV) words are never skipped.
+* **Zero-Buzz Crystal-Clear Default Audio (`PurrDspProcessor` & `PurrSentimentScorer`):** Made `CLEAN_STUDIO` truly transparent (flat `0 dB` EQ, compressor bypass unless an effect preset is selected, `0.92` peak ceiling), stopped automatic sentiment from triggering pitch resampling when Pitch is `1.00x`, upgraded `resampleMono` (`22.05kHz → 24kHz`) to 4-point Catmull-Rom Cubic Hermite interpolation, and fixed `AudioTrack` silence buffer underruns.
+
+### 📦 Prior Releases (v1.3.1 // Glassmorphic Icon HUD, Phasing Transitions & Custom Cyberdeck SVG Icons)
 
 * **GachaSwipe-Style Glassmorphic Icon HUD (`MikaBottomHudBar`):** Floating `54dp` translucent bottom capsule positioned neatly above the Android gesture bar so content scrolls underneath, with clean icon-only custom vector buttons (`Voice`, `Modules`, `Cartridge Bay`) and zero text/number clutter.
 * **Phasing Page Transitions & Decluttered `MODULES` Desktop:** Smooth scale + fade + slide phasing transitions between pages and removed the top `CYBERDECK_OS // MODULE_LAUNCHER` header card from `MODULES`.
