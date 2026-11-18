@@ -146,7 +146,7 @@ object PurrTextProcessor {
     private val ROLE_SPLIT_ACTION_ONLY_REGEX = Regex("(\\*[^*]+\\*)")
     private val ROLE_SPLIT_ACTION_AND_QUOTE_REGEX = Regex("(\\*[^*]+\\*|\"[^\"]+\"|“[^”]+”)")
     private val EXPLICIT_PAUSE_REGEX = Regex("\\[\\s*pause\\s*:\\s*(\\d{1,4})\\s*(?:ms)?\\s*]", RegexOption.IGNORE_CASE)
-    private val COMPOUND_HYPHEN_REGEX = Regex("\\b([a-zA-Z]{2,})-([a-zA-Z]{2,})\\b")
+    private val COMPOUND_HYPHEN_REGEX = Regex("\\b([\\p{L}]{2,})-(?=([\\p{L}]{2,})\\b)")
     private val ORGANIC_STUTTER_REGEX = Regex("\\b([a-z]{1,2})-(?=\\1[a-z])", RegexOption.IGNORE_CASE)
     private val ABBREVIATION_DOT_REGEX = Regex("\\b(Mr|Mrs|Ms|Mx|Dr|Prof|St|Mt|Jr|Sr|vs|etc|Fig|Vol|Ch|No)\\.", RegexOption.IGNORE_CASE)
     private val LATIN_ABBR_DOT_REGEX = Regex("\\b([ei])\\.([eg])\\.", RegexOption.IGNORE_CASE)
@@ -500,7 +500,7 @@ object PurrTextProcessor {
                 val rightLow = right.lowercase()
                 val isHonorific = rightLow in HONORIFIC_SUFFIXES || (leftLow == "ara" && rightLow == "ara")
                 val isDigraphStutter = leftLow in STUTTER_DIGRAPHS && rightLow.startsWith(leftLow)
-                if (isHonorific || isDigraphStutter) m.value else "$left $right"
+                if (isHonorific || isDigraphStutter) m.value else "$left "
             }
         }
 
