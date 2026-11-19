@@ -50,7 +50,10 @@ class PurrAcademyDataTest {
         assertEquals(false, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION))
         assertEquals(false, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION + 5))
         assertEquals(true, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION - 1))
-        assertEquals(true, PurrUpdateGate.shouldAutoOpenPatchnotes(maxOf(1, TUTORIAL_VERSION - 2)))
+        // Version-guarded case: TUTORIAL_VERSION - 2 only exists once content has bumped twice.
+        if (TUTORIAL_VERSION >= 2) {
+            assertEquals(true, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION - 2))
+        }
         assertEquals(AcademyEntry.PATCHNOTES_ONLY, PurrUpdateGate.resolveEntry(TUTORIAL_VERSION - 1))
         assertEquals(AcademyEntry.NONE, PurrUpdateGate.resolveEntry(TUTORIAL_VERSION))
     }
