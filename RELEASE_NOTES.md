@@ -1,3 +1,20 @@
+# 🌌 PURR-TTS v1.5.1 // Squeaky-Clean Buttons
+
+### ✨ What's New since v1.5.0
+
+A quick layout patch — the Clone Studio's new IMPORT_CLIP and CLEAN_AUDIO controls were wrapping their labels into word-salad on narrow screens. Fixed! 🐾
+
+* **🧹 FIXED CLONE STUDIO IMPORT LAYOUT (`VoiceCloneStudioSheet`)**: The `IMPORT_AUDIO_CLIP` and `CLEAN_AUDIO` labels now own a weighted column with single-line ellipsis, the `IMPORT_CLIP` / `ON` / `OFF` chips render on one line, and the format list (`MP3 M4A OGG FLAC WAV • ≤30s`) plus the `RECOMMENDED` hint moved to tidy dim sub-lines. No more button word-salad.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.5.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `10`) with the Clone Studio layout patch.
+2. **`PURR-TTS_V1.5.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.5.0 // The M.I.K.A. Academy
 
 ### ✨ What's New since v1.4.0

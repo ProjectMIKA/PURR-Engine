@@ -30,6 +30,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -198,13 +199,25 @@ fun VoiceCloneStudioSheet(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "IMPORT_AUDIO_CLIP // MP3 M4A OGG FLAC WAV",
-                        color = MikaColors.NeonCyan,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "IMPORT_AUDIO_CLIP",
+                            color = MikaColors.NeonCyan,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = "// MP3 M4A OGG FLAC WAV • ≤30s",
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 8.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
@@ -219,27 +232,46 @@ fun VoiceCloneStudioSheet(
                     ) {
                         MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonCyan, size = 10.dp)
                         Text(
-                            text = if (isImporting) "DECODING..." else "IMPORT_CLIP",
+                            text = if (isImporting) "DECODING" else "IMPORT_CLIP",
                             color = MikaColors.NeonCyan,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
-                            fontSize = 10.sp
+                            fontSize = 10.sp,
+                            maxLines = 1
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(4.dp))
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "🧹 CLEAN_AUDIO // DE_NOISE + DE_STATIC",
-                        color = MikaColors.TerminalGreen,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp
-                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "🧹 CLEAN_AUDIO // DE_NOISE + DE_STATIC",
+                            color = MikaColors.TerminalGreen,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = if (cleanAudio) {
+                                "// RECOMMENDED — strips static & hum"
+                            } else {
+                                "// OFF — keeps the clip raw"
+                            },
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 8.5.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                     Row(
                         modifier = Modifier
                             .clip(RoundedCornerShape(4.dp))
@@ -250,14 +282,15 @@ fun VoiceCloneStudioSheet(
                                 RoundedCornerShape(4.dp)
                             )
                             .clickable { onToggleCleanAudio(!cleanAudio) }
-                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                            .padding(horizontal = 12.dp, vertical = 7.dp)
                     ) {
                         Text(
-                            text = if (cleanAudio) "ON (RECOMMENDED)" else "OFF (KEEP RAW)",
+                            text = if (cleanAudio) "ON" else "OFF",
                             color = if (cleanAudio) MikaColors.TerminalGreen else MikaColors.DimText,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
-                            fontSize = 10.sp
+                            fontSize = 10.sp,
+                            maxLines = 1
                         )
                     }
                 }
