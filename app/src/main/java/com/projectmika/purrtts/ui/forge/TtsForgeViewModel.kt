@@ -31,6 +31,7 @@ import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
+import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.engine.CloneClipImporter
@@ -605,6 +606,11 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     fun removeClonedVoice(voiceId: String) {
         repository.removeClonedVoice(voiceId)
         showToast("Removed cloned voice")
+    }
+
+    /** ✨ ACADEMY (v1.5.0): persist the tutorial content version after finish/dismiss. */
+    fun markTutorialSeen() {
+        repository.markTutorialSeen(TUTORIAL_VERSION)
     }
 
     /**

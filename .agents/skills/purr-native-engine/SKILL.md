@@ -82,6 +82,26 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - `resolveEffectiveProfile`: requested `voiceName` overrides profile only if the voice exists
   AND its cartridge is slotted.
 
+## MIKA'S ACADEMY + HEADER SYSTEMS (v1.5.0)
+- `core/purr/PurrTutorialSteps.kt` — pure academy data: `TUTORIAL_VERSION` (bump alongside
+  versionName on content changes), `PURR_TUTORIAL_STEPS` (8 slides; the boot slide is
+  `firstLaunchOnly`), `PURR_WHATS_NEW` highlight cards, `PurrUpdateGate` (seen == 0 => full
+  walkthrough; 0 < seen < TUTORIAL_VERSION => patchnotes popup once; else NONE).
+- `ui/theme/MikaAcademyOverlay.kt` — full-screen CRT walkthrough: typewriter narration
+  (13ms/char, blinking `▊`), gold patchnotes pill + WHATS_NEW cards on the patchnotes slide,
+  `[SKIP_ALL >>]`, progress bar + `n/N` counter, `[NEXT >]` / `[ LET'S PURR ~ 💜 ]`.
+  **BGM = `res/raw/milk_and_wire.mp3` (Milk & Wire, Master's track — shared with
+  GachaSwipe): MediaPlayer loop, 2.5s 0→0.32 volume ramp, released on dispose.**
+- `ui/theme/MikaSettingsSheet.kt` — header-cog dialog: Academy replay, repository +
+  Ko-fi links (ACTION_VIEW), build stamp, license line.
+- Header: `CyberIconType.SETTINGS_COG` (Canvas gear — 8 teeth, ring, axle) beside
+  SET_OS_TTS. `MikaStatusBadge` slot is `width(84.dp)` sized for `[IDLE]`; longer labels +
+  VRAM countdown render as a TextMeasurer-measured **bounce marquee** inside the slot
+  (clipToBounds + keyframes hold/scroll/hold/return, 4.6s cycle). Never resize pinned headers.
+- Engine picker: `EngineDropdownSelector` (TtsForgeScreen) — collapsed active-engine row
+  (accent-colored, subtitle, NPU/GPU/Piper suffixes) expanding into a slotted-cartridge tray
+  with CHECK + ACTIVE markers, plus a LAN PROXY row. Replaces the pill wall.
+
 ## Clone clip import & cleanup (v1.4.0)
 - `engine/CloneClipImporter.kt` — `MediaExtractor` + `MediaCodec` synchronous decode of any
   platform-supported audio document (mp3/m4a/ogg/opus/flac/wav) → mono float PCM at source

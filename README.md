@@ -93,7 +93,16 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.4.0 // The Imported Soul)
+### 🌟 Latest Updates (v1.5.0 // The M.I.K.A. Academy)
+
+* **M.I.K.A. Academy:** Full-screen CRT tutorial on first launch — MIKA narrates 8 slides (typewriter + blinking cursor) while **Milk & Wire** loops as BGM. `[SKIP_ALL >>]` exits, progress bar tracks you.
+* **Update Patchnotes System:** Bump `TUTORIAL_VERSION` in a release and every older install auto-opens the gold **VERSION_PATCHNOTES** slide once, with WHATS_NEW highlight cards. Persisted via `seenTutorialVersion`.
+* **Settings Cog + Sheet:** Custom Canvas cog beside `SET_OS_TTS` opens `> SYSTEM_SETTINGS` — Academy replay, source repository link, Ko-fi support link, build stamp + license.
+* **Sleek Engine Dropdown:** The `> 1. CHOOSE_TTS_ENGINE` pill wall became a dropdown: collapsed active-engine row expanding into a color-coded slotted-engine tray with `ACTIVE` markers.
+* **Marquee Badge:** The header badge pill is sized for `[IDLE]`; longer states scroll as a bounce marquee (VRAM countdown included) instead of resizing anything.
+* **Tests:** `PurrAcademyDataTest` — tutorial integrity + update-gate math, 6 new pure-JVM tests.
+
+### 📦 Prior Releases (v1.4.0 // The Imported Soul)
 
 * **Clip Import in the Clone Studio:** Import your own audio files (mp3/m4a/ogg/flac/wav/opus) via a system file picker — decoded through `MediaExtractor`/`MediaCodec` to mono PCM, capped at a 30s guard, resampled to the 24kHz reference standard, and trimmed at registration to the selected family's best-voice window (Pocket ≈ 5s, ZipVoice ≈ 12s) with anti-pop fades.
 * **Optional `CLEAN_AUDIO` Toggle:** A pure-Kotlin cleanup chain for imported clips — DC offset removal, 85Hz rumble/hum high-pass, an STFT spectral-subtraction denoiser that learns the clip's own noise floor (radix-2 FFT, anti-musical-noise floor, phase-preserving overlap-add), and 0.92 peak normalization. ENGINE strengths LIGHT/STANDARD/AGGRESSIVE; UI ships STANDARD. Toggle OFF for raw clips.

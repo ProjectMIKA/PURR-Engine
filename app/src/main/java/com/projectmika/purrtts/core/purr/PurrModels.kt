@@ -389,7 +389,10 @@ data class PurrForgeState(
         "tool_clone_studio",
         "tool_audio_exporter"
     ),
-    val enabledSubCartridges: Set<String> = emptySet()
+    val enabledSubCartridges: Set<String> = emptySet(),
+    // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
+    // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
+    val seenTutorialVersion: Int = 0
 )
 
 object PurrDefaultPresets {
