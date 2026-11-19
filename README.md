@@ -93,7 +93,11 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.5.0 // The M.I.K.A. Academy)
+### 🌟 Latest Updates (v1.5.1 // Squeaky-Clean Buttons)
+
+* **Clone Studio Layout Patch:** The `IMPORT_AUDIO_CLIP` and `CLEAN_AUDIO` rows now use weighted label columns with single-line ellipsis; chips read `IMPORT_CLIP` / `ON` / `OFF` on one line, and the format list + recommended hint moved to dim sub-lines. No more wrapped word-salad on narrow screens.
+
+### 📦 Prior Releases (v1.5.0 // The M.I.K.A. Academy)
 
 * **M.I.K.A. Academy:** Full-screen CRT tutorial on first launch — MIKA narrates 8 slides (typewriter + blinking cursor) while **Milk & Wire** loops as BGM. `[SKIP_ALL >>]` exits, progress bar tracks you.
 * **Update Patchnotes System:** Bump `TUTORIAL_VERSION` in a release and every older install auto-opens the gold **VERSION_PATCHNOTES** slide once, with WHATS_NEW highlight cards. Persisted via `seenTutorialVersion`.
