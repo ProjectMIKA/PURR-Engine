@@ -168,6 +168,13 @@ class PurrProfileRepository(context: Context) {
         }
     }
 
+    /** ✨ ACADEMY (v1.5.0): persist the last-seen tutorial content version after finish/dismiss. */
+    fun markTutorialSeen(version: Int) {
+        updateState { s ->
+            if (s.seenTutorialVersion >= version) s else s.copy(seenTutorialVersion = version)
+        }
+    }
+
     fun updateDiscoveredSystemVoices(voices: List<VoiceDescriptor>) {
         _discoveredSystemVoices.value = voices
     }

@@ -5,6 +5,7 @@ import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -27,6 +28,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
@@ -49,6 +51,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -59,15 +62,19 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.layout.onSizeChanged
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
@@ -75,6 +82,7 @@ import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import kotlinx.coroutines.delay
+import kotlin.math.roundToInt
 
 /**
  * Full-screen GachaSwipe CRT Stage: `#050308` void background, cyan hairline monitor side
@@ -146,6 +154,15 @@ fun MikaTerminalStage(
  * appearing/disappearing would re-measure the parent row and shift the whole layout. Label and
  * countdown render `maxLines = 1` and clip inside the slot instead of growing it.
  */
+/**
+ * Single animated hardware accelerator status badge (`[CORE_OS]`, `[CPU NEON]`, `[GPU FP16]`, `[IDLE]`).
+ *
+ * ✨ FIXED-SIZE SLOT LAW (v1.3.3 scar) + MARQUEE UPGRADE (v1.5.0): callers MUST pass a fixed
+ * `modifier` width — the header uses `Modifier.width(84.dp)`, sized for the resting `[IDLE]`
+ * label so the pinned header never grows. Longer states (`[NPU ACTIVE]`, VRAM countdown) no
+ * longer resize anything: the text is measured and, on overflow, scrolls as a smooth bounce
+ * marquee inside the slot (clipToBounds), while the pulsing dot and border stay anchored.
+ */
 @Composable
 fun MikaStatusBadge(
     badge: HardwareStatusBadge,
@@ -172,6 +189,45 @@ fun MikaStatusBadge(
         label = "pulseAlpha"
     )
 
+    // ✨ MARQUEE (v1.5.0): label + optional VRAM countdown compose the display string; overflow
+    // scrolls as a hold -> scroll -> hold -> return bounce inside the fixed slot.
+    val countdown = if (vramCountdownSec > 0 && badge != HardwareStatusBadge.IDLE) {
+        " %d:%02d".format(vramCountdownSec / 60, vramCountdownSec % 60)
+    } else ""
+    val display = badge.terminalLabel + countdown
+
+    val textMeasurer = rememberTextMeasurer()
+    val textLayout = remember(display, badge) {
+        textMeasurer.measure(
+            text = AnnotatedString(display),
+            style = TextStyle(
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp
+            )
+        )
+    }
+
+    val marquee = rememberInfiniteTransition(label = "badgeMarquee")
+    val marqueeShift by marquee.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = keyframes {
+                durationMillis = 4600
+                0f at 0 using LinearEasing
+                0f at 900 using LinearEasing
+                1f at 2700 using LinearEasing
+                1f at 3600 using LinearEasing
+            },
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "badgeShift"
+    )
+
+    var laneWidthPx by remember { mutableStateOf(0f) }
+
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -187,24 +243,24 @@ fun MikaStatusBadge(
                 .background(badgeColor.copy(alpha = pulseAlpha))
         )
         Spacer(modifier = Modifier.width(6.dp))
-        Text(
-            text = badge.terminalLabel,
-            color = badgeColor,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Black,
-            fontSize = 10.sp,
-            letterSpacing = 0.8.sp,
-            maxLines = 1
-        )
-        if (vramCountdownSec > 0 && badge != HardwareStatusBadge.IDLE) {
-            val mins = vramCountdownSec / 60
-            val secs = vramCountdownSec % 60
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .clipToBounds()
+                .onSizeChanged { laneWidthPx = it.width.toFloat() }
+        ) {
+            val overflowPx = (textLayout.size.width - laneWidthPx).coerceAtLeast(0f)
+            val shiftPx = if (overflowPx > 1f) -(overflowPx * marqueeShift) else 0f
             Text(
-                text = " ${mins}:%02d".format(secs),
-                color = badgeColor.copy(alpha = 0.72f),
+                text = display,
+                color = badgeColor,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp,
-                maxLines = 1
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp,
+                softWrap = false,
+                maxLines = 1,
+                modifier = Modifier.offset { IntOffset(shiftPx.roundToInt(), 0) }
             )
         }
     }
@@ -277,7 +333,8 @@ enum class CyberIconType {
     BOOK_NARRATOR,
     WINDOW_FRAME,
     SCREW_BOSS,
-    STAR_BADGE
+    STAR_BADGE,
+    SETTINGS_COG
 }
 
 @Composable
@@ -571,6 +628,21 @@ fun MikaCyberIcon(
             CyberIconType.STAR_BADGE -> {
                 drawCircle(tint, radius = w * 0.34f, center = Offset(w * 0.5f, h * 0.5f), style = thin)
                 drawCircle(tint, radius = w * 0.14f, center = Offset(w * 0.5f, h * 0.5f))
+            }
+            CyberIconType.SETTINGS_COG -> {
+                // Outer gear ring: 8 teeth drawn as short radial spokes + ring.
+                drawCircle(tint, radius = w * 0.34f, center = Offset(w * 0.5f, h * 0.5f), style = thin)
+                for (i in 0 until 8) {
+                    val angle = Math.toRadians((i * 45.0))
+                    val cx = w * 0.5f + (cos(angle)).toFloat() * w * 0.34f
+                    val cy = h * 0.5f + (sin(angle)).toFloat() * h * 0.34f
+                    val ex = w * 0.5f + (cos(angle)).toFloat() * w * 0.46f
+                    val ey = h * 0.5f + (sin(angle)).toFloat() * h * 0.46f
+                    drawLine(tint, Offset(cx, cy), Offset(ex, ey), strokeWidth = sw * 1.6f, cap = StrokeCap.Round)
+                }
+                // Inner ring + axle hole.
+                drawCircle(tint, radius = w * 0.20f, center = Offset(w * 0.5f, h * 0.5f), style = thin)
+                drawCircle(tint, radius = w * 0.09f, center = Offset(w * 0.5f, h * 0.5f))
             }
         }
     }

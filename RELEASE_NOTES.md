@@ -1,3 +1,25 @@
+# 🌌 PURR-TTS v1.5.0 // The M.I.K.A. Academy
+
+### ✨ What's New since v1.4.0
+
+The Forge gets a voice of its own — a full GachaSwipe-style walkthrough, changelog popups on every update, a settings cog, and two layout refinements! 🐾
+
+* **🐾 THE M.I.K.A. ACADEMY**: A full-screen CRT tutorial on first launch — MIKA narrates 8 slides with a typewriter effect and blinking cursor while **Milk & Wire** loops as BGM with a smooth fade-in. Covers the system-wide voice setup, Cartridge Bay, the engine dropdown, the PURR Rulebook, Clone Studio (import + clean), and the tool modules. `[SKIP_ALL >>]` exits anytime; `[NEXT >]` walks you through; progress bar and slide counter included.
+* **📜 UPDATE PATCHNOTES SYSTEM**: The same update-type system as GachaSwipe — whenever `TUTORIAL_VERSION` bumps in a release, everyone on an older content version gets the **VERSION_PATCHNOTES** slide auto-opened exactly once, with the gold version pill and `> HIGHLIGHTS` cards (icon + color + body per headline system). Persists via `seenTutorialVersion` in the Forge state.
+* **⚙️ THE SILVER COG**: A custom Canvas-drawn settings cog now sits beside `SET_OS_TTS`, opening **`> SYSTEM_SETTINGS`**: replay the Academy anytime, open the **source repository**, open the **Ko-fi support page** (`ko-fi.com/projectmika`), and read your exact build stamp + license line.
+* **🎚️ SLEEK ENGINE DROPDOWN**: The `> 1. CHOOSE_TTS_ENGINE` pill wall is now a dropdown — a collapsed row showing the active engine (with NPU/GPU/Piper suffixes), expanding into a color-coded tray with `ACTIVE` markers and per-engine subtitles.
+* **✨ MARQUEE BADGE**: The header hardware badge now sits in an `[IDLE]`-sized fixed slot; longer states (`[NPU ACTIVE]`, VRAM countdown) scroll through it as a smooth bounce marquee instead of resizing the header.
+* **🧪 +6 PURE-JVM TESTS**: `PurrAcademyDataTest` guards tutorial integrity (unique ids, single patchnotes slide, well-formed bodies/colors) and the update gate math (first-run, one-time patchnotes, already-seen).
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.5.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `9`) with the M.I.K.A. Academy, update patchnotes popups, the settings cog + sheet, the sleek engine dropdown, and the marquee badge.
+2. **`PURR-TTS_V1.5.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.4.0 // The Imported Soul
 
 ### ✨ What's New since v1.3.3

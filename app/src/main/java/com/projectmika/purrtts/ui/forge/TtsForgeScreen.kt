@@ -38,6 +38,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -58,12 +59,19 @@ import androidx.compose.ui.window.Dialog
 import com.projectmika.purrtts.core.purr.ActionHandlingMode
 import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.DownloadState
+import com.projectmika.purrtts.core.purr.AcademyEntry
+import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.PurrProfile
+import com.projectmika.purrtts.core.purr.PurrUpdateGate
+import com.projectmika.purrtts.core.purr.PurrForgeState
+import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
 import androidx.compose.material3.HorizontalDivider
 import com.projectmika.purrtts.ui.theme.CartridgeSlamOverlay
 import com.projectmika.purrtts.ui.theme.CyberIconType
 import com.projectmika.purrtts.ui.theme.ExpandableTerminalSection
 import com.projectmika.purrtts.ui.theme.LiveWaveformMonitor
+import com.projectmika.purrtts.ui.theme.MikaAcademyOverlay
+import com.projectmika.purrtts.ui.theme.MikaSettingsSheet
 import com.projectmika.purrtts.ui.theme.MikaBottomHudBar
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaCyberIcon
@@ -118,6 +126,25 @@ fun TtsForgeScreen(
     var showSaveProfileDialog by remember { mutableStateOf(false) }
     var showCloneStudio by remember { mutableStateOf(false) }
     var showAdvancedProxy by remember { mutableStateOf(false) }
+    var showSettingsSheet by remember { mutableStateOf(false) }
+    var showAcademy by remember { mutableStateOf(false) }
+    var academyPatchnotesOnly by remember { mutableStateOf(false) }
+
+    // ✨ MIKA'S ACADEMY GATE (v1.5.0): first launch => full walkthrough; returning user on
+    // older tutorial content => patchnotes popup once per TUTORIAL_VERSION bump.
+    LaunchedEffect(forgeState.seenTutorialVersion) {
+        when (PurrUpdateGate.resolveEntry(forgeState.seenTutorialVersion)) {
+            AcademyEntry.FULL_TUTORIAL -> {
+                academyPatchnotesOnly = false
+                showAcademy = true
+            }
+            AcademyEntry.PATCHNOTES_ONLY -> {
+                academyPatchnotesOnly = true
+                showAcademy = true
+            }
+            AcademyEntry.NONE -> Unit
+        }
+    }
 
     val activeCartridgeId = activeProfile.selectedCartridgeId
     val voicesForSelectedEngine = remember(allVoices, activeCartridgeId) {
@@ -184,7 +211,7 @@ fun TtsForgeScreen(
                         MikaStatusBadge(
                             badge = telemetry.badge,
                             vramCountdownSec = vramSec,
-                            modifier = Modifier.width(112.dp)
+                            modifier = Modifier.width(84.dp)
                         )
                         Box(
                             modifier = Modifier
@@ -201,6 +228,17 @@ fun TtsForgeScreen(
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 9.sp
                             )
+                        }
+                        // ✨ SETTINGS COG (v1.5.0) — System Settings, Academy replay & links.
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(MikaColors.DimText.copy(alpha = 0.12f))
+                                .border(1.dp, MikaColors.DimText.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
+                                .clickable { showSettingsSheet = true }
+                                .padding(6.dp)
+                        ) {
+                            MikaCyberIcon(type = CyberIconType.SETTINGS_COG, tint = MikaColors.CyanWhite, size = 13.dp)
                         }
                     }
                 }
@@ -342,45 +380,13 @@ fun TtsForgeScreen(
                                             modifier = Modifier.padding(top = 2.dp, bottom = 8.dp)
                                         )
 
-                                        FlowRow(
-                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                                        ) {
-                                            slottedSpecs.forEach { spec ->
-                                                val chipSuffix = if (spec.id == "rom_kokoro_sherpa") {
-                                                    val npuActive = "rom_kokoro_npu_g2p" in forgeState.enabledSubCartridges &&
-                                                        forgeState.modelStates["rom_kokoro_npu_g2p"]?.state == DownloadState.INSTALLED
-                                                    val gpuActive = "rom_kokoro_litert" in forgeState.enabledSubCartridges &&
-                                                        forgeState.modelStates["rom_kokoro_litert"]?.state == DownloadState.INSTALLED
-                                                    when {
-                                                        npuActive && gpuActive -> " [NPU+GPU]"
-                                                        npuActive -> " [NPU]"
-                                                        gpuActive -> " [GPU]"
-                                                        else -> ""
-                                                    }
-                                                } else if (spec.id == "rom_piper") {
-                                                    val extraPiperCount = forgeState.enabledSubCartridges.count {
-                                                        it.startsWith("sub_piper_") && forgeState.modelStates[it]?.state == DownloadState.INSTALLED
-                                                    }
-                                                    if (extraPiperCount > 0) " [+$extraPiperCount]" else ""
-                                                } else {
-                                                    ""
-                                                }
-                                                MikaTagPill(
-                                                    label = "${spec.romCode}: ${spec.name}$chipSuffix",
-                                                    selected = activeCartridgeId == spec.id,
-                                                    activeColor = Color(spec.accentHex),
-                                                    leadingIcon = if (chipSuffix.contains("NPU") || chipSuffix.contains("GPU")) CyberIconType.BOLT_ACCEL else null,
-                                                    onClick = { viewModel.selectEngineCartridge(spec.id) }
-                                                )
-                                            }
-                                            MikaTagPill(
-                                                label = "LAN PROXY",
-                                                selected = activeCartridgeId == "proxy_lan",
-                                                activeColor = MikaColors.NeonPurple,
-                                                onClick = { viewModel.selectEngineCartridge("proxy_lan") }
-                                            )
-                                        }
+                                        // ✨ SLEEK ENGINE DROPDOWN (v1.5.0) — replaces the pill wall.
+                                        EngineDropdownSelector(
+                                            slottedSpecs = slottedSpecs,
+                                            activeCartridgeId = activeCartridgeId,
+                                            forgeState = forgeState,
+                                            onSelect = { viewModel.selectEngineCartridge(it) }
+                                        )
 
                                         if (slottedSpecs.isEmpty()) {
                                             Spacer(modifier = Modifier.height(8.dp))
@@ -698,6 +704,235 @@ fun TtsForgeScreen(
                 },
                 onDismiss = { showCloneStudio = false }
             )
+        }
+
+        // ✨ SYSTEM SETTINGS SHEET (v1.5.0) — opened from the header cog.
+        if (showSettingsSheet) {
+            MikaSettingsSheet(
+                versionName = com.projectmika.purrtts.BuildConfig.VERSION_NAME,
+                versionCode = com.projectmika.purrtts.BuildConfig.VERSION_CODE,
+                onReplayTutorial = {
+                    academyPatchnotesOnly = false
+                    showAcademy = true
+                },
+                onDismiss = { showSettingsSheet = false }
+            )
+        }
+
+        // ✨ MIKA'S ACADEMY OVERLAY (v1.5.0) — full-screen walkthrough / patchnotes popup.
+        if (showAcademy) {
+            MikaAcademyOverlay(
+                versionName = com.projectmika.purrtts.BuildConfig.VERSION_NAME,
+                startAtPatchnotes = academyPatchnotesOnly,
+                onFinish = {
+                    showAcademy = false
+                    viewModel.markTutorialSeen()
+                }
+            )
+        }
+    }
+}
+
+/**
+ * ✨ SLEEK ENGINE DROPDOWN SELECTOR (v1.5.0) ✨
+ * Collapsed row = the active engine (ROM code + name + NPU/GPU/Piper suffix), expanding into a
+ * color-coded tray of every slotted cartridge + LAN PROXY. Replaces the old selectable pill wall.
+ */
+@Composable
+private fun EngineDropdownSelector(
+    slottedSpecs: List<ModelBundleSpec>,
+    activeCartridgeId: String?,
+    forgeState: PurrForgeState,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+
+    fun chipSuffixFor(spec: ModelBundleSpec): String = when (spec.id) {
+        "rom_kokoro_sherpa" -> {
+            val npuActive = "rom_kokoro_npu_g2p" in forgeState.enabledSubCartridges &&
+                forgeState.modelStates["rom_kokoro_npu_g2p"]?.state == DownloadState.INSTALLED
+            val gpuActive = "rom_kokoro_litert" in forgeState.enabledSubCartridges &&
+                forgeState.modelStates["rom_kokoro_litert"]?.state == DownloadState.INSTALLED
+            when {
+                npuActive && gpuActive -> " [NPU+GPU]"
+                npuActive -> " [NPU]"
+                gpuActive -> " [GPU]"
+                else -> ""
+            }
+        }
+        "rom_piper" -> {
+            val extraPiperCount = forgeState.enabledSubCartridges.count {
+                it.startsWith("sub_piper_") && forgeState.modelStates[it]?.state == DownloadState.INSTALLED
+            }
+            if (extraPiperCount > 0) " [+$extraPiperCount]" else ""
+        }
+        else -> ""
+    }
+
+    val selectedSpec = slottedSpecs.firstOrNull { it.id == activeCartridgeId }
+    val selectedIsProxy = activeCartridgeId == "proxy_lan"
+    val selectedAccent = when {
+        selectedIsProxy -> MikaColors.NeonPurple
+        selectedSpec != null -> Color(selectedSpec.accentHex)
+        else -> MikaColors.DimText
+    }
+    val selectedLabel = when {
+        selectedIsProxy -> "LAN PROXY"
+        selectedSpec != null -> "${selectedSpec.romCode}: ${selectedSpec.name}${chipSuffixFor(selectedSpec)}"
+        else -> "NO_ENGINE_SELECTED"
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Collapsed row: the active engine.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(selectedAccent.copy(alpha = 0.14f))
+                .border(1.dp, selectedAccent, RoundedCornerShape(6.dp))
+                .clickable { expanded = !expanded }
+                .padding(horizontal = 10.dp, vertical = 9.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            MikaCyberIcon(type = CyberIconType.BUS_PLUG, tint = selectedAccent, size = 14.dp)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = selectedLabel,
+                    color = selectedAccent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = when {
+                        selectedIsProxy -> "// LAN OpenAI-compatible endpoint"
+                        selectedSpec != null -> "// ${selectedSpec.subtitle}"
+                        else -> "// Slot an engine in Cartridge Bay"
+                    },
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            MikaCyberIcon(
+                type = if (expanded) CyberIconType.CHEVRON_DOWN else CyberIconType.CHEVRON_RIGHT,
+                tint = selectedAccent,
+                size = 12.dp
+            )
+        }
+
+        // Expanded tray: every slotted engine + LAN PROXY.
+        if (expanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MikaColors.DeepWellBg)
+                    .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.3f), RoundedCornerShape(6.dp))
+                    .padding(vertical = 4.dp)
+            ) {
+                slottedSpecs.forEach { spec ->
+                    val specAccent = Color(spec.accentHex)
+                    val isSelected = activeCartridgeId == spec.id
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(if (isSelected) specAccent.copy(alpha = 0.16f) else Color.Transparent)
+                            .clickable {
+                                onSelect(spec.id)
+                                expanded = false
+                            }
+                            .padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        MikaCyberIcon(
+                            type = if (isSelected) CyberIconType.CHECK else CyberIconType.BUS_PLUG,
+                            tint = specAccent,
+                            size = 12.dp
+                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${spec.romCode}: ${spec.name}${chipSuffixFor(spec)}",
+                                color = if (isSelected) specAccent else MikaColors.CyanWhite,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 10.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = "// ${spec.subtitle}",
+                                color = MikaColors.DimText,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 8.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        if (isSelected) {
+                            Text(
+                                text = "ACTIVE",
+                                color = specAccent,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 8.5.sp,
+                                letterSpacing = 1.0.sp
+                            )
+                        }
+                    }
+                }
+                // LAN PROXY tray row.
+                val proxySelected = activeCartridgeId == "proxy_lan"
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(if (proxySelected) MikaColors.NeonPurple.copy(alpha = 0.16f) else Color.Transparent)
+                        .clickable {
+                            onSelect("proxy_lan")
+                            expanded = false
+                        }
+                        .padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MikaCyberIcon(
+                        type = if (proxySelected) CyberIconType.CHECK else CyberIconType.BUS_PLUG,
+                        tint = MikaColors.NeonPurple,
+                        size = 12.dp
+                    )
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "LAN PROXY",
+                            color = if (proxySelected) MikaColors.NeonPurple else MikaColors.CyanWhite,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.5.sp
+                        )
+                        Text(
+                            text = "// LAN OpenAI-compatible endpoint",
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 8.5.sp
+                        )
+                    }
+                    if (proxySelected) {
+                        Text(
+                            text = "ACTIVE",
+                            color = MikaColors.NeonPurple,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 8.5.sp,
+                            letterSpacing = 1.0.sp
+                        )
+                    }
+                }
+            }
         }
     }
 }
