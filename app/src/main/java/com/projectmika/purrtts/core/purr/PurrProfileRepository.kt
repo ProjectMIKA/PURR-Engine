@@ -324,7 +324,7 @@ class PurrProfileRepository(filesDir: File) {
                     if (isSub) {
                         nextEnabledSubs = nextEnabledSubs + specId
                         nextSlotted = nextSlotted - specId
-                        val parentId = spec?.parentCartridgeId
+                        val parentId = spec.parentCartridgeId
                         if (!parentId.isNullOrBlank()) {
                             nextSlotted = nextSlotted + parentId
                         }

@@ -279,10 +279,12 @@ class PurrTextProcessorTest {
         val defaultState = PurrForgeState()
 
         assertTrue(catalog.any { it.id == "rom_kitten_tts" && it.sherpaFamily == SherpaModelFamily.KITTEN_TTS && it.category == CartridgeCategory.TTS })
-        assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" })
+        assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" && it.requiredSubCartridgeId == null })
+        assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" && it.requiredSubCartridgeId == "sub_kitten_mini" })
 
-        val piperSubs = catalog.filter { it.parentCartridgeId == "rom_piper" && it.isSubCartridge }
-        assertEquals(6, piperSubs.size)
+        val narratorSubs = catalog.filter { it.parentCartridgeId == "rom_piper" && it.isSubCartridge }
+        assertEquals(9, narratorSubs.size)
+        assertEquals(6, narratorSubs.count { it.id.startsWith("sub_piper_") })
         assertEquals(6, voices.count { it.requiredSubCartridgeId?.startsWith("sub_piper_") == true })
 
         val expectedTools = setOf(
