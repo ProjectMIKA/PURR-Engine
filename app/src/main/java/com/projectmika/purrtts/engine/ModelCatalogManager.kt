@@ -129,6 +129,9 @@ class ModelCatalogManager(
         activeJobs.remove(spec.id)?.cancel()
         runCatching { File(downloadsTempDir, "${spec.fileName}.part").delete() }
         runCatching { resolveDestinationFile(spec).delete() }
+        if (spec.companionFileName.isNotBlank()) {
+            runCatching { File(downloadsTempDir, "${spec.companionFileName}.part").delete() }
+        }
         if (spec.isArchiveTarBz2 && spec.sherpaFamily != null) {
             runCatching { resolveSherpaExtractDir(spec).deleteRecursively() }
         }
@@ -235,6 +238,19 @@ class ModelCatalogManager(
                 extractTarBz2(finalFile, resolveSherpaExtractDir(spec))
             }
 
+            // ✨ COMPANION ASSET (v1.6.0): Matcha's Vocos vocoder — download, verify, place.
+            if (spec.companionUrl.isNotBlank()) {
+                repository.updateModelState(
+                    spec.id,
+                    (repository.state.value.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)).copy(
+                        state = DownloadState.EXTRACTING,
+                        sha256Verified = true,
+                        errorMessage = "Fetching companion: ${spec.companionFileName}"
+                    )
+                )
+                downloadCompanionAsset(spec, resolveSherpaExtractDir(spec))
+            }
+
             repository.updateModelState(
                 spec.id,
                 ModelBundleState(
@@ -312,16 +328,97 @@ class ModelCatalogManager(
     }
 
     private fun resolveSherpaExtractDir(spec: ModelBundleSpec): File = when (spec.sherpaFamily) {
-        SherpaModelFamily.KOKORO -> File(context.filesDir, "models/sherpa/kokoro")
+        // ✨ PREMIUM TIER (v1.6.0): fp32/v1.1 Kokoro variants extract into per-cartridge dirs
+        // so they never collide with ROM-02's int8 weights (three model.onnx files would fight).
+        SherpaModelFamily.KOKORO -> if (spec.id != "rom_kokoro_sherpa") {
+            File(context.filesDir, "models/sherpa/kokoro_${spec.id}")
+        } else {
+            File(context.filesDir, "models/sherpa/kokoro")
+        }
         SherpaModelFamily.KITTEN_TTS -> File(context.filesDir, "models/sherpa/kitten")
         SherpaModelFamily.SUPERTONIC_3 -> File(context.filesDir, "models/sherpa/supertonic3")
         SherpaModelFamily.POCKET_TTS -> File(context.filesDir, "models/sherpa/pocket_tts")
         SherpaModelFamily.ZIPVOICE -> File(context.filesDir, "models/sherpa/zipvoice")
+        SherpaModelFamily.MATCHA -> File(context.filesDir, "models/sherpa/matcha")
         SherpaModelFamily.PIPER -> if (spec.isSubCartridge) {
             File(context.filesDir, "models/sherpa/piper_${spec.id}")
         } else {
             File(context.filesDir, "models/sherpa/piper")
         }
         null -> File(context.filesDir, "models/sherpa/other")
+    }
+
+    /**
+     * ✨ COMPANION ASSET PIPELINE (v1.6.0): downloads + SHA-256-verifies an optional companion
+     * file (Matcha's Vocos vocoder) and places it into the cartridge's extract dir. Resume-safe.
+     */
+    private suspend fun downloadCompanionAsset(spec: ModelBundleSpec, extractDir: File) = withContext(Dispatchers.IO) {
+        val partFile = File(downloadsTempDir, "${spec.companionFileName}.part")
+        val finalFile = File(extractDir, spec.companionFileName)
+        if (finalFile.exists() && finalFile.length() > 0L) return@withContext
+
+        try {
+            var existingBytes = if (partFile.exists()) partFile.length() else 0L
+            val reqBuilder = Request.Builder().url(spec.companionUrl)
+            if (existingBytes > 0L) {
+                reqBuilder.addHeader("Range", "bytes=$existingBytes-")
+            }
+
+            httpClient.newCall(reqBuilder.build()).execute().use { response ->
+                if (!response.isSuccessful && response.code != 206) {
+                    throw IllegalStateException("Companion HTTP ${response.code}: ${response.message}")
+                }
+                val isResumed = response.code == 206
+                if (!isResumed) existingBytes = 0L
+                val body = response.body ?: throw IllegalStateException("Empty companion body")
+                val contentLength = body.contentLength()
+                val totalBytes = if (contentLength > 0L) existingBytes + contentLength else existingBytes
+
+                body.byteStream().use { input ->
+                    FileOutputStream(partFile, isResumed).use { output ->
+                        val buffer = ByteArray(64 * 1024)
+                        var current = existingBytes
+                        var lastUiEmit = 0L
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            output.write(buffer, 0, read)
+                            current += read
+                            val now = System.currentTimeMillis()
+                            if (now - lastUiEmit >= 200L) {
+                                lastUiEmit = now
+                                repository.updateModelState(
+                                    spec.id,
+                                    (repository.state.value.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)).copy(
+                                        state = DownloadState.EXTRACTING,
+                                        downloadedBytes = current,
+                                        totalBytes = totalBytes,
+                                        errorMessage = "Fetching companion: ${spec.companionFileName}"
+                                    )
+                                )
+                            }
+                        }
+                        output.flush()
+                    }
+                }
+            }
+
+            val actualSha = computeSha256(partFile)
+            if (!actualSha.equals(spec.companionExpectedSha256, ignoreCase = true)) {
+                throw IllegalStateException(
+                    "Companion SHA-256 mismatch! Expected ${spec.companionExpectedSha256.take(12)}..., got ${actualSha.take(12)}..."
+                )
+            }
+            extractDir.mkdirs()
+            if (finalFile.exists()) finalFile.delete()
+            if (!partFile.renameTo(finalFile)) {
+                partFile.copyTo(finalFile, overwrite = true)
+                partFile.delete()
+            }
+            Log.i(TAG, "Companion asset installed: ${spec.companionFileName} (SHA-256 verified)")
+        } catch (err: Exception) {
+            runCatching { partFile.delete() }
+            throw IllegalStateException("Companion download failed: ${err.message}", err)
+        }
     }
 }

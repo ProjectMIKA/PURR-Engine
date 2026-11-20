@@ -67,8 +67,11 @@ class TtsBackendRouter(
             BackendType.LITERT_NPU_GPU,
             BackendType.SHERPA_ONNX -> {
                 val cleanVoiceId = voiceId.substringAfter(':')
-                val isKokoroVoice = cleanVoiceId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) ||
-                    profile.selectedCartridgeId == "rom_kokoro_sherpa"
+                // v1.6.0: [a-z0-9] allows the numeric Kokoro v1.1-zh roster (zf_001, zm_100...).
+                val isKokoroVoice = cleanVoiceId.matches(Regex("^[abjefhipz][fm]_[a-z0-9]+$")) ||
+                    profile.selectedCartridgeId in setOf(
+                        "rom_kokoro_sherpa", "rom_kokoro_fp32", "rom_kokoro_v11"
+                    )
                 val npuChipOn = isKokoroVoice &&
                     repository.isSubCartridgeEnabled("rom_kokoro_npu_g2p") &&
                     liteRtEngine.isNpuG2pReady

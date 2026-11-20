@@ -14,7 +14,7 @@ package com.projectmika.purrtts.core.purr
  */
 
 /** Bump alongside versionName in app/build.gradle.kts whenever tutorial content changes. */
-const val TUTORIAL_VERSION = 1
+const val TUTORIAL_VERSION = 2
 
 const val PURR_REPO_URL = "https://github.com/ProjectMIKA/PURR-Engine"
 const val PURR_KOFI_URL = "https://ko-fi.com/projectmika"
@@ -64,7 +64,7 @@ val PURR_TUTORIAL_STEPS: List<PurrTutorialStep> = listOf(
         iconGlyph = "💾",
         title = "SLAM_SOME_ENGINES",
         colorHex = 0xFF00E5FF,
-        body = "The CARTRIDGE BAY tab holds 7 swappable TTS engines. ROM-03: KITTEN_TTS_NANO is the quick win — only 30MB for 8 expressive voices. ROM-02: KOKORO_82M packs 54 neural voices with NPU/GPU acceleration, and ROM-05 ships 6 Piper packs (yes, including GLaDOS). ROM-01 is your device's built-in speech, free forever. Downloads are SHA-256 verified and resumable."
+        body = "The CARTRIDGE BAY tab now holds 10 swappable TTS engines. ROM-03: KITTEN_TTS_NANO is the quick win — only 30MB for 8 expressive voices. ROM-02: KOKORO_82M packs 54 neural voices, ROM-09 adds 103 Chinese+English speakers, and ROM-08/ROM-10 are the premium tier: full-precision FP32 weights and the blazing Matcha-TTS flow engine. ROM-01 is your device's built-in speech, free forever. Downloads are SHA-256 verified and resumable."
     ),
     PurrTutorialStep(
         id = "CHOOSE_AND_TEST",
@@ -98,39 +98,32 @@ val PURR_TUTORIAL_STEPS: List<PurrTutorialStep> = listOf(
 
 val PURR_WHATS_NEW: List<PurrWhatsNewEntry> = listOf(
     PurrWhatsNewEntry(
-        id = "THE_IMPORTED_SOUL",
-        iconGlyph = "🧬",
-        colorHex = 0xFFB967FF,
-        title = "THE_IMPORTED_SOUL",
-        body = "The Clone Studio now imports YOUR audio files — mp3, m4a, ogg, flac, wav — with an optional CLEAN_AUDIO toggle that strips static, hiss and hum through a spectral denoiser before cloning. Record a 5s sample or import a clip; the best voiced window is picked automatically."
-    ),
-    PurrWhatsNewEntry(
-        id = "THE_MIKA_ACADEMY",
-        iconGlyph = "🐾",
-        colorHex = 0xFF00E5FF,
-        title = "THE_M.I.K.A._ACADEMY",
-        body = "This tutorial! A full-screen CRT walkthrough with Milk & Wire playing in the background, a typewriter MIKA narrating every slide, and version patchnotes that pop up automatically after each app update. Replay it anytime from the new settings cog."
-    ),
-    PurrWhatsNewEntry(
-        id = "THE_SILVER_COG",
-        iconGlyph = "⚙️",
-        colorHex = 0xFFC0C0C0,
-        title = "THE_SILVER_COG",
-        body = "A new settings cog lives beside SET_OS_TTS: one tap opens SYSTEM_SETTINGS with the source repository, the Ko-fi support link, the academy replay, and your exact build stamp."
-    ),
-    PurrWhatsNewEntry(
-        id = "THE_SLEEK_SELECTOR",
-        iconGlyph = "🎚️",
-        colorHex = 0xFF00FF41,
-        title = "THE_SLEEK_SELECTOR",
-        body = "The engine pill wall is now a sleek dropdown: one collapsed row showing your active ROM, expanding into a color-coded tray of every slotted engine with NPU/GPU badges and Piper expansion counts intact."
-    ),
-    PurrWhatsNewEntry(
-        id = "THE_FLOWING_BADGE",
-        iconGlyph = "✨",
+        id = "THE_HEAVY_WEIGHTS",
+        iconGlyph = "🏋️",
         colorHex = 0xFFFFD700,
-        title = "THE_FLOWING_BADGE",
-        body = "The header hardware badge no longer shifts the layout — the pill stays sized for [IDLE] and longer states like [NPU ACTIVE] scroll through it as a smooth marquee, VRAM countdown included."
+        title = "THE_HEAVY_WEIGHTS",
+        body = "Three premium engine cartridges landed in the Bay: ROM-08 KOKORO_82M_FP32 (unquantized studio weights, same 54 voices as ROM-02, 8GB+ RAM), ROM-09 KOKORO_V11_MULTILING (140MB INT8), and ROM-10 MATCHA_ZH_EN — a completely new flow-matching architecture with the Vocos vocoder. The rack is now 10 bays!"
+    ),
+    PurrWhatsNewEntry(
+        id = "THE_THOUSAND_VOICES",
+        iconGlyph = "🎙️",
+        colorHex = 0xFF00E5FF,
+        title = "THE_103_SPEAKERS",
+        body = "ROM-09 ships Kokoro v1.1-zh: 103 speakers — af_maple, af_sol and bf_vale in English, plus 100 Chinese voices (55 female zf_*, 45 male zm_*). Fully bilingual synthesis with dual lexicons, all offline."
+    ),
+    PurrWhatsNewEntry(
+        id = "THE_MATCHA_FLOW",
+        iconGlyph = "🍵",
+        colorHex = 0xFF9146FF,
+        title = "THE_MATCHA_FLOW",
+        body = "ROM-10 brings Matcha-TTS flow synthesis — a different neural architecture with astonishingly natural prosody and blazing speed (RTF < 1 even on old hardware). The Vocos vocoder downloads as a verified companion asset."
+    ),
+    PurrWhatsNewEntry(
+        id = "THE_HEAVY_BRIDGE",
+        iconGlyph = "🌉",
+        colorHex = 0xFF00FF41,
+        title = "THE_HEAVY_BRIDGE",
+        body = "The LAN proxy panel now has HEAVY_MODEL_PRESETS: one tap configures Kokoro-FastAPI, openedai-speech, F5-TTS or the official OpenAI TTS — run CosyVoice, F5-TTS or XTTS-v2 on your PC and let the phone stream. (Qwen TTS stays cloud-WebSocket-only, so no preset for it.)"
     )
 )
 
