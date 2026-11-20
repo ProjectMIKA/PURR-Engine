@@ -216,4 +216,41 @@ class PurrHeavyEnginesTest {
             tempDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `qwen3 model_profile instruct_support parser handles true and false cleanly`() {
+        assertFalse(Qwen3TtsEngine.parseInstructSupport("""{"model_type": "custom", "instruct_support": false}"""))
+        assertTrue(Qwen3TtsEngine.parseInstructSupport("""{"model_type": "design", "instruct_support": true}"""))
+        assertFalse(Qwen3TtsEngine.parseInstructSupport("""{"model_type": "base"}"""))
+    }
+
+    @Test
+    fun `streaming bpe tokenizer loads large added_tokens and nested metadata from file`() {
+        val tempFile = File.createTempFile("purr_stream_tok_", ".json")
+        try {
+            val sb = StringBuilder()
+            sb.append("""{"version":"1.0","truncation":null,"padding":{"strategy":"longest"},""")
+            sb.append(""""normalizer":{"type":"NFC"},"pre_tokenizer":{"type":"Sequence","pretokenizers":[{"type":"ByteLevel"}]},""")
+            sb.append(""""added_tokens":[""")
+            sb.append("""{"id":151671,"content":"<|TEXT_PROMPT_START|>","special":true},""")
+            sb.append("""{"id":151672,"content":"<|TEXT_PROMPT_END|>","special":true},""")
+            sb.append("""{"id":217221,"content":"<|HAPPY|>","special":true},""")
+            for (i in 0 until 1000) {
+                if (i > 0) sb.append(',')
+                sb.append("""{"id":${151680 + i},"content":"<|speech_$i|>","special":true}""")
+            }
+            sb.append("""],"model":{"type":"BPE","unk_token":"<unk>","vocab":{"\"q\"":0,"Ġhello":1,"Ġworld":2,"<unk>":3},"merges":[]}}""")
+            tempFile.writeText(sb.toString())
+
+            val tok = PurrBpeTokenizer.fromFile(tempFile)
+            assertEquals(151671, tok.tokenToId("<|TEXT_PROMPT_START|>"))
+            assertEquals(217221, tok.tokenToId("<|HAPPY|>"))
+            assertEquals(151680 + 999, tok.tokenToId("<|speech_999|>"))
+            assertEquals(0, tok.tokenToId("\"q\""))
+            val ids = tok.encode("<|TEXT_PROMPT_START|><|HAPPY|><|speech_42|><|TEXT_PROMPT_END|>")
+            assertArrayEquals(longArrayOf(151671L, 217221L, (151680 + 42).toLong(), 151672L), ids)
+        } finally {
+            tempFile.delete()
+        }
+    }
 }

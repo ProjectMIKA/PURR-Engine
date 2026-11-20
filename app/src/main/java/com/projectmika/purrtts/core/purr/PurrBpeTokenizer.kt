@@ -1,15 +1,9 @@
 package com.projectmika.purrtts.core.purr
 
+import java.io.BufferedReader
 import java.io.File
-import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.intOrNull
-import kotlinx.serialization.json.jsonArray
-import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
+import java.io.Reader
+import java.io.StringReader
 
 /**
  * ✨ MIKA'S PURE-KOTLIN HUGGING FACE BPE TOKENIZER ✨
@@ -211,8 +205,6 @@ class PurrBpeTokenizer private constructor(
     }
 
     companion object {
-        private val jsonParser = Json { ignoreUnknownKeys = true }
-
         private val BYTE_TO_UNICODE: CharArray = buildByteToUnicodeTable()
         private val UNICODE_TO_BYTE: Map<Char, Int> = buildMap {
             for (b in 0..255) {
@@ -235,57 +227,70 @@ class PurrBpeTokenizer private constructor(
         }
 
         fun fromFile(tokenizerJsonFile: File): PurrBpeTokenizer =
-            fromJsonString(tokenizerJsonFile.readText(Charsets.UTF_8))
-
-        fun fromJsonString(jsonText: String): PurrBpeTokenizer {
-            val root = jsonParser.parseToJsonElement(jsonText).jsonObject
-            val modelObj = root["model"]?.jsonObject
-                ?: throw IllegalArgumentException("tokenizer.json missing `model` object")
-
-            val vocabObj = modelObj["vocab"]?.jsonObject
-                ?: throw IllegalArgumentException("tokenizer.json missing `model.vocab`")
-            val vocabMap = HashMap<String, Int>(vocabObj.size * 2)
-            val idMap = HashMap<Int, String>(vocabObj.size * 2)
-
-            for ((tok, el) in vocabObj) {
-                val id = el.jsonPrimitive.intOrNull ?: continue
-                vocabMap[tok] = id
-                idMap[id] = tok
+            tokenizerJsonFile.bufferedReader(Charsets.UTF_8, 65536).use { br ->
+                fromReader(br)
             }
 
-            val addedMap = HashMap<String, Int>(64)
-            root["added_tokens"]?.jsonArray?.forEach { entry ->
-                val obj = entry.jsonObject
-                val id = obj["id"]?.jsonPrimitive?.intOrNull ?: return@forEach
-                val content = obj["content"]?.jsonPrimitive?.contentOrNull ?: return@forEach
-                addedMap[content] = id
-                vocabMap.putIfAbsent(content, id)
-                idMap.putIfAbsent(id, content)
-            }
+        fun fromJsonString(jsonText: String): PurrBpeTokenizer =
+            StringReader(jsonText).use { sr -> fromReader(sr) }
 
-            val mergesArr = modelObj["merges"]?.jsonArray
-            val mergeRanks = HashMap<Long, Int>((mergesArr?.size ?: 0) * 2)
-            mergesArr?.forEachIndexed { rank, item ->
-                val pair: Pair<String, String>? = when (item) {
-                    is JsonArray -> {
-                        if (item.size >= 2) {
-                            item[0].jsonPrimitive.content to item[1].jsonPrimitive.content
-                        } else {
-                            null
+        private fun fromReader(reader: Reader): PurrBpeTokenizer {
+            val vocabMap = HashMap<String, Int>(16384)
+            val idMap = HashMap<Int, String>(16384)
+            val addedMap = HashMap<String, Int>(256)
+            val mergeRanks = HashMap<Long, Int>(16384)
+            val deferredMerges = ArrayList<Pair<String, String>>()
+
+            var useByteLevel = false
+            var lowercaseNormalizer = false
+            var collapseWhitespace = false
+            var splitDigitsIndividually = false
+            var hasModel = false
+            var hasVocab = false
+            var unkTok: String? = null
+
+            val parser = StreamingTokenizerJsonReader(reader)
+            parser.expect('{')
+            val first = parser.skipWs()
+            if (first != '}'.code) {
+                parser.unreadChar(first)
+                while (true) {
+                    val key = parser.readString()
+                    parser.expect(':')
+                    when (key) {
+                        "normalizer" -> {
+                            val flags = HashSet<String>(8)
+                            parser.scanStringTokens(flags)
+                            lowercaseNormalizer = "Lowercase" in flags
+                            collapseWhitespace = "Replace" in flags
                         }
-                    }
-                    is JsonPrimitive -> {
-                        val s = item.content
-                        val sp = s.indexOf(' ')
-                        if (sp > 0 && sp < s.lastIndex) {
-                            s.substring(0, sp) to s.substring(sp + 1)
-                        } else {
-                            null
+                        "pre_tokenizer" -> {
+                            val flags = HashSet<String>(8)
+                            parser.scanStringTokens(flags)
+                            useByteLevel = "ByteLevel" in flags
+                            splitDigitsIndividually = "Digits" in flags
                         }
+                        "added_tokens" -> parser.parseAddedTokens(addedMap, vocabMap, idMap)
+                        "model" -> {
+                            hasModel = true
+                            val mRes = parser.parseModelObject(vocabMap, idMap, mergeRanks, deferredMerges)
+                            hasVocab = mRes.first
+                            unkTok = mRes.second
+                        }
+                        else -> parser.skipValue()
                     }
-                    else -> null
+                    val delim = parser.skipWs()
+                    if (delim == ','.code) continue
+                    if (delim == '}'.code) break
+                    throw IllegalArgumentException("Expected ',' or '}' at top-level tokenizer.json, got ${delim.toChar()}")
                 }
-                if (pair != null) {
+            }
+
+            if (!hasModel) throw IllegalArgumentException("tokenizer.json missing `model` object")
+            if (!hasVocab) throw IllegalArgumentException("tokenizer.json missing `model.vocab`")
+
+            if (deferredMerges.isNotEmpty()) {
+                deferredMerges.forEachIndexed { rank, pair ->
                     val idL = vocabMap[pair.first]
                     val idR = vocabMap[pair.second]
                     if (idL != null && idR != null) {
@@ -295,9 +300,6 @@ class PurrBpeTokenizer private constructor(
                 }
             }
 
-            val normJson = root["normalizer"]?.toString().orEmpty()
-            val preTokJson = root["pre_tokenizer"]?.toString().orEmpty()
-            val unkTok = modelObj["unk_token"]?.jsonPrimitive?.contentOrNull
             val unkId = unkTok?.let { vocabMap[it] }
                 ?: vocabMap["[UNK]"]
                 ?: vocabMap["<unk>"]
@@ -308,12 +310,416 @@ class PurrBpeTokenizer private constructor(
                 idToToken = idMap,
                 addedTokens = addedMap,
                 mergeRanks = mergeRanks,
-                useByteLevel = preTokJson.contains("\"ByteLevel\""),
-                lowercaseNormalizer = normJson.contains("\"Lowercase\""),
-                collapseWhitespace = normJson.contains("\"Replace\""),
-                splitDigitsIndividually = preTokJson.contains("\"Digits\""),
+                useByteLevel = useByteLevel,
+                lowercaseNormalizer = lowercaseNormalizer,
+                collapseWhitespace = collapseWhitespace,
+                splitDigitsIndividually = splitDigitsIndividually,
                 unkId = unkId
             )
+        }
+    }
+}
+
+/**
+ * Zero-AST streaming JSON parser tailored for HuggingFace `tokenizer.json`.
+ * Prevents 200MB+ DOM/String heap spikes on Android when loading 150k-vocab + 65k-added-token files.
+ */
+private class StreamingTokenizerJsonReader(private val reader: Reader) {
+    private var pushedBack: Int = -2
+    private val strBuf = StringBuilder(64)
+
+    fun nextChar(): Int {
+        if (pushedBack != -2) {
+            val c = pushedBack
+            pushedBack = -2
+            return c
+        }
+        return reader.read()
+    }
+
+    fun unreadChar(c: Int) {
+        pushedBack = c
+    }
+
+    fun skipWs(): Int {
+        var c = nextChar()
+        while (c == ' '.code || c == '\t'.code || c == '\n'.code || c == '\r'.code) {
+            c = nextChar()
+        }
+        return c
+    }
+
+    fun expect(expected: Char) {
+        val c = skipWs()
+        if (c != expected.code) {
+            throw IllegalArgumentException("Expected '$expected', got '${if (c == -1) "EOF" else c.toChar().toString()}'")
+        }
+    }
+
+    fun readString(): String {
+        expect('"')
+        strBuf.setLength(0)
+        while (true) {
+            val c = nextChar()
+            if (c == -1) throw IllegalArgumentException("Unterminated JSON string")
+            if (c == '"'.code) break
+            if (c == '\\'.code) {
+                val esc = nextChar()
+                when (esc) {
+                    '"'.code, '\\'.code, '/'.code -> strBuf.append(esc.toChar())
+                    'b'.code -> strBuf.append('\b')
+                    'f'.code -> strBuf.append('\u000C')
+                    'n'.code -> strBuf.append('\n')
+                    'r'.code -> strBuf.append('\r')
+                    't'.code -> strBuf.append('\t')
+                    'u'.code -> {
+                        var code = 0
+                        for (i in 0 until 4) {
+                            val h = nextChar()
+                            val d = when (h) {
+                                in '0'.code..'9'.code -> h - '0'.code
+                                in 'a'.code..'f'.code -> 10 + (h - 'a'.code)
+                                in 'A'.code..'F'.code -> 10 + (h - 'A'.code)
+                                else -> throw IllegalArgumentException("Invalid \\u escape in JSON")
+                            }
+                            code = (code shl 4) or d
+                        }
+                        strBuf.append(code.toChar())
+                    }
+                    -1 -> throw IllegalArgumentException("Unterminated escape sequence in JSON string")
+                    else -> strBuf.append(esc.toChar())
+                }
+            } else {
+                strBuf.append(c.toChar())
+            }
+        }
+        return strBuf.toString()
+    }
+
+    fun readIntOrNull(): Int? {
+        var c = skipWs()
+        if (c == 'n'.code) {
+            unreadChar(c)
+            skipPrimitive()
+            return null
+        }
+        var neg = false
+        if (c == '-'.code) {
+            neg = true
+            c = nextChar()
+        }
+        if (c !in '0'.code..'9'.code) {
+            unreadChar(c)
+            skipPrimitive()
+            return null
+        }
+        var valAcc = 0L
+        while (c in '0'.code..'9'.code) {
+            valAcc = valAcc * 10L + (c - '0'.code)
+            c = nextChar()
+        }
+        while (c == '.'.code || c == 'e'.code || c == 'E'.code || c == '+'.code || c == '-'.code || c in '0'.code..'9'.code) {
+            c = nextChar()
+        }
+        unreadChar(c)
+        return (if (neg) -valAcc else valAcc).toInt()
+    }
+
+    fun readStringOrNull(): String? {
+        val c = skipWs()
+        unreadChar(c)
+        if (c == '"'.code) return readString()
+        skipValue()
+        return null
+    }
+
+    private fun skipPrimitive() {
+        var c = nextChar()
+        while (c != -1 && c != ','.code && c != '}'.code && c != ']'.code &&
+            c != ' '.code && c != '\t'.code && c != '\n'.code && c != '\r'.code
+        ) {
+            c = nextChar()
+        }
+        unreadChar(c)
+    }
+
+    fun skipValue() {
+        val c = skipWs()
+        when (c) {
+            '{'.code -> {
+                val n = skipWs()
+                if (n != '}'.code) {
+                    unreadChar(n)
+                    while (true) {
+                        readString()
+                        expect(':')
+                        skipValue()
+                        val d = skipWs()
+                        if (d == ','.code) continue
+                        if (d == '}'.code) break
+                        throw IllegalArgumentException("Invalid object in JSON")
+                    }
+                }
+            }
+            '['.code -> {
+                val n = skipWs()
+                if (n != ']'.code) {
+                    unreadChar(n)
+                    while (true) {
+                        skipValue()
+                        val d = skipWs()
+                        if (d == ','.code) continue
+                        if (d == ']'.code) break
+                        throw IllegalArgumentException("Invalid array in JSON")
+                    }
+                }
+            }
+            '"'.code -> {
+                unreadChar(c)
+                readString()
+            }
+            -1 -> Unit
+            else -> {
+                unreadChar(c)
+                skipPrimitive()
+            }
+        }
+    }
+
+    fun scanStringTokens(outStrings: MutableSet<String>) {
+        val c = skipWs()
+        when (c) {
+            '{'.code -> {
+                val n = skipWs()
+                if (n != '}'.code) {
+                    unreadChar(n)
+                    while (true) {
+                        readString()
+                        expect(':')
+                        scanStringTokens(outStrings)
+                        val d = skipWs()
+                        if (d == ','.code) continue
+                        if (d == '}'.code) break
+                        throw IllegalArgumentException("Malformed object while scanning section flags")
+                    }
+                }
+            }
+            '['.code -> {
+                val n = skipWs()
+                if (n != ']'.code) {
+                    unreadChar(n)
+                    while (true) {
+                        scanStringTokens(outStrings)
+                        val d = skipWs()
+                        if (d == ','.code) continue
+                        if (d == ']'.code) break
+                        throw IllegalArgumentException("Malformed array while scanning section flags")
+                    }
+                }
+            }
+            '"'.code -> {
+                unreadChar(c)
+                val s = readString()
+                if (s.length <= 32) outStrings.add(s)
+            }
+            else -> {
+                unreadChar(c)
+                skipPrimitive()
+            }
+        }
+    }
+
+    fun parseAddedTokens(
+        addedMap: MutableMap<String, Int>,
+        vocabMap: MutableMap<String, Int>,
+        idMap: MutableMap<Int, String>
+    ) {
+        val c = skipWs()
+        if (c == 'n'.code) {
+            unreadChar(c)
+            skipPrimitive()
+            return
+        }
+        if (c != '['.code) {
+            unreadChar(c)
+            skipValue()
+            return
+        }
+        val first = skipWs()
+        if (first == ']'.code) return
+        unreadChar(first)
+        while (true) {
+            expect('{')
+            val f2 = skipWs()
+            var id: Int? = null
+            var content: String? = null
+            if (f2 != '}'.code) {
+                unreadChar(f2)
+                while (true) {
+                    val k = readString()
+                    expect(':')
+                    when (k) {
+                        "id" -> id = readIntOrNull()
+                        "content" -> content = readStringOrNull()
+                        else -> skipValue()
+                    }
+                    val d = skipWs()
+                    if (d == ','.code) continue
+                    if (d == '}'.code) break
+                    throw IllegalArgumentException("Malformed added_tokens entry")
+                }
+            }
+            if (id != null && content != null) {
+                addedMap[content] = id
+                vocabMap.putIfAbsent(content, id)
+                idMap.putIfAbsent(id, content)
+            }
+            val arrD = skipWs()
+            if (arrD == ','.code) continue
+            if (arrD == ']'.code) break
+            throw IllegalArgumentException("Malformed added_tokens array")
+        }
+    }
+
+    fun parseModelObject(
+        vocabMap: MutableMap<String, Int>,
+        idMap: MutableMap<Int, String>,
+        mergeRanks: MutableMap<Long, Int>,
+        deferredMerges: MutableList<Pair<String, String>>
+    ): Pair<Boolean, String?> {
+        val c = skipWs()
+        if (c != '{'.code) {
+            unreadChar(c)
+            skipValue()
+            return false to null
+        }
+        var hasVocab = false
+        var unkTok: String? = null
+        val first = skipWs()
+        if (first != '}'.code) {
+            unreadChar(first)
+            while (true) {
+                val k = readString()
+                expect(':')
+                when (k) {
+                    "vocab" -> {
+                        hasVocab = true
+                        parseVocabMap(vocabMap, idMap)
+                    }
+                    "merges" -> parseMergesArray(vocabMap, mergeRanks, deferredMerges)
+                    "unk_token" -> unkTok = readStringOrNull()
+                    else -> skipValue()
+                }
+                val d = skipWs()
+                if (d == ','.code) continue
+                if (d == '}'.code) break
+                throw IllegalArgumentException("Malformed model object in tokenizer.json")
+            }
+        }
+        return hasVocab to unkTok
+    }
+
+    private fun parseVocabMap(
+        vocabMap: MutableMap<String, Int>,
+        idMap: MutableMap<Int, String>
+    ) {
+        expect('{')
+        val first = skipWs()
+        if (first == '}'.code) return
+        unreadChar(first)
+        while (true) {
+            val tok = readString()
+            expect(':')
+            val id = readIntOrNull()
+            if (id != null) {
+                vocabMap[tok] = id
+                idMap[id] = tok
+            }
+            val d = skipWs()
+            if (d == ','.code) continue
+            if (d == '}'.code) break
+            throw IllegalArgumentException("Malformed vocab map in tokenizer.json")
+        }
+    }
+
+    private fun parseMergesArray(
+        vocabMap: Map<String, Int>,
+        mergeRanks: MutableMap<Long, Int>,
+        deferredMerges: MutableList<Pair<String, String>>
+    ) {
+        val c = skipWs()
+        if (c == 'n'.code) {
+            unreadChar(c)
+            skipPrimitive()
+            return
+        }
+        if (c != '['.code) {
+            unreadChar(c)
+            skipValue()
+            return
+        }
+        val first = skipWs()
+        if (first == ']'.code) return
+        unreadChar(first)
+
+        var rank = 0
+        while (true) {
+            val itemC = skipWs()
+            var pair: Pair<String, String>? = null
+            when (itemC) {
+                '"'.code -> {
+                    unreadChar(itemC)
+                    val s = readString()
+                    val sp = s.indexOf(' ')
+                    if (sp > 0 && sp < s.lastIndex) {
+                        pair = s.substring(0, sp) to s.substring(sp + 1)
+                    }
+                }
+                '['.code -> {
+                    val f = skipWs()
+                    if (f != ']'.code) {
+                        unreadChar(f)
+                        val l = readStringOrNull()
+                        val d1 = skipWs()
+                        var r: String? = null
+                        if (d1 == ','.code) {
+                            r = readStringOrNull()
+                            var d2 = skipWs()
+                            while (d2 == ','.code) {
+                                skipValue()
+                                d2 = skipWs()
+                            }
+                            if (d2 != ']'.code) throw IllegalArgumentException("Expected ']' in merge pair")
+                        } else if (d1 != ']'.code) {
+                            throw IllegalArgumentException("Malformed merge pair array")
+                        }
+                        if (l != null && r != null) pair = l to r
+                    }
+                }
+                else -> {
+                    unreadChar(itemC)
+                    skipValue()
+                }
+            }
+
+            if (pair != null) {
+                if (vocabMap.isNotEmpty() && deferredMerges.isEmpty()) {
+                    val idL = vocabMap[pair.first]
+                    val idR = vocabMap[pair.second]
+                    if (idL != null && idR != null) {
+                        val key = (idL.toLong() shl 32) or (idR.toLong() and 0xFFFFFFFFL)
+                        mergeRanks.putIfAbsent(key, rank)
+                    }
+                } else {
+                    deferredMerges.add(pair)
+                }
+                rank++
+            }
+
+            val d = skipWs()
+            if (d == ','.code) continue
+            if (d == ']'.code) break
+            throw IllegalArgumentException("Malformed merges array")
         }
     }
 }

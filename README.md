@@ -93,7 +93,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.7.0 // Heavy Local Fleet & 8-Bay Hub Rack)
+### 🌟 Latest Updates (v1.7.1 // Qwen3 Clarity, NeuTTS-2E Fix & Module Dock Polish)
+
+* **Qwen3 `instruct_support` Fix & Zero Mixed Fallback:** `Qwen3TtsEngine` reads `instruct_support` from `model_profile.json` so `0.6B CustomVoice` never fails on emotional chunks and stops mixing stock OS speech into neural tests.
+* **WSOLA Studio Speed Scaling:** Replaced naive grain overlap-add with pitch-synchronous `PurrDspProcessor.timeScaleWsola` (bit-exact bypass for `0.94x..1.06x`), eliminating metallic reverb on Qwen3 & ONNX voices.
+* **NeuTTS-2E OOM Fix:** Added `android:largeHeap="true"`, streaming zero-AST `PurrBpeTokenizer`, and last-step-only ORT logit slicing so NeuTTS-2E runs cleanly on Android without hitting heap limits.
+* **Module Window Icon Dock & Crisp `[IDLE]` Marquee:** Open module windows now switch via a single-row horizontally scrollable icon dock with pulsating chevrons, and `MikaStatusBadge` cleanly fits `[IDLE]` with a seamless marquee on longer telemetry.
+
+### 📦 Prior Releases (v1.7.0 // Heavy Local Fleet & 8-Bay Hub Rack)
 
 * **Qwen3-TTS Native JNI (`ROM-04`):** Pure on-device `llama.cpp b8470` + `Lux-Luna/LunaVox` + `ORT 1.31.1` JNI running 0.6B CustomVoice (9 multilingual speakers), 0.6B Base 3s multilingual cloning (`SUB-04A`), and prompt-driven 1.7B VoiceDesign (`SUB-04B`).
 * **Chatterbox-Turbo 350M Q4 (`SUB-03E`):** Zero-shot cloning + 19 native paralinguistic reaction tags (`[laugh]`, `[sigh]`, `[gasp]`, `[whispering]`...) with automatic RP `*laughs*` -> `[laugh]` conversion.

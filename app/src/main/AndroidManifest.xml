@@ -21,6 +21,7 @@
     <application
         android:name=".PurrApplication"
         android:allowBackup="true"
+        android:largeHeap="true"
         android:icon="@drawable/ic_launcher_purr"
         android:label="@string/app_name"
         android:roundIcon="@drawable/ic_launcher_purr"

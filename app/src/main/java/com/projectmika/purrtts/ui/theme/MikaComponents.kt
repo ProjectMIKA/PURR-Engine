@@ -196,37 +196,39 @@ fun MikaStatusBadge(
     } else ""
     val display = badge.terminalLabel + countdown
 
-    val textMeasurer = rememberTextMeasurer()
-    val textLayout = remember(display, badge) {
-        textMeasurer.measure(
-            text = AnnotatedString(display),
-            style = TextStyle(
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 10.sp,
-                letterSpacing = 0.8.sp
-            )
+    val marqueeTextStyle = remember {
+        TextStyle(
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.Black,
+            fontSize = 9.sp,
+            letterSpacing = 0.5.sp
         )
     }
+
+    val textMeasurer = rememberTextMeasurer()
+    val textLayout = remember(display, badge) {
+        textMeasurer.measure(text = AnnotatedString(display), style = marqueeTextStyle)
+    }
+    val cycleDisplay = "$display   •   "
+    val cycleLayout = remember(cycleDisplay, badge) {
+        textMeasurer.measure(text = AnnotatedString(cycleDisplay), style = marqueeTextStyle)
+    }
+
+    var laneWidthPx by remember { mutableStateOf(0f) }
+    val needsMarquee = laneWidthPx > 0f && textLayout.size.width.toFloat() > laneWidthPx
+    val cycleWidthPx = cycleLayout.size.width.toFloat().coerceAtLeast(1f)
+    val marqueeDurationMs = ((cycleWidthPx / 38f) * 1000f).roundToInt().coerceIn(2200, 7500)
 
     val marquee = rememberInfiniteTransition(label = "badgeMarquee")
     val marqueeShift by marquee.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = keyframes {
-                durationMillis = 4600
-                0f at 0 using LinearEasing
-                0f at 900 using LinearEasing
-                1f at 2700 using LinearEasing
-                1f at 3600 using LinearEasing
-            },
+            animation = tween(durationMillis = marqueeDurationMs, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
         label = "badgeShift"
     )
-
-    var laneWidthPx by remember { mutableStateOf(0f) }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -234,34 +236,41 @@ fun MikaStatusBadge(
             .clip(RoundedCornerShape(4.dp))
             .background(badgeColor.copy(alpha = 0.12f))
             .border(1.dp, badgeColor.copy(alpha = pulseAlpha), RoundedCornerShape(4.dp))
-            .padding(horizontal = 8.dp, vertical = 4.dp)
+            .padding(horizontal = 6.dp, vertical = 3.dp)
     ) {
         Box(
             modifier = Modifier
-                .size(6.dp)
+                .size(5.dp)
                 .clip(CircleShape)
                 .background(badgeColor.copy(alpha = pulseAlpha))
         )
-        Spacer(modifier = Modifier.width(6.dp))
+        Spacer(modifier = Modifier.width(4.dp))
         Box(
+            contentAlignment = if (needsMarquee) Alignment.CenterStart else Alignment.Center,
             modifier = Modifier
                 .weight(1f)
                 .clipToBounds()
                 .onSizeChanged { laneWidthPx = it.width.toFloat() }
         ) {
-            val overflowPx = (textLayout.size.width - laneWidthPx).coerceAtLeast(0f)
-            val shiftPx = if (overflowPx > 1f) -(overflowPx * marqueeShift) else 0f
-            Text(
-                text = display,
-                color = badgeColor,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 10.sp,
-                letterSpacing = 0.8.sp,
-                softWrap = false,
-                maxLines = 1,
-                modifier = Modifier.offset { IntOffset(shiftPx.roundToInt(), 0) }
-            )
+            if (!needsMarquee) {
+                Text(
+                    text = display,
+                    color = badgeColor,
+                    style = marqueeTextStyle,
+                    softWrap = false,
+                    maxLines = 1
+                )
+            } else {
+                val shiftPx = -(cycleWidthPx * marqueeShift)
+                Text(
+                    text = "$cycleDisplay$display",
+                    color = badgeColor,
+                    style = marqueeTextStyle,
+                    softWrap = false,
+                    maxLines = 1,
+                    modifier = Modifier.offset { IntOffset(shiftPx.roundToInt(), 0) }
+                )
+            }
         }
     }
 }
@@ -313,6 +322,7 @@ enum class CyberIconType {
     CLOSE,
     CHEVRON_DOWN,
     CHEVRON_UP,
+    CHEVRON_LEFT,
     CHEVRON_RIGHT,
     MIC_WAVE,
     WRENCH_TOOL,
@@ -455,6 +465,14 @@ fun MikaCyberIcon(
                     moveTo(w * 0.20f, h * 0.66f)
                     lineTo(w * 0.50f, h * 0.34f)
                     lineTo(w * 0.80f, h * 0.66f)
+                }
+                drawPath(p, color = tint, style = stroke)
+            }
+            CyberIconType.CHEVRON_LEFT -> {
+                val p = Path().apply {
+                    moveTo(w * 0.66f, h * 0.20f)
+                    lineTo(w * 0.34f, h * 0.50f)
+                    lineTo(w * 0.66f, h * 0.80f)
                 }
                 drawPath(p, color = tint, style = stroke)
             }
@@ -1620,13 +1638,16 @@ fun MikaOsModuleIcon(
     type: OsModuleIconType,
     accentColor: Color,
     isOnline: Boolean = true,
+    iconSize: Dp = 58.dp,
     modifier: Modifier = Modifier
 ) {
-    val activeAlpha = if (isOnline) 1f else 0.35f
+    val activeAlpha = if (isOnline) 1f else 0.42f
+    val s = (iconSize.value / 58f).coerceIn(0.45f, 1.5f)
+    val cornerDp = (10f * s).dp
     Box(
         modifier = modifier
-            .size(58.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .size(iconSize)
+            .clip(RoundedCornerShape(cornerDp))
             .background(
                 Brush.radialGradient(
                     colors = listOf(
@@ -1635,22 +1656,22 @@ fun MikaOsModuleIcon(
                     )
                 )
             )
-            .border(1.2.dp, accentColor.copy(alpha = 0.65f * activeAlpha), RoundedCornerShape(10.dp)),
+            .border((1.2f * s).dp, accentColor.copy(alpha = 0.72f * activeAlpha), RoundedCornerShape(cornerDp)),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(modifier = Modifier.fillMaxSize().padding(9.dp)) {
+        Canvas(modifier = Modifier.fillMaxSize().padding((9f * s).dp)) {
             val w = size.width
             val h = size.height
-            val stroke = Stroke(width = 2.dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
-            val thinStroke = Stroke(width = 1.2.dp.toPx(), cap = StrokeCap.Round)
+            val stroke = Stroke(width = (2.0f * s).dp.toPx(), cap = StrokeCap.Round, join = StrokeJoin.Round)
+            val thinStroke = Stroke(width = (1.2f * s).dp.toPx(), cap = StrokeCap.Round)
             val drawColor = accentColor.copy(alpha = activeAlpha)
 
             // HUD Corner framing ticks
             val tick = w * 0.18f
-            drawLine(drawColor.copy(alpha = 0.45f), Offset(0f, 0f), Offset(tick, 0f), strokeWidth = 1.4.dp.toPx())
-            drawLine(drawColor.copy(alpha = 0.45f), Offset(0f, 0f), Offset(0f, tick), strokeWidth = 1.4.dp.toPx())
-            drawLine(drawColor.copy(alpha = 0.45f), Offset(w, h), Offset(w - tick, h), strokeWidth = 1.4.dp.toPx())
-            drawLine(drawColor.copy(alpha = 0.45f), Offset(w, h), Offset(w, h - tick), strokeWidth = 1.4.dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(0f, 0f), Offset(tick, 0f), strokeWidth = (1.4f * s).dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(0f, 0f), Offset(0f, tick), strokeWidth = (1.4f * s).dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(w, h), Offset(w - tick, h), strokeWidth = (1.4f * s).dp.toPx())
+            drawLine(drawColor.copy(alpha = 0.45f), Offset(w, h), Offset(w, h - tick), strokeWidth = (1.4f * s).dp.toPx())
 
             when (type) {
                 OsModuleIconType.PURR_CORE -> {
@@ -1671,8 +1692,8 @@ fun MikaOsModuleIcon(
                         lineTo(w * 0.88f, h * 0.55f)
                     }
                     drawPath(wave, color = drawColor, style = stroke)
-                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = 2.6.dp.toPx(), center = Offset(w * 0.12f, h * 0.55f))
-                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = 2.6.dp.toPx(), center = Offset(w * 0.88f, h * 0.55f))
+                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = (2.6f * s).dp.toPx(), center = Offset(w * 0.12f, h * 0.55f))
+                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = (2.6f * s).dp.toPx(), center = Offset(w * 0.88f, h * 0.55f))
                 }
 
                 OsModuleIconType.DSP_RACK -> {
@@ -1680,13 +1701,13 @@ fun MikaOsModuleIcon(
                     val xs = listOf(w * 0.24f, w * 0.50f, w * 0.76f)
                     val knobYs = listOf(h * 0.34f, h * 0.68f, h * 0.28f)
                     xs.forEachIndexed { idx, x ->
-                        drawLine(drawColor.copy(alpha = 0.35f), Offset(x, h * 0.14f), Offset(x, h * 0.86f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                        drawLine(drawColor, Offset(x, knobYs[idx]), Offset(x, h * 0.86f), strokeWidth = 2.4.dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(drawColor.copy(alpha = 0.35f), Offset(x, h * 0.14f), Offset(x, h * 0.86f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
+                        drawLine(drawColor, Offset(x, knobYs[idx]), Offset(x, h * 0.86f), strokeWidth = (2.4f * s).dp.toPx(), cap = StrokeCap.Round)
                         drawRoundRect(
                             color = drawColor,
-                            topLeft = Offset(x - 5.dp.toPx(), knobYs[idx] - 3.dp.toPx()),
-                            size = Size(10.dp.toPx(), 6.dp.toPx()),
-                            cornerRadius = CornerRadius(2.dp.toPx())
+                            topLeft = Offset(x - (5f * s).dp.toPx(), knobYs[idx] - (3f * s).dp.toPx()),
+                            size = Size((10f * s).dp.toPx(), (6f * s).dp.toPx()),
+                            cornerRadius = CornerRadius((2f * s).dp.toPx())
                         )
                     }
                 }
@@ -1704,9 +1725,9 @@ fun MikaOsModuleIcon(
                     }
                     drawPath(shield, color = drawColor, style = stroke)
                     // Inner filter slash / node dots
-                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.36f, h * 0.60f), Offset(w * 0.64f, h * 0.34f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawCircle(drawColor, radius = 2.4.dp.toPx(), center = Offset(w * 0.38f, h * 0.38f))
-                    drawCircle(drawColor, radius = 2.4.dp.toPx(), center = Offset(w * 0.62f, h * 0.56f))
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.36f, h * 0.60f), Offset(w * 0.64f, h * 0.34f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawCircle(drawColor, radius = (2.4f * s).dp.toPx(), center = Offset(w * 0.38f, h * 0.38f))
+                    drawCircle(drawColor, radius = (2.4f * s).dp.toPx(), center = Offset(w * 0.62f, h * 0.56f))
                 }
 
                 OsModuleIconType.CLONE_STUDIO -> {
@@ -1715,7 +1736,7 @@ fun MikaOsModuleIcon(
                         color = drawColor,
                         topLeft = Offset(w * 0.36f, h * 0.14f),
                         size = Size(w * 0.28f, h * 0.44f),
-                        cornerRadius = CornerRadius(6.dp.toPx()),
+                        cornerRadius = CornerRadius((6f * s).dp.toPx()),
                         style = stroke
                     )
                     // Helix Orbit Arcs
@@ -1737,19 +1758,19 @@ fun MikaOsModuleIcon(
                     }
                     drawPath(strand1, color = MikaColors.NeonCyan.copy(alpha = 0.65f * activeAlpha), style = thinStroke)
                     drawPath(strand2, color = drawColor.copy(alpha = 0.65f), style = thinStroke)
-                    drawLine(drawColor, Offset(w * 0.50f, h * 0.66f), Offset(w * 0.50f, h * 0.84f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawLine(drawColor, Offset(w * 0.34f, h * 0.84f), Offset(w * 0.66f, h * 0.84f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(drawColor, Offset(w * 0.50f, h * 0.66f), Offset(w * 0.50f, h * 0.84f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(drawColor, Offset(w * 0.34f, h * 0.84f), Offset(w * 0.66f, h * 0.84f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
                 }
 
                 OsModuleIconType.AUDIO_EXPORTER -> {
                     // Soundwave bars at top + download arrow into glowing media tray
-                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.20f, h * 0.22f), Offset(w * 0.20f, h * 0.42f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.32f, h * 0.14f), Offset(w * 0.32f, h * 0.46f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.68f, h * 0.14f), Offset(w * 0.68f, h * 0.46f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
-                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.80f, h * 0.22f), Offset(w * 0.80f, h * 0.42f), strokeWidth = 2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.20f, h * 0.22f), Offset(w * 0.20f, h * 0.42f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.32f, h * 0.14f), Offset(w * 0.32f, h * 0.46f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.68f, h * 0.14f), Offset(w * 0.68f, h * 0.46f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.80f, h * 0.22f), Offset(w * 0.80f, h * 0.42f), strokeWidth = (2f * s).dp.toPx(), cap = StrokeCap.Round)
 
                     // Center download arrow shaft + chevron
-                    drawLine(drawColor, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.50f, h * 0.62f), strokeWidth = 2.2.dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(drawColor, Offset(w * 0.50f, h * 0.14f), Offset(w * 0.50f, h * 0.62f), strokeWidth = (2.2f * s).dp.toPx(), cap = StrokeCap.Round)
                     val arrowHead = Path().apply {
                         moveTo(w * 0.34f, h * 0.48f)
                         lineTo(w * 0.50f, h * 0.65f)

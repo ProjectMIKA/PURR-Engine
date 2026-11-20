@@ -103,6 +103,10 @@ class Qwen3TtsEngine(
                 else -> LANG_EN
             }
         }
+
+        fun parseInstructSupport(profileJson: String): Boolean =
+            Regex("\"instruct_support\"\\s*:\\s*true", RegexOption.IGNORE_CASE)
+                .containsMatchIn(profileJson)
     }
 
     override val backendType: BackendType = BackendType.QWEN3_NATIVE
@@ -114,6 +118,7 @@ class Qwen3TtsEngine(
     private var idleJob: Job? = null
     private var activeHandle: Long = 0L
     private var activeSpecId: String? = null
+    private var activeInstructSupport: Boolean = false
 
     private fun modelDirForSpec(specId: String): File =
         File(context.filesDir, "models/native/$specId")
@@ -240,7 +245,7 @@ class Qwen3TtsEngine(
                 }
                 else -> {
                     val speaker = SPEAKER_MAP[cleanVoiceId] ?: "vivian"
-                    val instruct = buildSentimentInstruct(text, profile)
+                    val instruct = if (activeInstructSupport) buildSentimentInstruct(text, profile) else ""
                     Qwen3NativeBridge.nativeSynthesizeCustom(
                         handle = handle,
                         text = text,
@@ -265,9 +270,9 @@ class Qwen3TtsEngine(
 
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
             var shaped = rawAudio
-            // Apply clean speaking rate time-scaling only when significantly off 1.0x
-            if (speakingRate !in 0.96f..1.04f) {
-                shaped = timeScaleLinear(shaped, speakingRate.coerceIn(0.65f, 1.65f))
+            // Only time-scale when rate deviates meaningfully from 1.0x (1.0x stays bit-exact studio)
+            if (speakingRate !in 0.94f..1.06f) {
+                shaped = PurrDspProcessor.timeScaleWsola(shaped, speakingRate.coerceIn(0.65f, 1.65f), SAMPLE_RATE_HZ)
             }
             val finalPcm = if (pitch in 0.995f..1.005f) {
                 shaped
@@ -295,6 +300,7 @@ class Qwen3TtsEngine(
                 runCatching { Qwen3NativeBridge.nativeDestroy(activeHandle) }
                 activeHandle = 0L
                 activeSpecId = null
+                activeInstructSupport = false
                 _statusFlow.value = HardwareStatusBadge.IDLE
                 Log.i(TAG, "[QWEN3_EVICT] Destroyed native LunavoxEngine instance.")
             }
@@ -315,6 +321,7 @@ class Qwen3TtsEngine(
             runCatching { Qwen3NativeBridge.nativeDestroy(activeHandle) }
             activeHandle = 0L
             activeSpecId = null
+            activeInstructSupport = false
         }
 
         val dir = modelDirForSpec(specId)
@@ -325,8 +332,11 @@ class Qwen3TtsEngine(
         if (handle != 0L) {
             activeHandle = handle
             activeSpecId = specId
+            activeInstructSupport = runCatching {
+                parseInstructSupport(File(dir, "model_profile.json").readText())
+            }.getOrDefault(false)
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
-            Log.i(TAG, "Mounted Qwen3-TTS [$specId] from ${dir.absolutePath} with $nThreads threads")
+            Log.i(TAG, "Mounted Qwen3-TTS [$specId] (instruct=$activeInstructSupport) from ${dir.absolutePath}")
         }
         return handle
     }
@@ -344,38 +354,6 @@ class Qwen3TtsEngine(
             "FLUSTERED" -> "Shy, flustered and hesitant tone"
             else -> ""
         }
-    }
-
-    private fun timeScaleLinear(samples: FloatArray, rate: Float): FloatArray {
-        if (samples.size < 64 || rate in 0.96f..1.04f) return samples
-        // Simple WSOLA-lite grain overlap-add to keep pitch intact when adjusting pace
-        val outLen = (samples.size / rate).roundToInt().coerceAtLeast(16)
-        val out = FloatArray(outLen)
-        val winSize = 480 // 20ms at 24kHz
-        val synHop = winSize / 2
-        val anaHop = (synHop * rate).coerceAtLeast(16f)
-        val norm = FloatArray(outLen)
-        var synPos = 0
-        var anaPos = 0f
-
-        while (synPos < outLen) {
-            val aStart = anaPos.roundToInt().coerceIn(0, (samples.size - 1).coerceAtLeast(0))
-            for (i in 0 until winSize) {
-                val dst = synPos + i
-                val src = aStart + i
-                if (dst >= outLen || src >= samples.size) break
-                val w = 0.5f * (1f - kotlin.math.cos(2.0 * Math.PI * i / winSize).toFloat())
-                out[dst] += samples[src] * w
-                norm[dst] += w
-            }
-            synPos += synHop
-            anaPos += anaHop
-            if (anaPos >= samples.size - 1) break
-        }
-        for (i in out.indices) {
-            if (norm[i] > 1e-4f) out[i] /= norm[i]
-        }
-        return out
     }
 
     private fun resetIdleTimer() {

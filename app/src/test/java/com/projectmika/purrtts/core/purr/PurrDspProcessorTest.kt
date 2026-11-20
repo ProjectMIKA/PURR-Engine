@@ -139,4 +139,44 @@ class PurrDspProcessorTest {
         assertEquals(1, out.size)
         assertEquals(0.5f, out[0], 0.0001f)
     }
+
+    // ---------- WSOLA time-scaler ----------
+
+    @Test
+    fun `wsola returns neutral speech rate untouched bit-exact`() {
+        val src = FloatArray(12000) { i -> 0.5f * sin(2.0 * PI * 220.0 * i / 24000).toFloat() }
+        val same = PurrDspProcessor.timeScaleWsola(src, rate = 1.0f)
+        assertTrue(src contentEquals same)
+        val slight = PurrDspProcessor.timeScaleWsola(src, rate = 1.04f)
+        assertTrue(src contentEquals slight)
+    }
+
+    @Test
+    fun `wsola scales duration accurately and preserves 220hz pitch coherence`() {
+        val sr = 24000
+        val src = FloatArray(24000) { i -> 0.55f * sin(2.0 * PI * 220.0 * i / sr).toFloat() }
+        val faster = PurrDspProcessor.timeScaleWsola(src, rate = 1.25f, sampleRate = sr)
+        val slower = PurrDspProcessor.timeScaleWsola(src, rate = 0.80f, sampleRate = sr)
+
+        assertTrue(abs(faster.size - 19200) <= 64)
+        assertTrue(abs(slower.size - 30000) <= 64)
+        assertTrue(faster.all { it.isFinite() && abs(it) <= 1.0f })
+        assertTrue(slower.all { it.isFinite() && abs(it) <= 1.0f })
+
+        fun zeroCrossingHz(buf: FloatArray): Double {
+            val start = 1200
+            val end = buf.size - 1200
+            var crossings = 0
+            for (i in start until end) {
+                if (buf[i - 1] <= 0f && buf[i] > 0f) crossings++
+            }
+            val sec = (end - start).toDouble() / sr
+            return crossings / sec
+        }
+
+        val fastHz = zeroCrossingHz(faster)
+        val slowHz = zeroCrossingHz(slower)
+        assertTrue("Expected ~220Hz fast, got $fastHz", abs(fastHz - 220.0) < 12.0)
+        assertTrue("Expected ~220Hz slow, got $slowHz", abs(slowHz - 220.0) < 12.0)
+    }
 }

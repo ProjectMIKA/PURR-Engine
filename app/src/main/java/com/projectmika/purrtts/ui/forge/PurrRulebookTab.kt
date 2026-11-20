@@ -1,6 +1,11 @@
 package com.projectmika.purrtts.ui.forge
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -9,6 +14,7 @@ import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,9 +24,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -39,6 +47,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -50,8 +59,10 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.ArchetypeTone
 import com.projectmika.purrtts.core.purr.CommaHandlingMode
@@ -291,23 +302,123 @@ fun PurrRulebookTab(
                             }
                         }
 
-                        // Quick OS Taskbar Switcher Pills inside Open Window
+                        // Single-Row Horizontally Scrollable Icon Dock + Pulsating Scroll Indicators
                         if (activeModules.size > 1) {
-                            FlowRow(
+                            val dockScroll = rememberScrollState()
+                            val dockScope = rememberCoroutineScope()
+                            val arrowPulse = rememberInfiniteTransition(label = "dockArrowPulse")
+                            val arrowAlpha by arrowPulse.animateFloat(
+                                initialValue = 0.35f,
+                                targetValue = 1.0f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(720, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "dockArrowAlpha"
+                            )
+                            val arrowNudge by arrowPulse.animateFloat(
+                                initialValue = 0f,
+                                targetValue = 2.5f,
+                                animationSpec = infiniteRepeatable(
+                                    animation = tween(720, easing = LinearEasing),
+                                    repeatMode = RepeatMode.Reverse
+                                ),
+                                label = "dockArrowNudge"
+                            )
+
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .background(Color(0xFF0A0813))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                                    .padding(vertical = 7.dp)
                             ) {
-                                activeModules.forEach { mod ->
-                                    MikaTagPill(
-                                        label = mod.title,
-                                        selected = mod == targetModule,
-                                        activeColor = mod.accent,
-                                        onClick = { openedModule = mod }
-                                    )
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .horizontalScroll(dockScroll)
+                                        .padding(horizontal = 24.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    activeModules.forEach { mod ->
+                                        val isCurrent = mod == targetModule
+                                        Column(
+                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                            verticalArrangement = Arrangement.spacedBy(3.dp),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .clickable { openedModule = mod }
+                                                .padding(2.dp)
+                                        ) {
+                                            MikaOsModuleIcon(
+                                                type = mod.iconType,
+                                                accentColor = mod.accent,
+                                                isOnline = isCurrent,
+                                                iconSize = 36.dp
+                                            )
+                                            Box(
+                                                modifier = Modifier
+                                                    .width(22.dp)
+                                                    .height(2.5.dp)
+                                                    .clip(RoundedCornerShape(2.dp))
+                                                    .background(
+                                                        if (isCurrent) mod.accent else Color.Transparent
+                                                    )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (dockScroll.canScrollBackward) {
+                                    Box(
+                                        contentAlignment = Alignment.CenterStart,
+                                        modifier = Modifier
+                                            .align(Alignment.CenterStart)
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(Color(0xFF0A0813), Color(0xCC0A0813), Color.Transparent)
+                                                )
+                                            )
+                                            .clickable {
+                                                dockScope.launch {
+                                                    dockScroll.animateScrollTo((dockScroll.value - 180).coerceAtLeast(0))
+                                                }
+                                            }
+                                            .padding(start = 4.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+                                    ) {
+                                        MikaCyberIcon(
+                                            type = CyberIconType.CHEVRON_LEFT,
+                                            tint = targetModule.accent.copy(alpha = arrowAlpha),
+                                            size = 14.dp,
+                                            modifier = Modifier.offset { IntOffset(-arrowNudge.dp.roundToPx(), 0) }
+                                        )
+                                    }
+                                }
+
+                                if (dockScroll.canScrollForward) {
+                                    Box(
+                                        contentAlignment = Alignment.CenterEnd,
+                                        modifier = Modifier
+                                            .align(Alignment.CenterEnd)
+                                            .background(
+                                                Brush.horizontalGradient(
+                                                    colors = listOf(Color.Transparent, Color(0xCC0A0813), Color(0xFF0A0813))
+                                                )
+                                            )
+                                            .clickable {
+                                                dockScope.launch {
+                                                    dockScroll.animateScrollTo((dockScroll.value + 180).coerceAtMost(dockScroll.maxValue))
+                                                }
+                                            }
+                                            .padding(start = 12.dp, end = 4.dp, top = 8.dp, bottom = 8.dp)
+                                    ) {
+                                        MikaCyberIcon(
+                                            type = CyberIconType.CHEVRON_RIGHT,
+                                            tint = targetModule.accent.copy(alpha = arrowAlpha),
+                                            size = 14.dp,
+                                            modifier = Modifier.offset { IntOffset(arrowNudge.dp.roundToPx(), 0) }
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -1151,7 +1262,7 @@ private fun CloneStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Record a 5-second voice sample via your microphone to clone any voice timbre offline using ROM-06 (Pocket TTS) or ROM-07 (ZipVoice).",
+            text = "Record a sample or import an audio clip to clone any voice timbre offline across ROM-03 (Pocket, ZipVoice, Chatterbox-Turbo) & ROM-04 (Qwen3 0.6B Base).",
             color = MikaColors.CyanWhite.copy(alpha = 0.78f),
             fontFamily = FontFamily.Monospace,
             fontSize = 10.sp,
@@ -1192,7 +1303,7 @@ private fun CloneStudioModuleWindowBody(
         Spacer(modifier = Modifier.height(6.dp))
         if (forgeState.clonedVoices.isEmpty()) {
             Text(
-                text = "// No cloned voices yet. Launch the recorder above after slotting ROM-06 or ROM-07.",
+                text = "// No cloned voices yet. Launch the recorder above after installing a cloning engine in ROM-03 or ROM-04.",
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 9.5.sp
