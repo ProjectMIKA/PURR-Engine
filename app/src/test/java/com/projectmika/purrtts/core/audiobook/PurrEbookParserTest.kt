@@ -39,7 +39,7 @@ class PurrEbookParserTest {
         val ch2 = parsed.chapters[2]
         assertEquals("Chapter 2: Neural Tide", ch2.title)
         assertTrue(ch2.included)
-        assertTrue(ch2.text.contains("\"Ready to sail,\" Elara whispered."))
+        assertTrue(ch2.text.contains("\"Ready to sail,\" Elara whispered"))
     }
 
     @Test

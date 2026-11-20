@@ -515,7 +515,7 @@ object EbookParser {
         if (line.startsWith("#")) return CHAPTER_HEADING_REGEX.matches(line)
         if (!prevBlank && !nextBlank) return false
         if (line.endsWith(",") || line.endsWith(";") || line.endsWith("\"") || line.endsWith("'")) return false
-        return CHAPTER_HEADING_REGEX.matches(line)
+        return CHAPTER_HEADING_REGEX.matches(line) || (prevBlank && nextBlank && NON_STORY_TITLE_REGEX.matches(line))
     }
 
     private fun cleanHeadingLabel(raw: String): String =
