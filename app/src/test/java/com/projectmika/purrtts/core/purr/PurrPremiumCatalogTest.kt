@@ -37,11 +37,13 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `matcha cartridge carries a verified vocos companion`() {
+    fun `matcha cartridge carries a verified 16khz vocos companion`() {
         val matcha = catalog.first { it.id == "rom_matcha_zh_en" }
-        assertEquals("vocos-22khz-univ.onnx", matcha.companionFileName)
-        assertTrue(matcha.companionUrl.startsWith("https://"))
-        assertTrue("companion sha", matcha.companionExpectedSha256.matches(Regex("[0-9a-f]{64}")))
+        // matcha-icefall-zh-en is a 16kHz model — the vocoder MUST be vocos-16khz-univ
+        // (the 22kHz example vocoder outputs robotic garbage — v1.6.1 scar).
+        assertEquals("vocos-16khz-univ.onnx", matcha.companionFileName)
+        assertTrue(matcha.companionUrl.endsWith("vocos-16khz-univ.onnx"))
+        assertEquals("b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e", matcha.companionExpectedSha256)
         assertEquals(51, matcha.companionApproxSizeMb)
     }
 
