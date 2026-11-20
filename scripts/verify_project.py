@@ -206,7 +206,7 @@ def main() -> int:
             failures.append(f"AndroidManifest.xml missing required entry: {expected}")
 
     # 4. Kotlin file checks (package header + balanced delimiters)
-    kt_files = sorted(ROOT.glob("app/src/**/*.kt"))
+    kt_files = sorted(p for p in ROOT.glob("app/src/**/*.kt") if "third_party" not in p.parts)
     if len(kt_files) < 20:
         failures.append(f"Expected >= 20 Kotlin files, found {len(kt_files)}")
 
