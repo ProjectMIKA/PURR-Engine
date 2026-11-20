@@ -102,7 +102,12 @@ jobs:
           fi
           cp "$APK_SRC" "builds/PURR-Engine_V${VERSION}_Android.apk"
           cp "$APK_SRC" "builds/PURR-TTS_V${VERSION}.apk"
-          keytool -printcert -jarfile "builds/PURR-Engine_V${VERSION}_Android.apk" | grep -E "Owner:|SHA256:"
+          APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
+          if [ -x "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "builds/PURR-Engine_V${VERSION}_Android.apk"
+          else
+            echo "apksigner not found; listing APK META-INF entries"
+          fi
           ls -lh builds/*.apk
 
       - name: Upload Release APK Artifacts
