@@ -46,6 +46,26 @@ class ModelCatalogManager(
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
+    init {
+        // ✨ SELF-HEALING COMPANION MIGRATION (v1.6.1): if a companion spec changed (e.g. the
+        // Matcha vocoder switched 22kHz -> 16kHz), existing INSTALLED cartridges are missing the
+        // new companion file — re-fetch it silently in the background so the engine never mounts
+        // a stale/mismatched asset.
+        scope.launch {
+            catalog.filter { it.companionUrl.isNotBlank() }.forEach { spec ->
+                val state = repository.state.value.modelStates[spec.id] ?: return@forEach
+                if (state.state != DownloadState.INSTALLED) return@forEach
+                val extractDir = resolveSherpaExtractDir(spec)
+                val companion = File(extractDir, spec.companionFileName)
+                if (!companion.exists() || companion.length() == 0L) {
+                    Log.i(TAG, "Companion migration: fetching ${spec.companionFileName} for ${spec.id}")
+                    runCatching { downloadCompanionAsset(spec, extractDir) }
+                        .onFailure { Log.w(TAG, "Companion migration failed for ${spec.id}: ${it.message}") }
+                }
+            }
+        }
+    }
+
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(60, TimeUnit.SECONDS)
@@ -410,6 +430,21 @@ class ModelCatalogManager(
                 )
             }
             extractDir.mkdirs()
+            // ✨ VOCODER HYGIENE (v1.6.1 scar): remove stale vocoder variants (e.g. the wrong-rate
+            // vocos-22khz from v1.6.0) so the engine's first-match vocoder pick can never grab a
+            // mismatched sample rate. The companion IS the authoritative vocoder for this spec.
+            extractDir.listFiles()
+                ?.filter {
+                    it.extension.equals("onnx", ignoreCase = true) &&
+                        it.name != spec.companionFileName &&
+                        (it.name.contains("vocos", ignoreCase = true) ||
+                            it.name.contains("hifigan", ignoreCase = true) ||
+                            it.name.contains("vocoder", ignoreCase = true))
+                }
+                ?.forEach { stale ->
+                    runCatching { stale.delete() }
+                    Log.i(TAG, "Removed stale vocoder variant: ${stale.name}")
+                }
             if (finalFile.exists()) finalFile.delete()
             if (!partFile.renameTo(finalFile)) {
                 partFile.copyTo(finalFile, overwrite = true)
