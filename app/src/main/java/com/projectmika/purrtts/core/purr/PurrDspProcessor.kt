@@ -8,7 +8,9 @@ import kotlin.math.log10
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.pow
+import kotlin.math.roundToInt
 import kotlin.math.sin
+import kotlin.math.sqrt
 import kotlin.math.tanh
 import kotlin.random.Random
 
@@ -404,6 +406,124 @@ object PurrDspProcessor {
             val a3 = y1
 
             out[i] = (((a0 * t + a1) * t + a2) * t + a3).coerceIn(-1.0f, 1.0f)
+        }
+        return out
+    }
+
+    /**
+     * Phase-coherent Waveform Similarity Overlap-Add (WSOLA) time-scaler.
+     * Bypasses 0.94x..1.06x bit-exact to keep default neural studio fidelity pure,
+     * while eliminating robotic metallic phase-comb reverb at faster/slower speeds.
+     */
+    fun timeScaleWsola(
+        samples: FloatArray,
+        rate: Float,
+        sampleRate: Int = SAMPLE_RATE_HZ
+    ): FloatArray {
+        if (rate in 0.94f..1.06f || samples.size < 1024 || sampleRate <= 0) return samples
+        val r = rate.coerceIn(0.60f, 1.75f)
+        var winSize = ((sampleRate * 32) / 1000).coerceIn(256, 1024)
+        if (winSize % 2 != 0) winSize += 1
+        if (samples.size <= winSize + 32) return samples
+
+        val synHop = winSize / 2
+        val tolerance = ((sampleRate * 12) / 1000).coerceIn(64, 384)
+        val maxStart = (samples.size - winSize).coerceAtLeast(0)
+        val outLen = (samples.size / r).roundToInt().coerceAtLeast(winSize)
+
+        val window = FloatArray(winSize) { i ->
+            0.5f * (1f - cos(2.0 * PI * i / winSize).toFloat())
+        }
+        val out = FloatArray(outLen)
+        val norm = FloatArray(outLen)
+
+        var prevBestStart = 0
+        // Seed initial frame cleanly at offset 0
+        for (i in 0 until winSize) {
+            if (i >= outLen || i >= samples.size) break
+            val w = window[i]
+            out[i] += samples[i] * w
+            norm[i] += w
+        }
+
+        var outPos = synHop
+        while (outPos < outLen) {
+            val targetAna = (outPos * r).roundToInt().coerceIn(0, maxStart)
+            val naturalNext = (prevBestStart + synHop).coerceIn(0, maxStart)
+
+            var bestStart = targetAna
+            var natEnergy = 0f
+            for (k in 0 until synHop) {
+                val s = samples[naturalNext + k]
+                natEnergy += s * s
+            }
+
+            if (natEnergy > 1e-6f && maxStart > 0) {
+                var bestCorr = Float.NEGATIVE_INFINITY
+                val minOff = (-tolerance).coerceAtLeast(-targetAna)
+                val maxOff = tolerance.coerceAtMost(maxStart - targetAna)
+
+                // Coarse scan (step 2) over [-tolerance..tolerance] maximizing normalized cross-correlation
+                var coarseBestOff = 0
+                var off = minOff
+                while (off <= maxOff) {
+                    val cand = targetAna + off
+                    var dot = 0f
+                    var candEnergy = 0f
+                    for (k in 0 until synHop) {
+                        val a = samples[naturalNext + k]
+                        val b = samples[cand + k]
+                        dot += a * b
+                        candEnergy += b * b
+                    }
+                    if (candEnergy > 1e-7f) {
+                        val corr = dot / sqrt(natEnergy * candEnergy)
+                        if (corr > bestCorr) {
+                            bestCorr = corr
+                            coarseBestOff = off
+                        }
+                    }
+                    off += 2
+                }
+
+                // Fine ±2 sample refinement around coarse peak
+                val fineStart = (coarseBestOff - 2).coerceAtLeast(minOff)
+                val fineEnd = (coarseBestOff + 2).coerceAtMost(maxOff)
+                bestStart = targetAna + coarseBestOff
+                for (fOff in fineStart..fineEnd) {
+                    val cand = targetAna + fOff
+                    var dot = 0f
+                    var candEnergy = 0f
+                    for (k in 0 until synHop) {
+                        val a = samples[naturalNext + k]
+                        val b = samples[cand + k]
+                        dot += a * b
+                        candEnergy += b * b
+                    }
+                    if (candEnergy > 1e-7f) {
+                        val corr = dot / sqrt(natEnergy * candEnergy)
+                        if (corr > bestCorr) {
+                            bestCorr = corr
+                            bestStart = cand
+                        }
+                    }
+                }
+            }
+
+            for (i in 0 until winSize) {
+                val dst = outPos + i
+                val src = bestStart + i
+                if (dst >= outLen || src >= samples.size) break
+                val w = window[i]
+                out[dst] += samples[src] * w
+                norm[dst] += w
+            }
+            prevBestStart = bestStart
+            outPos += synHop
+        }
+
+        for (i in out.indices) {
+            out[i] = if (norm[i] > 1e-4f) (out[i] / norm[i]).coerceIn(-1f, 1f) else 0f
         }
         return out
     }

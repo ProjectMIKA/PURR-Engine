@@ -371,6 +371,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
                 audioTrack.play()
 
+                var playedAnyAudio = false
+                var showedFallbackToast = false
+                var lastEmptySummary: String? = null
+
                 for (chunk in chunks) {
                     if (!isActive) break
                     when (chunk) {
@@ -387,6 +391,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                         is PurrChunk.Speech -> {
                             val outcome = backendRouter.synthesizeSpeechChunk(chunk, effectiveProfile)
                             if (outcome.pcmFloat24k.isNotEmpty()) {
+                                playedAnyAudio = true
                                 val pcmBytes = PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
                                 var offset = 0
                                 while (offset < pcmBytes.size && isActive) {
@@ -411,16 +416,32 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                                     pitch = chunk.pitch,
                                     preferredPkg = effectiveProfile.proxyConfig.fallbackSystemEnginePackage
                                 )
-                                if (!spoken) {
+                                if (spoken) {
+                                    playedAnyAudio = true
+                                } else {
                                     showToast("Install Google Speech Services or a ROM Cartridge in Tab 3!")
+                                    showedFallbackToast = true
                                     break
                                 }
                             } else {
-                                showToast("No active voice cartridge ready — slam a cartridge in Tab 3!")
-                                break
+                                lastEmptySummary = outcome.engineSummary.ifBlank {
+                                    "No active voice cartridge ready — slam a cartridge in Tab 3!"
+                                }
+                                val fatalMissing = lastEmptySummary.contains("not installed", ignoreCase = true) ||
+                                    lastEmptySummary.contains("not downloaded", ignoreCase = true) ||
+                                    lastEmptySummary.contains("unavailable", ignoreCase = true) ||
+                                    lastEmptySummary.contains("load error", ignoreCase = true)
+                                if (fatalMissing) {
+                                    showToast(lastEmptySummary)
+                                    showedFallbackToast = true
+                                    break
+                                }
                             }
                         }
                     }
+                }
+                if (!playedAnyAudio && !showedFallbackToast && !lastEmptySummary.isNullOrBlank()) {
+                    showToast(lastEmptySummary)
                 }
             } catch (err: Exception) {
                 showToast("Audition error: ${err.message}")

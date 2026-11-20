@@ -278,8 +278,8 @@ class OnnxRuntimeEngine(
 
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
             var pcm = outcome.pcmFloat24k
-            if (speakingRate !in 0.96f..1.04f) {
-                pcm = timeScaleGrain(pcm, speakingRate.coerceIn(0.65f, 1.65f))
+            if (speakingRate !in 0.94f..1.06f) {
+                pcm = PurrDspProcessor.timeScaleWsola(pcm, speakingRate.coerceIn(0.65f, 1.65f), SAMPLE_RATE_HZ)
             }
             if (pitch !in 0.995f..1.005f) {
                 pcm = PurrDspProcessor.shiftPitchCubic(pcm, pitch.coerceIn(0.88f, 1.12f))
@@ -416,17 +416,8 @@ class OnnxRuntimeEngine(
                     val logitsVal = result.get(logitsName).orElse(null) as OnnxTensor
                     val hiddenVal = result.get(hiddenName).orElse(null) as OnnxTensor
 
-                    val logitsShape = logitsVal.info.shape
-                    val vocabSize = logitsShape.last().toInt()
-                    val stepIdx = (logitsShape[1].toInt() - 1).coerceAtLeast(0)
-                    val allLogits = extractFloatArray(logitsVal)
-                    val lastLogits = allLogits.copyOfRange(stepIdx * vocabSize, (stepIdx + 1) * vocabSize)
-
-                    val hShape = hiddenVal.info.shape
-                    val hiddenDim = hShape.last().toInt()
-                    val hStepIdx = (hShape[1].toInt() - 1).coerceAtLeast(0)
-                    val allHidden = extractFloatArray(hiddenVal)
-                    val frameVec = allHidden.copyOfRange(hStepIdx * hiddenDim, (hStepIdx + 1) * hiddenDim)
+                    val lastLogits = extractLastStepVector(logitsVal)
+                    val frameVec = extractLastStepVector(hiddenVal)
 
                     for (outName in outputNames) {
                         if (outName.startsWith("present.")) {
@@ -598,11 +589,9 @@ class OnnxRuntimeEngine(
             }
         }
 
-        val codesSb = StringBuilder(ref.codes.size * 15)
-        for (c in ref.codes) {
-            codesSb.append("<|speech_").append(c).append("|>")
-        }
-        val refCodeIds = tokenizer.encode(codesSb.toString(), addSpecialControlScan = true)
+        val refCodeIds = ref.codes.mapNotNull { c ->
+            tokenizer.tokenToId("<|speech_$c|>")?.toLong()
+        }.toLongArray()
 
         val promptIds = LongArray(3 + textIds.size + refCodeIds.size)
         var p = 0
@@ -637,7 +626,7 @@ class OnnxRuntimeEngine(
         var stepIds = promptIds
         var posStart = 0L
         val minNewTokens = 25
-        val maxNewTokens = (normInput.length * 5 + 140).coerceIn(180, 720)
+        val maxNewTokens = (normInput.length * 5 + 140).coerceIn(150, 480)
 
         for (step in 0 until maxNewTokens) {
             val seqLen = stepIds.size.toLong()
@@ -657,11 +646,7 @@ class OnnxRuntimeEngine(
 
                 backbone.run(feeds).use { result ->
                     val logitsVal = result.get(logitsName).orElse(null) as OnnxTensor
-                    val logitsShape = logitsVal.info.shape
-                    val vocabSize = logitsShape.last().toInt()
-                    val stepIdx = (logitsShape[1].toInt() - 1).coerceAtLeast(0)
-                    val allLogits = extractFloatArray(logitsVal)
-                    val lastLogits = allLogits.copyOfRange(stepIdx * vocabSize, (stepIdx + 1) * vocabSize)
+                    val lastLogits = extractLastStepVector(logitsVal)
 
                     if (generated.size < minNewTokens && speechEnd < lastLogits.size) {
                         lastLogits[speechEnd] = Float.NEGATIVE_INFINITY
@@ -896,11 +881,7 @@ class OnnxRuntimeEngine(
 
                 lm.run(feeds).use { result ->
                     val logitsVal = result.get(logitsName).orElse(null) as OnnxTensor
-                    val logitsShape = logitsVal.info.shape
-                    val vocabSize = logitsShape.last().toInt()
-                    val stepIdx = (logitsShape[1].toInt() - 1).coerceAtLeast(0)
-                    val allLogits = extractFloatArray(logitsVal)
-                    val lastLogits = allLogits.copyOfRange(stepIdx * vocabSize, (stepIdx + 1) * vocabSize)
+                    val lastLogits = extractLastStepVector(logitsVal)
 
                     // Apply repetition_penalty = 1.2f matching ResembleAI reference script
                     for (prevId in penaltyTokens) {
@@ -1206,6 +1187,52 @@ class OnnxRuntimeEngine(
         return copyTensorPayload(tensor).floats ?: FloatArray(0)
     }
 
+    /**
+     * Reads ONLY the final sequence step `[dim]` directly from an ORT `[B, seq, dim]` buffer
+     * (FLOAT / FLOAT16 / BFLOAT16) without allocating the full `[seq * dim]` matrix on heap.
+     * Prevents Android OOM on large vocabularies such as NeuTTS-2E's 217,226-token head.
+     */
+    private fun extractLastStepVector(tensor: OnnxTensor): FloatArray {
+        val info = tensor.info
+        val shape = info.shape
+        if (shape.isEmpty()) return FloatArray(0)
+        val dim = shape.last().toInt().coerceAtLeast(0)
+        if (dim == 0) return FloatArray(0)
+        val seqLen = if (shape.size >= 2) shape[shape.size - 2].toInt().coerceAtLeast(1) else 1
+        val startOffset = (seqLen - 1) * dim
+
+        return when (info.type) {
+            OnnxJavaType.FLOAT -> {
+                val out = FloatArray(dim)
+                val fb = tensor.floatBuffer
+                if (fb != null) {
+                    fb.position(startOffset)
+                    fb.get(out, 0, dim)
+                }
+                out
+            }
+            OnnxJavaType.FLOAT16 -> {
+                val tmp = ShortArray(dim)
+                val sb = tensor.shortBuffer
+                if (sb != null) {
+                    sb.position(startOffset)
+                    sb.get(tmp, 0, dim)
+                }
+                FloatArray(dim) { fp16BitsToFloat(tmp[it]) }
+            }
+            OnnxJavaType.BFLOAT16 -> {
+                val tmp = ShortArray(dim)
+                val sb = tensor.shortBuffer
+                if (sb != null) {
+                    sb.position(startOffset)
+                    sb.get(tmp, 0, dim)
+                }
+                FloatArray(dim) { java.lang.Float.intBitsToFloat(tmp[it].toInt() shl 16) }
+            }
+            else -> FloatArray(0)
+        }
+    }
+
     private fun loadWavMonoFloat24k(wavFile: File): FloatArray {
         if (!wavFile.exists() || wavFile.length() <= 44L) return FloatArray(0)
         return runCatching {
@@ -1235,36 +1262,6 @@ class OnnxRuntimeEngine(
                 PurrDspProcessor.resampleMono(mono, sampleRate, SAMPLE_RATE_HZ)
             }
         }.getOrElse { FloatArray(0) }
-    }
-
-    private fun timeScaleGrain(samples: FloatArray, rate: Float): FloatArray {
-        if (samples.size < 64 || rate in 0.96f..1.04f) return samples
-        val outLen = (samples.size / rate).roundToInt().coerceAtLeast(16)
-        val out = FloatArray(outLen)
-        val winSize = 480
-        val synHop = winSize / 2
-        val anaHop = (synHop * rate).coerceAtLeast(16f)
-        val norm = FloatArray(outLen)
-        var synPos = 0
-        var anaPos = 0f
-        while (synPos < outLen) {
-            val aStart = anaPos.roundToInt().coerceIn(0, (samples.size - 1).coerceAtLeast(0))
-            for (i in 0 until winSize) {
-                val dst = synPos + i
-                val src = aStart + i
-                if (dst >= outLen || src >= samples.size) break
-                val w = 0.5f * (1f - kotlin.math.cos(2.0 * Math.PI * i / winSize).toFloat())
-                out[dst] += samples[src] * w
-                norm[dst] += w
-            }
-            synPos += synHop
-            anaPos += anaHop
-            if (anaPos >= samples.size - 1) break
-        }
-        for (i in out.indices) {
-            if (norm[i] > 1e-4f) out[i] /= norm[i]
-        }
-        return out
     }
 
     private fun resetIdleTimer() {

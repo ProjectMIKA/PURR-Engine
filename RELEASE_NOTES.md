@@ -1,3 +1,24 @@
+# 🌌 PURR-TTS v1.7.1 // Crystal Clear Qwen3, NeuTTS-2E Fix & Module Dock Polish
+
+### ✨ What's New since v1.7.0
+
+Five focused runtime and UI polish fixes from live on-device testing! 🐾✨
+
+* **👑 QWEN3 `0.6B` INSTRUCT FIX + NO MIXED OS FALLBACK**: `Qwen3TtsEngine` now reads `instruct_support` from `model_profile.json` and stops passing sentiment `instruct` phrases to `0.6B CustomVoice` (`instruct_support: false`), preventing LunaVox rejections on emotional chunks (and preventing mixed OS-speech + neural-speech audition transitions or silent drops when `ROM-01` is ejected).
+* **🎙️ ZERO ROBOTIC REVERB ON SPEED ADJUSTMENT (`PurrDspProcessor.timeScaleWsola`)**: Replaced naive unaligned overlap-add scaling in `Qwen3TtsEngine` and `OnnxRuntimeEngine` with phase-coherent **Waveform Similarity Overlap-Add (WSOLA)** and bypassed neutral `0.94x..1.06x` speech rates bit-exact so voices stay crisp and metallic-free everywhere.
+* **🎭 NEUTTS-2E OOM CRASH FIXED**: Added `android:largeHeap="true"`, replaced full-DOM `tokenizer.json` loading with a **zero-AST streaming JSON parser** in `PurrBpeTokenizer`, and extracted only the final sequence step in `OnnxRuntimeEngine` (avoiding 387MB heap spikes on NeuTTS-2E's 217k vocab head) — NeuTTS-2E now renders smoothly without silently failing back to OS voices.
+* **🧩 MODULES WINDOW ICON DOCK**: Replaced the multi-line text switcher inside open module windows with a fixed-height horizontally scrollable bar of mini `MikaOsModuleIcon` SVGs featuring pulsating left/right scroll chevrons whenever more apps exist off-screen.
+* **📡 CRISP `[IDLE]` BADGE & SEAMLESS MARQUEE (`MikaStatusBadge`)**: Fitted the top-right status badge neatly into a `70.dp × 26.dp` capsule aligned with `SET_OS_TTS` & Settings, centered short labels (`[IDLE]`), and upgraded overflowing labels (`[CPU NEON]`, `[NPU ACTIVE]`, VRAM timer) to a smooth continuous marquee loop.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.7.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `15`).
+2. **`PURR-TTS_V1.7.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.7.0 // The Heavy Local Fleet & Clean 8-Bay Hub Rack
 
 ### ✨ What's New since v1.6.2

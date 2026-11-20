@@ -212,15 +212,19 @@ fun TtsForgeScreen(
                         MikaStatusBadge(
                             badge = telemetry.badge,
                             vramCountdownSec = vramSec,
-                            modifier = Modifier.width(84.dp)
+                            modifier = Modifier
+                                .width(70.dp)
+                                .height(26.dp)
                         )
                         Box(
+                            contentAlignment = Alignment.Center,
                             modifier = Modifier
+                                .height(26.dp)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(MikaColors.NeonCyan.copy(alpha = 0.14f))
                                 .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
                                 .clickable(onClick = onOpenSystemTtsSettings)
-                                .padding(horizontal = 8.dp, vertical = 4.dp)
+                                .padding(horizontal = 8.dp)
                         ) {
                             Text(
                                 text = "SET_OS_TTS",
@@ -232,12 +236,13 @@ fun TtsForgeScreen(
                         }
                         // ✨ SETTINGS COG (v1.5.0) — System Settings, Academy replay & links.
                         Box(
+                            contentAlignment = Alignment.Center,
                             modifier = Modifier
+                                .size(26.dp)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(MikaColors.DimText.copy(alpha = 0.12f))
                                 .border(1.dp, MikaColors.DimText.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
                                 .clickable { showSettingsSheet = true }
-                                .padding(6.dp)
                         ) {
                             MikaCyberIcon(type = CyberIconType.SETTINGS_COG, tint = MikaColors.CyanWhite, size = 13.dp)
                         }
