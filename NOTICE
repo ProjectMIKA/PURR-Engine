@@ -45,3 +45,4 @@ NAMING & ATTRIBUTION NOTICE
    - NeuTTS-2E & NeuCodec (neuphonic/neutts-2e, neuphonic/neucodec): Apache License 2.0
    - Soprano-80M (ekwek/Soprano-80M, KevinAHM/soprano-onnx): Apache License 2.0
    - sherpa-onnx (k2-fsa/sherpa-onnx) & MeloTTS (myshell-ai/MeloTTS): Apache 2.0 / MIT License
+   - PdfBox-Android (TomRoush/PdfBox-Android): Apache License 2.0

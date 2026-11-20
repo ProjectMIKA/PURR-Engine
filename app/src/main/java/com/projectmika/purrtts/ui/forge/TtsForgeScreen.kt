@@ -130,6 +130,7 @@ fun TtsForgeScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showAcademy by remember { mutableStateOf(false) }
     var academyPatchnotesOnly by remember { mutableStateOf(false) }
+    var requestedOsToolId by remember { mutableStateOf<String?>(null) }
 
     // ✨ MIKA'S ACADEMY GATE (v1.5.0): first launch => full walkthrough; returning user on
     // older tutorial content => patchnotes popup once per TUTORIAL_VERSION bump.
@@ -492,7 +493,10 @@ fun TtsForgeScreen(
                                                         ),
                                                         modifier = Modifier.fillMaxWidth()
                                                     )
-                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                    FlowRow(
+                                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                                        verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                    ) {
                                                         listOf(
                                                             "Warm Anime" to "Warm, expressive young woman with crisp close-mic clarity and playful cadence",
                                                             "Cinema Narrator" to "Deep, resonant baritone narrator with calm studio warmth and slow deliberate pacing",
@@ -505,6 +509,17 @@ fun TtsForgeScreen(
                                                                 onClick = { viewModel.updateVoiceDesignPrompt(chipPrompt) }
                                                             )
                                                         }
+                                                        MikaTagPill(
+                                                            label = "OPEN VOICEDESIGN STUDIO",
+                                                            selected = true,
+                                                            activeColor = MikaColors.NeonCyan,
+                                                            leadingIcon = CyberIconType.WRENCH_TOOL,
+                                                            onClick = {
+                                                                viewModel.repository.setCartridgeSlotted("tool_voice_design", true)
+                                                                requestedOsToolId = "tool_voice_design"
+                                                                activeTab = PurrTab.MODULES.ordinal
+                                                            }
+                                                        )
                                                     }
                                                 }
                                             }
@@ -723,7 +738,13 @@ fun TtsForgeScreen(
                                         onOpenCartridgeBayTools = {
                                             cartridgeBayCategory = CartridgeCategory.TOOLS
                                             activeTab = PurrTab.CARTRIDGE_BAY.ordinal
-                                        }
+                                        },
+                                        onOpenCartridgeBayTts = {
+                                            cartridgeBayCategory = CartridgeCategory.TTS
+                                            activeTab = PurrTab.CARTRIDGE_BAY.ordinal
+                                        },
+                                        requestedToolId = requestedOsToolId,
+                                        onConsumeRequestedTool = { requestedOsToolId = null }
                                     )
                                 }
                             }

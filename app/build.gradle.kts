@@ -13,8 +13,8 @@ android {
         applicationId = "com.projectmika.purrtts"
         minSdk = 26
         targetSdk = 35
-        versionCode = 15
-        versionName = "1.7.1"
+        versionCode = 16
+        versionName = "1.8.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -140,6 +140,7 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
     implementation(libs.commons.compress)
+    implementation(libs.pdfbox.android)
 
     // Primary Hardware-Accelerated Runtime: Google AI Edge LiteRT-LM / MediaPipe Tasks Audio
     implementation(libs.mediapipe.tasks.audio)

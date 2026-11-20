@@ -7,6 +7,7 @@ import com.projectmika.purrtts.core.purr.DspConfig
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
+import com.projectmika.purrtts.core.purr.PurrNeuralBypass
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrProfileRepository
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
@@ -180,10 +181,9 @@ class TtsBackendRouter(
         }
 
         val dspModuleOn = repository.isDspModuleActive()
-        val effectiveDspConfig = if (dspModuleOn) {
-            profile.dspConfig
-        } else {
-            DspConfig(
+        val neuralPureActive = PurrNeuralBypass.shouldBypassEnhancers(profile, repository.state.value.clonedVoices)
+        val effectiveDspConfig = when {
+            !dspModuleOn -> DspConfig(
                 warmthEqDb = 0f,
                 presenceEqDb = 0f,
                 reverbWetMix = 0f,
@@ -192,6 +192,17 @@ class TtsBackendRouter(
                 antiPopFadeInMs = 0,
                 normalizePeak = false
             )
+            neuralPureActive && profile.dspConfig.effectPreset in setOf(AcousticEffectPreset.NONE, AcousticEffectPreset.WARM_STUDIO) ->
+                DspConfig(
+                    warmthEqDb = 0f,
+                    presenceEqDb = 0f,
+                    reverbWetMix = 0f,
+                    effectPreset = AcousticEffectPreset.NONE,
+                    enableSentenceTaper = false,
+                    antiPopFadeInMs = 10,
+                    normalizePeak = false
+                )
+            else -> profile.dspConfig
         }
 
         val processedPcm = PurrDspProcessor.process(

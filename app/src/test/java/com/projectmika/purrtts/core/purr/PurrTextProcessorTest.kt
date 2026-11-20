@@ -273,7 +273,7 @@ class PurrTextProcessorTest {
     }
 
     @Test
-    fun `catalog includes kittentts 6 piper expansion packs and 5 default-on tool cartridges`() {
+    fun `catalog includes kittentts 6 piper expansion packs and 7 default-on tool cartridges`() {
         val catalog = PurrDefaultPresets.modelCatalog()
         val voices = PurrDefaultPresets.builtInVoices()
         val defaultState = PurrForgeState()
@@ -292,11 +292,63 @@ class PurrTextProcessorTest {
             "tool_dsp_rack",
             "tool_symbol_shield",
             "tool_clone_studio",
-            "tool_audio_exporter"
+            "tool_audio_exporter",
+            "tool_voice_design",
+            "tool_audiobook_constructor"
         )
         val tools = catalog.filter { it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
         assertTrue(expectedTools.all { it in defaultState.slottedCartridges })
+    }
+
+    @Test
+    fun `neural pure mode auto bypasses slang stutters and comma chopping for heavyweight neural models`() {
+        val sample = "O-oh, wait... omg fr Mika-senpai, \"Are you serious right now?!\" nya~"
+        val qwenProfile = defaultProfile.copy(
+            selectedCartridgeId = "rom_qwen3_custom_06b",
+            preferredBackend = BackendType.QWEN3_NATIVE,
+            primaryVoiceId = "qwen3_vivian",
+            autoBypassEnhancersForNeuralModels = true
+        )
+        assertTrue(PurrNeuralBypass.shouldBypassEnhancers(qwenProfile))
+
+        val qwenChunks = PurrTextProcessor.process(sample, qwenProfile)
+        val qwenSpeech = qwenChunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        val qwenSilences = qwenChunks.filterIsInstance<PurrChunk.Silence>()
+
+        // No slang expansion, stutter phoneticizing, honorific mangling, or comma micro-slicing
+        assertFalse(qwenSpeech.contains("oh my god", ignoreCase = true))
+        assertFalse(qwenSpeech.contains("for real", ignoreCase = true))
+        assertFalse(qwenSpeech.contains("sen-pie", ignoreCase = true))
+        assertFalse(qwenSpeech.contains("oh-oh", ignoreCase = true))
+        assertTrue(qwenSpeech.contains("omg"))
+        assertTrue(qwenSpeech.contains(","))
+        assertTrue(qwenSpeech.contains("\"Are you serious right now?!\""))
+        assertEquals(0, qwenSilences.size)
+
+        // Flagship user override works: turning off Neural Pure re-enables classic PURR middleware
+        val overrideChunks = PurrTextProcessor.process(
+            sample,
+            qwenProfile.copy(autoBypassEnhancersForNeuralModels = false)
+        )
+        val overrideSpeech = overrideChunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        assertTrue(overrideSpeech.contains("oh my god", ignoreCase = true))
+
+        // Standard lightweight engines still keep full PURR enhancements on by default
+        assertFalse(PurrNeuralBypass.shouldBypassEnhancers(defaultProfile))
+        val kokoroInt8 = defaultProfile.copy(
+            selectedCartridgeId = "rom_kokoro_sherpa",
+            preferredBackend = BackendType.SHERPA_ONNX,
+            primaryVoiceId = "af_bella"
+        )
+        assertFalse(PurrNeuralBypass.shouldBypassEnhancers(kokoroInt8))
+
+        val neuttsProfile = defaultProfile.copy(
+            selectedCartridgeId = "rom_neutts_2e",
+            preferredBackend = BackendType.ONNX_NATIVE,
+            primaryVoiceId = "neutts_emily"
+        )
+        assertTrue(PurrNeuralBypass.shouldBypassEnhancers(neuttsProfile))
     }
 
     @Test

@@ -209,7 +209,8 @@ class PurrTtsService : TextToSpeechService() {
             customRules = repo.state.value.customPhoneticRules,
             purrModuleActive = repo.isPurrEngineModuleActive(),
             symbolShieldModuleActive = repo.isSymbolShieldModuleActive(),
-            isChatterboxVoice = isCbVoice
+            isChatterboxVoice = isCbVoice,
+            clonedVoices = repo.state.value.clonedVoices
         )
 
         val useFloat32 = profile.dspConfig.useFloat32Callback

@@ -60,14 +60,33 @@ jobs:
       - name: Verify project manifests & structure
         run: python3 scripts/verify_project.py
 
-      - name: Generate Release Signing Keystore
+      - name: Prepare Persistent Release Signing Keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.PURR_RELEASE_KEYSTORE_B64 }}
+          KS_PASS: ${{ secrets.PURR_KEYSTORE_PASS }}
+          KS_ALIAS: ${{ secrets.PURR_KEY_ALIAS }}
+          K_PASS: ${{ secrets.PURR_KEY_PASS }}
         run: |
-          keytool -genkeypair -v \
-            -keystore release.keystore \
-            -alias purrtts \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass purrtts -keypass purrtts \
-            -dname "CN=Project MIKA, OU=PURR Engine, O=ProjectMIKA, L=Cyber, S=Matrix, C=US"
+          if [ -n "$KEYSTORE_B64" ]; then
+            printf '%s' "$KEYSTORE_B64" | base64 -d > release.keystore
+            echo "KEYSTORE_PASS=$KS_PASS" >> "$GITHUB_ENV"
+            echo "KEY_ALIAS=$KS_ALIAS" >> "$GITHUB_ENV"
+            echo "KEY_PASS=$K_PASS" >> "$GITHUB_ENV"
+            keytool -list -v -keystore release.keystore -storepass "$KS_PASS" -alias "$KS_ALIAS" \
+              | grep -E "Alias name:|Signature algorithm|SHA256:"
+            echo "Using persistent release signing keystore (in-place upgrades preserved)."
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "Error: PURR_RELEASE_KEYSTORE_B64 secret missing on tagged release build!" >&2
+            exit 1
+          else
+            echo "No persistent keystore secret configured (e.g. PR); generating ephemeral test keystore."
+            keytool -genkeypair -v \
+              -keystore release.keystore \
+              -alias purrtts \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -storepass purrtts -keypass purrtts \
+              -dname "CN=Project MIKA, OU=PURR Engine, O=ProjectMIKA, L=Cyber, S=Matrix, C=US"
+          fi
 
       - name: Run JVM unit tests & build signed Release APK
         run: gradle testDebugUnitTest assembleRelease --no-daemon --stacktrace
@@ -83,6 +102,7 @@ jobs:
           fi
           cp "$APK_SRC" "builds/PURR-Engine_V${VERSION}_Android.apk"
           cp "$APK_SRC" "builds/PURR-TTS_V${VERSION}.apk"
+          keytool -printcert -jarfile "builds/PURR-Engine_V${VERSION}_Android.apk" | grep -E "Owner:|SHA256:"
           ls -lh builds/*.apk
 
       - name: Upload Release APK Artifacts

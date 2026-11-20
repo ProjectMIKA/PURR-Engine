@@ -69,6 +69,7 @@ import com.projectmika.purrtts.core.purr.CommaHandlingMode
 import com.projectmika.purrtts.core.purr.ExportedAudioFile
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrForgeState
+import com.projectmika.purrtts.core.purr.PurrNeuralBypass
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.RuleCategory
@@ -131,12 +132,28 @@ private enum class ActiveOsModule(
         badge = "TOOL-05",
         iconType = OsModuleIconType.AUDIO_EXPORTER,
         accent = MikaColors.SsrGold
+    ),
+    VOICE_DESIGN(
+        toolCartridgeId = "tool_voice_design",
+        title = "QWEN3 VOICEDESIGN STUDIO",
+        subtitle = "1.7B Structured Prompt Lab",
+        badge = "TOOL-06",
+        iconType = OsModuleIconType.VOICE_DESIGN,
+        accent = MikaColors.NeonPink
+    ),
+    AUDIOBOOK_CONSTRUCTOR(
+        toolCartridgeId = "tool_audiobook_constructor",
+        title = "AUDIOBOOK CONSTRUCTOR",
+        subtitle = "EPUB/PDF/TXT -> Chaptered .M4B",
+        badge = "TOOL-07",
+        iconType = OsModuleIconType.AUDIOBOOK_CONSTRUCTOR,
+        accent = MikaColors.NeonCyan
     )
 }
 
 /**
  * ✨ TAB 2: CYBERDECK OS MODULES DESKTOP & WINDOW LAUNCHER ✨
- * Displays slotted Tool Cartridges (`TOOL-01`..`TOOL-04`) as custom OS vector icons.
+ * Displays slotted Tool Cartridges (`TOOL-01`..`TOOL-07`) as custom OS vector icons.
  * Clicking an icon plays an animated window launch transition and opens that module's terminal window.
  */
 @OptIn(ExperimentalLayoutApi::class)
@@ -149,12 +166,24 @@ fun PurrRulebookTab(
     viewModel: TtsForgeViewModel,
     onOpenSaveDialog: () -> Unit,
     onOpenCloneStudio: () -> Unit,
-    onOpenCartridgeBayTools: () -> Unit
+    onOpenCartridgeBayTools: () -> Unit,
+    onOpenCartridgeBayTts: () -> Unit,
+    requestedToolId: String? = null,
+    onConsumeRequestedTool: () -> Unit = {}
 ) {
     val activeModules = remember(forgeState.slottedCartridges) {
         ActiveOsModule.entries.filter { it.toolCartridgeId in forgeState.slottedCartridges }
     }
     var openedModule by remember { mutableStateOf<ActiveOsModule?>(null) }
+
+    LaunchedEffect(requestedToolId, activeModules) {
+        if (requestedToolId != null) {
+            activeModules.firstOrNull { it.toolCartridgeId == requestedToolId }?.let {
+                openedModule = it
+            }
+            onConsumeRequestedTool()
+        }
+    }
 
     // If the user ejects a Tool Cartridge from Cartridge Bay while its window is open, close the window.
     LaunchedEffect(activeModules) {
@@ -228,6 +257,8 @@ fun PurrRulebookTab(
                                                 ActiveOsModule.SYMBOL_SHIELD -> if (activeProfile.enableSymbolShield) "SHIELD ACTIVE" else "BYPASSED"
                                                 ActiveOsModule.CLONE_STUDIO -> "${forgeState.clonedVoices.size} CLONED"
                                                 ActiveOsModule.AUDIO_EXPORTER -> "${forgeState.exportedAudioFiles.size} EXPORTS"
+                                                ActiveOsModule.VOICE_DESIGN -> "${forgeState.savedVoiceDesigns.size} DESIGNS"
+                                                ActiveOsModule.AUDIOBOOK_CONSTRUCTOR -> "EPUB/PDF -> .M4B"
                                             },
                                             onClick = { openedModule = mod }
                                         )
@@ -460,6 +491,18 @@ fun PurrRulebookTab(
                                     isPlayingPreview = isPlayingPreview,
                                     viewModel = viewModel
                                 )
+                                ActiveOsModule.VOICE_DESIGN -> VoiceDesignModuleWindowBody(
+                                    forgeState = forgeState,
+                                    activeProfile = activeProfile,
+                                    isPlayingPreview = isPlayingPreview,
+                                    viewModel = viewModel,
+                                    onOpenCartridgeBayTts = onOpenCartridgeBayTts
+                                )
+                                ActiveOsModule.AUDIOBOOK_CONSTRUCTOR -> AudiobookConstructorModuleWindowBody(
+                                    activeProfile = activeProfile,
+                                    isPlayingPreview = isPlayingPreview,
+                                    viewModel = viewModel
+                                )
                             }
                         }
                     }
@@ -666,6 +709,7 @@ private fun PurrEngineModuleWindowBody(
     }
 
     // 2. Core PURR Text & Acting Toggles
+    val neuralPureActive = PurrNeuralBypass.shouldBypassEnhancers(activeProfile, forgeState.clonedVoices)
     MikaGlowPanel(accent = MikaColors.TerminalGreen) {
         Text(
             text = "> CORE_PURR_TEXT_CONTROLS",
@@ -675,6 +719,36 @@ private fun PurrEngineModuleWindowBody(
             fontSize = 11.sp
         )
         Spacer(modifier = Modifier.height(6.dp))
+        SimplePurrToggle(
+            title = "Neural Pure Mode (Flagship Auto-Bypass)",
+            subtitle = "Auto-disables slang, stutters, comma-chopping & EQ coloring on Qwen3, NeuTTS-2E, Chatterbox, Soprano & Studio FP32 voices.",
+            checked = activeProfile.autoBypassEnhancersForNeuralModels,
+            accent = MikaColors.NeonCyan,
+            icon = CyberIconType.BOLT_ACCEL,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(autoBypassEnhancersForNeuralModels = v) } }
+        )
+        if (neuralPureActive) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 4.dp)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(MikaColors.NeonCyan.copy(alpha = 0.12f))
+                    .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.6f), RoundedCornerShape(6.dp))
+                    .padding(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MikaCyberIcon(type = CyberIconType.SHIELD_GUARD, tint = MikaColors.NeonCyan, size = 12.dp)
+                Text(
+                    text = "NEURAL PURE ACTIVE: Enhancers bypassed for clean speech on ${activeProfile.primaryVoiceId.substringAfter(':')}.",
+                    color = MikaColors.NeonCyan,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.sp,
+                    lineHeight = 12.5.sp
+                )
+            }
+        }
         SimplePurrToggle(
             title = "Slang, Honorifics & Stutters",
             subtitle = "Expands 'omg', 'fr', '-senpai', 'nya~' & 'w-what' cleanly.",
@@ -1753,7 +1827,7 @@ private fun ChunkPreviewBox(previewChunks: List<PurrChunk>) {
 }
 
 @Composable
-private fun SimplePurrToggle(
+internal fun SimplePurrToggle(
     title: String,
     subtitle: String,
     checked: Boolean,
@@ -1803,7 +1877,7 @@ private fun SimplePurrToggle(
 }
 
 @Composable
-private fun TerminalSlider(
+internal fun TerminalSlider(
     label: String,
     valueText: String,
     value: Float,

@@ -93,7 +93,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.7.1 // Qwen3 Clarity, NeuTTS-2E Fix & Module Dock Polish)
+### 🌟 Latest Updates (v1.8.0 // Audiobook Constructor (.M4B), VoiceDesign Studio & Persistent Signing)
+
+* **Audiobook Constructor (`TOOL-07`):** Import `EPUB`, `PDF`, `TXT`, `MD`, `HTML`, `DOCX`, or `FB2` ebooks, select/edit chapters, synthesize per-chapter with Pause/Resume checkpoints across restarts, and mux into a universal **chaptered `.M4B` audiobook** (`MediaCodec` AAC + Nero `chpl` & iTunes audiobook atoms).
+* **Qwen3 VoiceDesign Studio (`TOOL-06`):** Dedicated Cyberdeck OS prompt builder for `Qwen3-TTS 1.7B VoiceDesign` covering Gender, Age, Pitch, multi-select Timbre, Pace, Emotion Delivery, Accent/Language, Mic Acoustics, curated templates, saved presets, and Design→Clone identity locking.
+* **Qwen3 Clone `NhwcFused` Crash Fixed:** Switched Android ARM64 ORT CPU EP to `ORT_ENABLE_BASIC` in `provider_policy_android.cpp`, resolving the `speaker_encoder.fp16.onnx` `NhwcFused` inference error.
+* **Neural Pure Mode + Clone Studio Dropdown + Persistent Keystore:** Auto-disables intrusive PURR enhancers on flagship neural TTS models, upgrades Clone Studio to a sleek `CyberDropdown`, and pins a permanent release signing certificate for seamless future in-place APK upgrades (`TUTORIAL_VERSION = 4`).
+
+### 📦 Prior Releases (v1.7.1 // Qwen3 Clarity, NeuTTS-2E Fix & Module Dock Polish)
 
 * **Qwen3 `instruct_support` Fix & Zero Mixed Fallback:** `Qwen3TtsEngine` reads `instruct_support` from `model_profile.json` so `0.6B CustomVoice` never fails on emotional chunks and stops mixing stock OS speech into neural tests.
 * **WSOLA Studio Speed Scaling:** Replaced naive grain overlap-add with pitch-synchronous `PurrDspProcessor.timeScaleWsola` (bit-exact bypass for `0.94x..1.06x`), eliminating metallic reverb on Qwen3 & ONNX voices.

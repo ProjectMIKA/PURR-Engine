@@ -14,7 +14,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -36,6 +38,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.VoiceGender
+import com.projectmika.purrtts.ui.theme.CyberDropdown
 import com.projectmika.purrtts.ui.theme.CyberIconType
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaCyberIcon
@@ -50,16 +53,17 @@ private data class CloneEngineOption(
     val id: String,
     val label: String,
     val family: SherpaModelFamily,
-    val windowSec: Int
+    val windowSec: Int,
+    val badge: String
 )
 
 private val CLONE_ENGINE_OPTIONS = listOf(
-    CloneEngineOption("rom_pocket_tts", "Pocket INT8 (5s)", SherpaModelFamily.POCKET_TTS, 5),
-    CloneEngineOption("sub_pocket_fp32", "Pocket FP32 (5s)", SherpaModelFamily.POCKET_TTS, 5),
-    CloneEngineOption("rom_zipvoice", "ZipVoice INT8 (12s)", SherpaModelFamily.ZIPVOICE, 12),
-    CloneEngineOption("sub_zipvoice_full", "ZipVoice Full (12s)", SherpaModelFamily.ZIPVOICE, 12),
-    CloneEngineOption("sub_chatterbox_turbo", "Chatterbox 350M", SherpaModelFamily.POCKET_TTS, 12),
-    CloneEngineOption("sub_qwen3_base_06b", "Qwen3 0.6B Base", SherpaModelFamily.ZIPVOICE, 12)
+    CloneEngineOption("rom_pocket_tts", "Pocket INT8 (5s)", SherpaModelFamily.POCKET_TTS, 5, "FAST INT8"),
+    CloneEngineOption("sub_pocket_fp32", "Pocket FP32 (5s)", SherpaModelFamily.POCKET_TTS, 5, "STUDIO FP32"),
+    CloneEngineOption("rom_zipvoice", "ZipVoice INT8 (12s)", SherpaModelFamily.ZIPVOICE, 12, "FLOW INT8"),
+    CloneEngineOption("sub_zipvoice_full", "ZipVoice Full (12s)", SherpaModelFamily.ZIPVOICE, 12, "FLOW FULL"),
+    CloneEngineOption("sub_chatterbox_turbo", "Chatterbox 350M (12s)", SherpaModelFamily.POCKET_TTS, 12, "PARALINGUISTIC"),
+    CloneEngineOption("sub_qwen3_base_06b", "Qwen3 0.6B Base (12s)", SherpaModelFamily.ZIPVOICE, 12, "10-LANG 3S")
 )
 
 @Composable
@@ -95,6 +99,7 @@ fun VoiceCloneStudioSheet(
                 .clip(RoundedCornerShape(14.dp))
                 .background(MikaColors.PanelBg)
                 .border(1.5.dp, MikaColors.NeonPurple, RoundedCornerShape(14.dp))
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
@@ -128,25 +133,14 @@ fun VoiceCloneStudioSheet(
                 fontSize = 10.sp
             )
 
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                CLONE_ENGINE_OPTIONS.chunked(2).forEach { pair ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        pair.forEach { opt ->
-                            Box(modifier = Modifier.weight(1f)) {
-                                MikaTagPill(
-                                    label = opt.label,
-                                    selected = selectedEngine.id == opt.id,
-                                    activeColor = MikaColors.NeonPurple,
-                                    onClick = { selectedEngine = opt }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
+            CyberDropdown(
+                label = "> CLONE_ENGINE_TARGET",
+                options = CLONE_ENGINE_OPTIONS,
+                selectedOption = selectedEngine,
+                optionLabel = { opt -> "${opt.label} • ${opt.badge}" },
+                onSelect = { selectedEngine = it },
+                accent = MikaColors.NeonPurple
+            )
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 VoiceGender.entries.forEach { g ->
