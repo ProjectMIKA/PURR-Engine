@@ -2100,7 +2100,7 @@ object PurrDefaultPresets {
             accentHex = 0xFFB533FF,
             name = "VOICE_CLONE_STUDIO",
             subtitle = "3-12s Zero-Shot Mic Reference Recorder & Cloner Workshop",
-            description = "Dedicated studio OS app for recording & registering custom zero-shot cloned voices across Pocket TTS, ZipVoice, Chatterbox-Turbo (ROM-03) and Qwen3-TTS Base (ROM-04).",,
+            description = "Dedicated studio OS app for recording & registering custom zero-shot cloned voices across Pocket TTS, ZipVoice, Chatterbox-Turbo (ROM-03) and Qwen3-TTS Base (ROM-04).",
             backend = BackendType.CORE_OS,
             downloadUrl = "builtin://tool/clone_studio",
             fileName = "clone_studio.tool",
