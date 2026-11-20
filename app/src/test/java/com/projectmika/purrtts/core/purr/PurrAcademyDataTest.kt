@@ -46,17 +46,18 @@ class PurrAcademyDataTest {
 
     @Test
     fun `older seen version auto opens patchnotes exactly once`() {
+        // seen == 0 is ALWAYS a first launch (full walkthrough), regardless of TUTORIAL_VERSION.
         assertEquals(false, PurrUpdateGate.shouldAutoOpenPatchnotes(0))
         assertEquals(false, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION))
         assertEquals(false, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION + 5))
-        // A "returning user on older content" only exists once content has bumped at least
-        // twice: at TUTORIAL_VERSION == 1, the only unseen value is 0 == never launched.
+
+        // 0 < seen < TUTORIAL_VERSION => returning user on older content => patchnotes once.
+        // Only exists once content has bumped at least twice (TUTORIAL_VERSION >= 2):
+        // at TUTORIAL_VERSION == 1 the only unseen value is 0 == never launched.
         if (TUTORIAL_VERSION >= 2) {
             assertEquals(true, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION - 1))
-            assertEquals(true, PurrUpdateGate.shouldAutoOpenPatchnotes(TUTORIAL_VERSION - 2))
             assertEquals(AcademyEntry.PATCHNOTES_ONLY, PurrUpdateGate.resolveEntry(TUTORIAL_VERSION - 1))
         } else {
-            // TUTORIAL_VERSION == 1: seen 0 is a first launch, nothing older exists.
             assertEquals(false, PurrUpdateGate.shouldAutoOpenPatchnotes(0))
             assertEquals(AcademyEntry.FULL_TUTORIAL, PurrUpdateGate.resolveEntry(0))
         }
