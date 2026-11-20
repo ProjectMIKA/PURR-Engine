@@ -589,9 +589,11 @@ class OnnxRuntimeEngine(
             }
         }
 
-        val refCodeIds = ref.codes.mapNotNull { c ->
-            tokenizer.tokenToId("<|speech_$c|>")?.toLong()
-        }.toLongArray()
+        val refCodeList = ArrayList<Long>(ref.codes.size)
+        for (c in ref.codes) {
+            tokenizer.tokenToId("<|speech_$c|>")?.let { refCodeList.add(it.toLong()) }
+        }
+        val refCodeIds = refCodeList.toLongArray()
 
         val promptIds = LongArray(3 + textIds.size + refCodeIds.size)
         var p = 0
