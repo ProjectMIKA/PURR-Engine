@@ -14,7 +14,7 @@ package com.projectmika.purrtts.core.purr
  */
 
 /** Bump alongside versionName in app/build.gradle.kts whenever tutorial content changes. */
-const val TUTORIAL_VERSION = 3
+const val TUTORIAL_VERSION = 4
 
 const val PURR_REPO_URL = "https://github.com/ProjectMIKA/PURR-Engine"
 const val PURR_KOFI_URL = "https://ko-fi.com/projectmika"
@@ -92,38 +92,38 @@ val PURR_TUTORIAL_STEPS: List<PurrTutorialStep> = listOf(
         iconGlyph = "⚙️",
         title = "MODULES_AND_SETTINGS",
         colorHex = 0xFFFF9100,
-        body = "The MODULES tab carries ejectable tool cartridges — the AUDIO_MEDIA_EXPORTER renders whole audiobook chapters into mastered WAV files in your Downloads folder. And the little cog beside SET_OS_TTS opens SYSTEM_SETTINGS: replay this academy anytime, jump to the source repository, or throw Ko-fi beans at the engineer. Purrject funded, purrject continued~"
+        body = "The MODULES tab carries 7 ejectable OS Tool Cartridges — including QWEN3 VOICEDESIGN STUDIO for prompt-sculpted voices, the resumable AUDIOBOOK CONSTRUCTOR (.epub/.pdf/.txt -> chaptered .m4b!), and AUDIO_MEDIA_EXPORTER (.WAV downloads). The cog beside SET_OS_TTS opens SYSTEM_SETTINGS to replay this academy or grab source/Ko-fi links~"
     )
 )
 
 val PURR_WHATS_NEW: List<PurrWhatsNewEntry> = listOf(
     PurrWhatsNewEntry(
-        id = "QWEN3_TTS_NATIVE",
-        iconGlyph = "👑",
-        colorHex = 0xFFFFD700,
-        title = "QWEN3_TTS_NATIVE_JNI",
-        body = "ROM-04 runs Alibaba Qwen3-TTS completely offline via llama.cpp GGUF + ORT 1.31.1 JNI! Get 9 multilingual speakers on 0.6B CustomVoice (Vivian, Serena, Ryan, Aiden, Ono Anna, Sohee...), 3s multilingual voice cloning with 0.6B Base, or prompt-directed VoiceDesign with 1.7B!"
-    ),
-    PurrWhatsNewEntry(
-        id = "CHATTERBOX_NEUTTS_EMOTION",
-        iconGlyph = "🎭",
-        colorHex = 0xFFFF107A,
-        title = "CHATTERBOX_&_NEUTTS_2E",
-        body = "SUB-03E brings Resemble AI Chatterbox-Turbo 350M Q4 with native [laugh], [chuckle], [sigh], [gasp], [whispering] paralinguistics (*laughs* auto-maps!). ROM-05 brings NeuTTS-2E Emotional where PURR Sentiment drives <|HAPPY|>, <|SAD|>, <|ANGRY|> & <|SURPRISED|> tokens!"
-    ),
-    PurrWhatsNewEntry(
-        id = "SOPRANO_32KHZ_MELO",
-        iconGlyph = "✨",
+        id = "AUDIOBOOK_CONSTRUCTOR_M4B",
+        iconGlyph = "📚",
         colorHex = 0xFF38BDF8,
-        title = "SOPRANO_32KHZ_&_HEAVY_UPGRADES",
-        body = "ROM-06 Soprano-80M emits ultra-fast 32kHz Vocos studio audio! Plus KittenTTS Mini 80M (SUB-07A), MeloTTS 5-accent English (SUB-08G), Pocket FP32 Studio (SUB-03B), and ZipVoice Full Non-Distilled (SUB-03D)!"
+        title = "AUDIOBOOK_CONSTRUCTOR_(.M4B)",
+        body = "New TOOL-07 imports EPUB, PDF, TXT, MD, HTML, DOCX & FB2 ebooks, splits them into selectable chapters, pauses & resumes seamlessly across restarts, and muxes finished chapters into a universal chaptered .M4B audiobook!"
     ),
     PurrWhatsNewEntry(
-        id = "EIGHT_BAY_HUB_RACK",
-        iconGlyph = "🧩",
+        id = "QWEN3_VOICEDESIGN_STUDIO",
+        iconGlyph = "🎨",
+        colorHex = 0xFFFF007F,
+        title = "QWEN3_VOICEDESIGN_STUDIO",
+        body = "New TOOL-06 lets you sculpt Qwen3 1.7B voices with Gender, Age, Pitch, Timbre, Pace, Delivery, Accent & Mic Acoustics knobs, save custom VoiceDesign presets, or freeze one into a locked Clone Voice!"
+    ),
+    PurrWhatsNewEntry(
+        id = "NEURAL_PURE_&_QWEN_CLONE_FIX",
+        iconGlyph = "🧠",
         colorHex = 0xFF00FF41,
-        title = "CLEAN_8_BAY_HUB_RACK",
-        body = "Kokoro variants now nest under ROM-02, all 5 Clone engines nest under ROM-03, Kitten Nano/Mini share ROM-07, and Piper/MeloTTS/Matcha/Supertonic unite under ROM-08. Clone Studio supports all 6 zero-shot cloning engines!"
+        title = "NEURAL_PURE_&_QWEN_CLONE_FIX",
+        body = "Fixed the Qwen3 0.6B Base Speaker Encoder NhwcFused crash, added Neural Pure Mode (auto-disabling intrusive slang/stutter/comma slicing on flagship neural models), and upgraded Clone Studio with a sleek dropdown!"
+    ),
+    PurrWhatsNewEntry(
+        id = "PERSISTENT_SIGNING_UPGRADES",
+        iconGlyph = "🔐",
+        colorHex = 0xFFFFD700,
+        title = "PERMANENT_RELEASE_SIGNING",
+        body = "Future APK releases starting from v1.8.0 now share a permanent signing key — seamless in-place APK upgrades forever without wiping models or profiles!"
     )
 )
 

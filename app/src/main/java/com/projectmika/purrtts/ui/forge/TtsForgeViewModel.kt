@@ -15,6 +15,9 @@ import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.projectmika.purrtts.PurrApplication
+import com.projectmika.purrtts.core.audiobook.AudiobookChapter
+import com.projectmika.purrtts.core.audiobook.AudiobookProject
+import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.DownloadState
@@ -30,12 +33,16 @@ import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.RuleCategory
+import com.projectmika.purrtts.core.purr.SavedVoiceDesign
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
+import com.projectmika.purrtts.core.purr.VoiceDesignSpec
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.engine.CloneClipImporter
 import com.projectmika.purrtts.engine.TtsBackendRouter
+import com.projectmika.purrtts.engine.audiobook.AudiobookConstructorManager
+import com.projectmika.purrtts.engine.qwen3.Qwen3TtsEngine
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -72,6 +79,14 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val repository = app.repository
     val backendRouter = app.backendRouter
     val catalogManager = app.modelCatalogManager
+    val audiobookManager = app.audiobookManager
+
+    val audiobookProjects: StateFlow<List<AudiobookProject>> = audiobookManager.projects
+    val activeAudiobookId: StateFlow<String?> = audiobookManager.activeProjectId
+    val isBuildingAudiobook: StateFlow<Boolean> = audiobookManager.isBuilding
+    val isCombiningAudiobook: StateFlow<Boolean> = audiobookManager.isCombining
+    val audiobookStatusLabel: StateFlow<String> = audiobookManager.statusLabel
+    val audiobookProgress: StateFlow<Float> = audiobookManager.overallProgress
 
     val forgeState: StateFlow<PurrForgeState> = repository.state
     val discoveredSystemVoices: StateFlow<List<VoiceDescriptor>> = repository.discoveredSystemVoices
@@ -193,12 +208,124 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             customRules = rules,
             purrModuleActive = repository.isPurrEngineModuleActive(),
             symbolShieldModuleActive = repository.isSymbolShieldModuleActive(),
-            isChatterboxVoice = isChatterboxVoiceActive(profile)
+            isChatterboxVoice = isChatterboxVoiceActive(profile),
+            clonedVoices = repository.state.value.clonedVoices
         )
     }
 
     fun updateVoiceDesignPrompt(prompt: String) {
         repository.updateActiveProfile { p -> p.copy(voiceDesignPrompt = prompt) }
+    }
+
+    fun activateVoiceDesignAndAudition(prompt: String, sampleLine: String) {
+        val cleanPrompt = prompt.trim()
+        if (cleanPrompt.isEmpty()) {
+            showToast("Enter or build a VoiceDesign description first!")
+            return
+        }
+        val designReady = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+        if (!designReady) {
+            showToast("Download SUB-04B (Qwen3 1.7B VoiceDesign) in Cartridge Bay first!")
+            return
+        }
+        repository.setCartridgeSlotted("rom_qwen3_custom_06b", true)
+        repository.setSubCartridgeEnabled(Qwen3TtsEngine.SPEC_DESIGN_17B, true)
+        repository.updateActiveProfile { p ->
+            p.copy(
+                selectedCartridgeId = "rom_qwen3_custom_06b",
+                preferredBackend = BackendType.QWEN3_NATIVE,
+                primaryVoiceId = "qwen3_design_custom",
+                voiceDesignPrompt = cleanPrompt
+            )
+        }
+        val textToSpeak = sampleLine.trim().ifBlank { _testInputText.value }
+        auditionText(text = textToSpeak)
+    }
+
+    fun saveVoiceDesignPreset(name: String, prompt: String, spec: VoiceDesignSpec) {
+        val cleanName = name.trim().ifEmpty { "Designed Voice" }
+        val cleanPrompt = prompt.trim()
+        if (cleanPrompt.isEmpty()) return
+        val entry = SavedVoiceDesign(
+            id = "vd_${cleanName.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${System.currentTimeMillis() % 10000}",
+            name = cleanName,
+            prompt = cleanPrompt,
+            spec = spec,
+            createdAtEpochMs = System.currentTimeMillis()
+        )
+        repository.saveVoiceDesign(entry)
+        repository.updateActiveProfile { p -> p.copy(voiceDesignPrompt = cleanPrompt) }
+        showToast("Saved VoiceDesign [$cleanName]")
+    }
+
+    fun deleteVoiceDesignPreset(designId: String) {
+        repository.deleteVoiceDesign(designId)
+        showToast("Deleted VoiceDesign preset")
+    }
+
+    fun freezeVoiceDesignAsClone(
+        name: String,
+        prompt: String,
+        gender: VoiceGender,
+        sampleLine: String
+    ) {
+        val cleanPrompt = prompt.trim()
+        val designReady = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+        if (!designReady) {
+            showToast("Download SUB-04B (Qwen3 1.7B VoiceDesign) first to freeze a clone seed!")
+            return
+        }
+        val qwenBaseReady = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_BASE_CLONE_06B]?.state == DownloadState.INSTALLED
+        val pocketReady = repository.state.value.modelStates["rom_pocket_tts"]?.state == DownloadState.INSTALLED
+        val targetCloneEngine = when {
+            qwenBaseReady -> Qwen3TtsEngine.SPEC_BASE_CLONE_06B
+            pocketReady -> "rom_pocket_tts"
+            else -> Qwen3TtsEngine.SPEC_BASE_CLONE_06B
+        }
+        val cleanSample = sampleLine.trim().ifBlank {
+            "Hello Master, this reference sample locks my custom voice identity cleanly."
+        }
+        viewModelScope.launch(Dispatchers.IO) {
+            showToast("Synthesizing 1.7B VoiceDesign clone seed...")
+            val designProfile = repository.currentProfile.copy(
+                selectedCartridgeId = "rom_qwen3_custom_06b",
+                preferredBackend = BackendType.QWEN3_NATIVE,
+                primaryVoiceId = "qwen3_design_custom",
+                voiceDesignPrompt = cleanPrompt,
+                baseSpeed = 1.0f,
+                basePitch = 1.0f
+            )
+            val outcome = backendRouter.synthesizeSpeechChunk(
+                chunk = PurrChunk.Speech(
+                    text = cleanSample,
+                    role = com.projectmika.purrtts.core.purr.SegmentRole.DIALOGUE,
+                    targetVoiceId = "qwen3_design_custom",
+                    speakingRate = 1.0f,
+                    pitch = 1.0f,
+                    volumeGain = 1.0f,
+                    sentiment = com.projectmika.purrtts.core.purr.SentimentResult()
+                ),
+                profile = designProfile
+            )
+            if (outcome.pcmFloat24k.isEmpty()) {
+                showToast(outcome.engineSummary.ifBlank { "VoiceDesign render failed" })
+                return@launch
+            }
+            val outDir = File(app.filesDir, "cloned_refs").apply { mkdirs() }
+            val seedFile = File(outDir, "vd_seed_${System.currentTimeMillis()}.wav")
+            val pcm16 = PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
+            writePcm16MonoWav(seedFile, pcm16, pcm16.size, PurrDspProcessor.SAMPLE_RATE_HZ)
+
+            registerClonedVoice(
+                displayName = name.trim().ifEmpty { "Designed_Clone" },
+                family = if (targetCloneEngine == Qwen3TtsEngine.SPEC_BASE_CLONE_06B) SherpaModelFamily.ZIPVOICE else SherpaModelFamily.POCKET_TTS,
+                gender = gender,
+                transcript = cleanSample,
+                tagsRaw = "voicedesign, qwen3, locked",
+                wavPathOverride = seedFile.absolutePath,
+                cloneEngineId = targetCloneEngine
+            )
+        }
     }
 
     fun selectProfile(profileId: String) {
@@ -337,7 +464,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     customRules = repository.state.value.customPhoneticRules,
                     purrModuleActive = repository.isPurrEngineModuleActive(),
                     symbolShieldModuleActive = repository.isSymbolShieldModuleActive(),
-                    isChatterboxVoice = isChatterboxVoiceActive(effectiveProfile)
+                    isChatterboxVoice = isChatterboxVoiceActive(effectiveProfile),
+                    clonedVoices = repository.state.value.clonedVoices
                 )
                 if (chunks.isEmpty()) {
                     showToast("Nothing speakable after PURR filter!")
@@ -695,7 +823,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     symbolShieldModuleActive = shieldOn,
                     targetChunkCharsOverride = targetChunkChars,
                     paragraphPauseMs = paragraphPauseMs,
-                    isChatterboxVoice = isChatterboxVoiceActive(activeProfile)
+                    isChatterboxVoice = isChatterboxVoiceActive(activeProfile),
+                    clonedVoices = repository.state.value.clonedVoices
                 )
 
                 val speechCount = chunks.count { it is PurrChunk.Speech }.coerceAtLeast(1)
@@ -811,7 +940,22 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun playExportedAudioFile(entry: ExportedAudioFile) {
-        val wavFile = File(entry.localPath)
+        playWavFileInternal(
+            wavFile = File(entry.localPath),
+            label = "[MEDIA] ${entry.title}",
+            summary = "${entry.fileName} (${"%.1f".format(entry.durationSec)}s)"
+        )
+    }
+
+    fun playCompletedChapterWav(chapter: AudiobookChapter) {
+        playWavFileInternal(
+            wavFile = File(chapter.renderedWavPath),
+            label = "[BOOK] ${chapter.title}",
+            summary = "${chapter.wordCount}w (${chapter.renderedDurationMs / 1000}s)"
+        )
+    }
+
+    private fun playWavFileInternal(wavFile: File, label: String, summary: String) {
         if (!wavFile.exists() || wavFile.length() <= 44L) {
             showToast("Audio file not found on disk!")
             return
@@ -858,9 +1002,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     if (written <= 0) break
                     val sliceFloat = PurrDspProcessor.pcm16LeToFloat32(pcmData.copyOfRange(offset, offset + count))
                     backendRouter.emitSpeechTelemetry(
-                        label = "[MEDIA] ${entry.title}",
+                        label = label,
                         badge = HardwareStatusBadge.CPU_NEON,
-                        summary = "${entry.fileName} (${"%.1f".format(entry.durationSec)}s)",
+                        summary = summary,
                         sentiment = "PLAYBACK",
                         bins = PurrDspProcessor.computeWaveformBins(sliceFloat, 32)
                     )
@@ -878,6 +1022,73 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             }
         }
     }
+
+    // ✨ AUDIOBOOK CONSTRUCTOR (TOOL-07) ACTIONS
+    fun importAudiobookDocument(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            showToast("Parsing ebook chapters...")
+            val result = audiobookManager.importEbook(uri)
+            result.onSuccess { proj ->
+                val activeCh = proj.includedChapters.size
+                showToast("Imported '${proj.title}' (${proj.chapters.size} sections, $activeCh selected)")
+            }.onFailure { err ->
+                showToast("Ebook import failed: ${err.message}")
+            }
+        }
+    }
+
+    fun selectAudiobookProject(projectId: String) = audiobookManager.selectProject(projectId)
+
+    fun deleteAudiobookProject(projectId: String) {
+        audiobookManager.deleteProject(projectId)
+        showToast("Deleted audiobook project")
+    }
+
+    fun toggleAudiobookChapter(projectId: String, chapterIndex: Int, included: Boolean) =
+        audiobookManager.toggleChapterIncluded(projectId, chapterIndex, included)
+
+    fun applyAudiobookChapterFilter(projectId: String, mode: AudiobookConstructorManager.ChapterFilterMode) =
+        audiobookManager.applyChapterFilter(projectId, mode)
+
+    fun renameAudiobookChapter(projectId: String, chapterIndex: Int, newTitle: String) =
+        audiobookManager.renameChapter(projectId, chapterIndex, newTitle)
+
+    fun updateAudiobookProjectOptions(
+        projectId: String,
+        title: String? = null,
+        author: String? = null,
+        targetChunkChars: Int? = null,
+        paragraphPauseMs: Int? = null,
+        chapterGapMs: Int? = null,
+        normalizeLoudness: Boolean? = null,
+        smoothTransitions: Boolean? = null
+    ) = audiobookManager.updateProjectOptions(
+        projectId = projectId,
+        title = title,
+        author = author,
+        targetChunkChars = targetChunkChars,
+        paragraphPauseMs = paragraphPauseMs,
+        chapterGapMs = chapterGapMs,
+        normalizeLoudness = normalizeLoudness,
+        smoothTransitions = smoothTransitions
+    )
+
+    fun startOrResumeAudiobookBuild(projectId: String) =
+        audiobookManager.startOrResumeBuild(projectId) { msg -> showToast(msg) }
+
+    fun pauseAudiobookBuild() {
+        audiobookManager.pauseBuild()
+        showToast("Audiobook build paused — progress saved!")
+    }
+
+    fun retryAudiobookChapter(projectId: String, chapterIndex: Int) =
+        audiobookManager.retryChapter(projectId, chapterIndex)
+
+    fun combineAudiobookToM4b(projectId: String) =
+        audiobookManager.combineIntoFullAudiobook(projectId) { msg -> showToast(msg) }
+
+    fun exportAudiobookChapterWav(projectId: String, chapterIndex: Int) =
+        audiobookManager.exportChapterToDownloads(projectId, chapterIndex) { msg -> showToast(msg) }
 
     fun saveExportedFileToDownloads(entry: ExportedAudioFile) {
         viewModelScope.launch(Dispatchers.IO) {

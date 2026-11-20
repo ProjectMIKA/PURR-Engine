@@ -275,7 +275,8 @@ data class PurrProfile(
     val dspConfig: DspConfig = DspConfig(),
     val symbolShieldConfig: SymbolShieldConfig = SymbolShieldConfig(),
     val proxyConfig: ProxyEndpointConfig = ProxyEndpointConfig(),
-    val voiceDesignPrompt: String = "Warm, expressive young woman with crisp close-mic clarity and gentle natural pacing"
+    val voiceDesignPrompt: String = "Warm, expressive young woman with crisp close-mic clarity and gentle natural pacing",
+    val autoBypassEnhancersForNeuralModels: Boolean = true
 )
 
 @Serializable
@@ -461,6 +462,18 @@ data class PurrForgeState(
             state = DownloadState.INSTALLED,
             sha256Verified = true,
             localPath = "builtin://tool/audio_exporter"
+        ),
+        "tool_voice_design" to ModelBundleState(
+            specId = "tool_voice_design",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/voice_design"
+        ),
+        "tool_audiobook_constructor" to ModelBundleState(
+            specId = "tool_audiobook_constructor",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/audiobook_constructor"
         )
     ),
     val slottedCartridges: Set<String> = setOf(
@@ -469,13 +482,85 @@ data class PurrForgeState(
         "tool_dsp_rack",
         "tool_symbol_shield",
         "tool_clone_studio",
-        "tool_audio_exporter"
+        "tool_audio_exporter",
+        "tool_voice_design",
+        "tool_audiobook_constructor"
     ),
     val enabledSubCartridges: Set<String> = emptySet(),
+    val savedVoiceDesigns: List<SavedVoiceDesign> = emptyList(),
+    val knownToolCatalogVersion: Int = 2,
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
     val seenTutorialVersion: Int = 0
 )
+
+/**
+ * ✨ NEURAL PURE MODE GUARD (v1.8.0) ✨
+ * Heavyweight neural LLM/flow models (Qwen3-TTS, NeuTTS-2E, Chatterbox-Turbo, Soprano-80M,
+ * Studio FP32/Full clones & Kokoro v1.1/FP32) naturally perform their own prosody and text
+ * normalization — aggressive slang expansion, stutters, comma-stripping & micro-chunking make
+ * them sound worse, so PURR enhancers automatically switch to Neural Pure Mode when active.
+ */
+object PurrNeuralBypass {
+
+    private val ADVANCED_CARTRIDGES = setOf(
+        "rom_qwen3_custom_06b",
+        "rom_neutts_2e",
+        "rom_soprano_80m"
+    )
+
+    private val ADVANCED_VOICE_PREFIXES = listOf(
+        "qwen3_",
+        "neutts_",
+        "soprano_",
+        "chatterbox_",
+        "fp32_",
+        "v11_",
+        "kmini_",
+        "melo_"
+    )
+
+    private val ADVANCED_EXACT_VOICE_IDS = setOf(
+        "zipvoice_full_studio",
+        "pocket_fp32_zero_shot",
+        "matcha_narrator"
+    )
+
+    private val ADVANCED_CLONE_ENGINE_IDS = setOf(
+        "sub_qwen3_base_06b",
+        "sub_chatterbox_turbo",
+        "sub_zipvoice_full",
+        "sub_pocket_fp32"
+    )
+
+    fun isAdvancedNeuralVoice(
+        profile: PurrProfile,
+        clonedVoices: List<ClonedVoiceProfile> = emptyList()
+    ): Boolean {
+        if (profile.preferredBackend == BackendType.QWEN3_NATIVE ||
+            profile.preferredBackend == BackendType.ONNX_NATIVE
+        ) {
+            return true
+        }
+        if (profile.selectedCartridgeId in ADVANCED_CARTRIDGES) {
+            return true
+        }
+        val cleanId = profile.primaryVoiceId.substringAfter(':')
+        if (ADVANCED_VOICE_PREFIXES.any { cleanId.startsWith(it) } ||
+            cleanId in ADVANCED_EXACT_VOICE_IDS
+        ) {
+            return true
+        }
+        return clonedVoices.any {
+            it.id == cleanId && it.resolvedCloneEngineId in ADVANCED_CLONE_ENGINE_IDS
+        }
+    }
+
+    fun shouldBypassEnhancers(
+        profile: PurrProfile,
+        clonedVoices: List<ClonedVoiceProfile> = emptyList()
+    ): Boolean = profile.autoBypassEnhancersForNeuralModels && isAdvancedNeuralVoice(profile, clonedVoices)
+}
 
 object PurrDefaultPresets {
 
@@ -2129,6 +2214,44 @@ object PurrDefaultPresets {
             hardwareAccelNote = "Multi-Chunk Audiobook Stitcher & WAV Mastering • Ejectable",
             isBuiltInOsCartridge = true,
             unlocksSummary = "ENABLES: Audio Media Exporter OS Module for rendering & downloading mastered .WAV speech files.",
+            category = CartridgeCategory.TOOLS
+        ),
+        ModelBundleSpec(
+            id = "tool_voice_design",
+            romCode = "TOOL-06",
+            badge = "1.7B_PROMPT_LAB",
+            accentHex = 0xFFFF007F,
+            name = "QWEN3_VOICE_DESIGN",
+            subtitle = "Qwen3 1.7B Prompt Builder • Gender, Pitch, Timbre, Pace, Accent & Lock-Clone",
+            description = "Dedicated Cyberdeck OS studio for Qwen3-TTS 1.7B VoiceDesign (SUB-04B): build natural-language voice prompts from structured acoustic controls, save custom voice presets, audition live, or lock into a reusable Clone reference.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/voice_design",
+            fileName = "voice_design.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Qwen3-TTS 1.7B VoiceDesign Prompt Studio • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Qwen3 VoiceDesign Studio OS Module for crafting and saving custom prompt-driven voices.",
+            category = CartridgeCategory.TOOLS
+        ),
+        ModelBundleSpec(
+            id = "tool_audiobook_constructor",
+            romCode = "TOOL-07",
+            badge = "M4B_BOOK_FORGE",
+            accentHex = 0xFF38BDF8,
+            name = "AUDIOBOOK_CONSTRUCTOR",
+            subtitle = "EPUB / PDF / TXT / MD / DOCX / FB2 -> Chaptered .M4B Audiobook Builder",
+            description = "Imports full ebooks across formats, splits intelligently into selectable chapters, synthesizes per-chapter audio with Pause & Resume-Later persistence, and combines completed chapters into a standard chaptered .M4B audiobook.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/audiobook_constructor",
+            fileName = "audiobook_constructor.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Multi-Format Ebook Parser + Resumable .M4B Chapter Muxer • Optional Tool",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Audiobook Constructor OS Module for chapter-by-chapter resumable .M4B creation.",
             category = CartridgeCategory.TOOLS
         )
     )

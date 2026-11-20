@@ -13,14 +13,18 @@ std::vector<ProviderCandidate> build_provider_chain(ort_session_role role) {
     const bool is_decoder = (role == ort_session_role::decoder);
     ProviderCandidate cpu;
     cpu.name = "CPUExecutionProvider";
-    cpu.opt_level = GraphOptimizationLevel::ORT_ENABLE_ALL;
+    // Use ORT_ENABLE_BASIC on Android ARM64 CPU EP so Level 2/3 layout transformers
+    // (specifically NhwcTransformer -> NhwcFusedConv) do not rewrite FP16 Conv nodes in
+    // qwen3_tts_speaker_encoder.fp16.onnx / codec_encoder.fp16.onnx / decoder.fp16.onnx
+    // into unsupported NhwcFused kernels.
+    cpu.opt_level = GraphOptimizationLevel::ORT_ENABLE_BASIC;
     // Decoder graph is sizable; disable memory arena/pattern on decoder to contain mobile RSS.
     cpu.disable_mem_arena = is_decoder;
     cpu.disable_mem_pattern = is_decoder;
     cpu.disable_spinning = is_decoder;
-    cpu.apply = [](Ort::SessionOptions & opts, std::string & err) -> bool {
+    cpu.apply = [is_decoder](Ort::SessionOptions & opts, std::string & err) -> bool {
         try {
-            opts.AppendExecutionProvider_CPU(/*use_arena=*/1);
+            opts.AppendExecutionProvider_CPU(/*use_arena=*/is_decoder ? 0 : 1);
             return true;
         } catch (const std::exception & e) {
             err = std::string("CPU EP error: ") + e.what();

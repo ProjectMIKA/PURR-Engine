@@ -143,6 +143,10 @@ class PurrProfileRepository(filesDir: File) {
 
     fun isAudioExporterModuleActive(): Boolean = isCartridgeSlotted("tool_audio_exporter")
 
+    fun isVoiceDesignModuleActive(): Boolean = isCartridgeSlotted("tool_voice_design")
+
+    fun isAudiobookConstructorModuleActive(): Boolean = isCartridgeSlotted("tool_audiobook_constructor")
+
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
         val voicesForCart = allAvailableVoices().filter { it.cartridgeId == cartridgeId }
@@ -299,6 +303,19 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
+    fun saveVoiceDesign(design: SavedVoiceDesign) {
+        updateState { s ->
+            val filtered = s.savedVoiceDesigns.filterNot { it.id == design.id }
+            s.copy(savedVoiceDesigns = (listOf(design) + filtered).take(40))
+        }
+    }
+
+    fun deleteVoiceDesign(designId: String) {
+        updateState { s ->
+            s.copy(savedVoiceDesigns = s.savedVoiceDesigns.filterNot { it.id == designId })
+        }
+    }
+
     fun setSubCartridgeEnabled(subSpecId: String, enabled: Boolean) {
         updateState { s ->
             val nextEnabled = if (enabled) s.enabledSubCartridges + subSpecId else s.enabledSubCartridges - subSpecId
@@ -444,6 +461,13 @@ class PurrProfileRepository(filesDir: File) {
             val catalogById = PurrDefaultPresets.modelCatalog().associateBy { it.id }
             val nextEnabledSubs = decoded.enabledSubCartridges.toMutableSet()
             val nextSlotted = decoded.slottedCartridges.toMutableSet()
+            // Auto-slot newly introduced v1.8.0 OS modules once when upgrading from <= v1.7.1.
+            val isNewToolCatalogV2 = decoded.knownToolCatalogVersion < 2 ||
+                ("tool_voice_design" !in decoded.modelStates && "tool_audiobook_constructor" !in decoded.modelStates)
+            if (isNewToolCatalogV2) {
+                nextSlotted += "tool_voice_design"
+                nextSlotted += "tool_audiobook_constructor"
+            }
             for ((legacyId, hubId) in legacyCartridgeToHub) {
                 if (normalizedModelStates[legacyId]?.state == DownloadState.INSTALLED) {
                     nextEnabledSubs += legacyId
@@ -482,7 +506,8 @@ class PurrProfileRepository(filesDir: File) {
                 modelStates = normalizedModelStates,
                 profiles = remappedProfiles,
                 slottedCartridges = nextSlotted,
-                enabledSubCartridges = nextEnabledSubs
+                enabledSubCartridges = nextEnabledSubs,
+                knownToolCatalogVersion = 2
             )
         }.getOrElse {
             PurrForgeState()

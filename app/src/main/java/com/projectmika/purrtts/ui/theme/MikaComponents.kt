@@ -1627,7 +1627,9 @@ enum class OsModuleIconType {
     DSP_RACK,
     SYMBOL_SHIELD,
     CLONE_STUDIO,
-    AUDIO_EXPORTER
+    AUDIO_EXPORTER,
+    VOICE_DESIGN,
+    AUDIOBOOK_CONSTRUCTOR
 }
 
 /**
@@ -1786,6 +1788,72 @@ fun MikaOsModuleIcon(
                         lineTo(w * 0.84f, h * 0.66f)
                     }
                     drawPath(tray, color = drawColor, style = stroke)
+                }
+
+                OsModuleIconType.VOICE_DESIGN -> {
+                    // Sculpted orbital ring + 4-point neural spark + sculpted pitch bars
+                    drawCircle(
+                        color = drawColor.copy(alpha = 0.36f),
+                        radius = w * 0.40f,
+                        center = Offset(w * 0.50f, h * 0.52f),
+                        style = thinStroke
+                    )
+                    // Sculpted neural spark star (top-right)
+                    val cx = w * 0.68f
+                    val cy = h * 0.28f
+                    val spark = Path().apply {
+                        moveTo(cx, cy - h * 0.14f)
+                        lineTo(cx + w * 0.04f, cy - h * 0.04f)
+                        lineTo(cx + w * 0.14f, cy)
+                        lineTo(cx + w * 0.04f, cy + h * 0.04f)
+                        lineTo(cx, cy + h * 0.14f)
+                        lineTo(cx - w * 0.04f, cy + h * 0.04f)
+                        lineTo(cx - w * 0.14f, cy)
+                        lineTo(cx - w * 0.04f, cy - h * 0.04f)
+                        close()
+                    }
+                    drawPath(spark, color = MikaColors.NeonCyan.copy(alpha = activeAlpha))
+
+                    // Sculpted symmetric formant wave bars
+                    val barXs = listOf(w * 0.22f, w * 0.36f, w * 0.50f, w * 0.64f, w * 0.78f)
+                    val tops = listOf(h * 0.52f, h * 0.34f, h * 0.26f, h * 0.42f, h * 0.54f)
+                    val bots = listOf(h * 0.70f, h * 0.80f, h * 0.84f, h * 0.78f, h * 0.68f)
+                    barXs.forEachIndexed { idx, x ->
+                        drawLine(
+                            color = drawColor,
+                            start = Offset(x, tops[idx]),
+                            end = Offset(x, bots[idx]),
+                            strokeWidth = (2.3f * s).dp.toPx(),
+                            cap = StrokeCap.Round
+                        )
+                    }
+                }
+
+                OsModuleIconType.AUDIOBOOK_CONSTRUCTOR -> {
+                    // Open cyber-book spreads + spine + glowing bookmark & audio track lines
+                    val leftPage = Path().apply {
+                        moveTo(w * 0.12f, h * 0.20f)
+                        lineTo(w * 0.48f, h * 0.26f)
+                        lineTo(w * 0.48f, h * 0.82f)
+                        lineTo(w * 0.12f, h * 0.76f)
+                        close()
+                    }
+                    val rightPage = Path().apply {
+                        moveTo(w * 0.88f, h * 0.20f)
+                        lineTo(w * 0.52f, h * 0.26f)
+                        lineTo(w * 0.52f, h * 0.82f)
+                        lineTo(w * 0.88f, h * 0.76f)
+                        close()
+                    }
+                    drawPath(leftPage, color = drawColor, style = stroke)
+                    drawPath(rightPage, color = drawColor, style = stroke)
+                    // Bookmark ribbon + chapter audio bars inside pages
+                    drawLine(MikaColors.SsrGold.copy(alpha = activeAlpha), Offset(w * 0.38f, h * 0.24f), Offset(w * 0.38f, h * 0.62f), strokeWidth = (2.1f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonPink.copy(alpha = activeAlpha), Offset(w * 0.22f, h * 0.40f), Offset(w * 0.30f, h * 0.40f), strokeWidth = (1.6f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonPink.copy(alpha = activeAlpha), Offset(w * 0.22f, h * 0.54f), Offset(w * 0.30f, h * 0.54f), strokeWidth = (1.6f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.62f, h * 0.42f), Offset(w * 0.62f, h * 0.60f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.71f, h * 0.34f), Offset(w * 0.71f, h * 0.66f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.80f, h * 0.44f), Offset(w * 0.80f, h * 0.58f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
                 }
             }
         }

@@ -1,3 +1,29 @@
+# 🌌 PURR-TTS v1.8.0 // Audiobook Constructor (.M4B), Qwen3 VoiceDesign Studio, Neural Pure Mode & Persistent Signing
+
+### ✨ What's New since v1.7.1
+
+Six major upgrades turning PURR-TTS into a full mobile voice lab and chaptered audiobook studio! 🐾👑
+
+* **🔐 PERMANENT RELEASE SIGNING (IN-PLACE APK UPGRADES)**: Replaced per-build CI ephemeral key generation with a permanent persistent signing key in CI secrets. *(Note: installing `v1.8.0` over `v1.7.1` requires one final clean reinstall because `v1.7.1` used an ephemeral key; starting with `v1.8.0 -> v1.8.1+`, every future release upgrades cleanly in-place keeping all downloaded models and profiles!)*
+* **👑 FIX QWEN3 `NhwcFused` SPEAKER ENCODER CRASH**: Set ONNX Runtime CPU EP optimization level in `provider_policy_android.cpp` to `ORT_ENABLE_BASIC` so ONNX Runtime 1.31.1 on ARM64 no longer rewrites FP16 `Conv` nodes into unsupported `NhwcFused` kernels inside `qwen3_tts_speaker_encoder.fp16.onnx`, `codec_encoder.fp16.onnx`, and `decoder.fp16.onnx`.
+* **🧠 NEURAL PURE MODE (AUTO-BYPASS ON FLAGSHIP MODELS)**: Heavyweight neural voices (`Qwen3-TTS`, `NeuTTS-2E`, `Chatterbox-Turbo`, `Soprano-80M`, `Kokoro FP32 / v1.1`, `ZipVoice Full`, `Pocket FP32`, `MeloTTS`, `Matcha`) now automatically bypass disruptive slang expansion, anime honorific mangling, stutter injection, comma micro-chopping, and neutral EQ coloring — keeping expressive quotes, commas, capitalization, Chatterbox `[laugh]`/`[sigh]`/`[gasp]` tags, and NeuTTS-2E sentiment controls crisp and natural (toggleable anytime in P.U.R.R. Engine settings).
+* **🎛️ SLICK VOICE CLONE STUDIO DROPDOWN**: Replaced the 2×3 engine pill grid in `VoiceCloneStudioSheet` with a sleek `CyberDropdown` engine selector (`> CLONE_ENGINE_TARGET`) and added smooth vertical scrolling.
+* **🎨 NEW OS MODULE — `TOOL-06: QWEN3_VOICE_DESIGN` (Structured 1.7B Prompt Builder)**: Build expressive Qwen3-TTS 1.7B VoiceDesign prompts visually using curated presets + Gender, Age, Pitch, up to 3 Vocal Timbres, Pace, Emotional Delivery, Accent/Language, Mic Acoustics, Character Role & Nuance controls — save custom voice designs, audition live, or lock into a reusable Clone Voice via the Design→Clone pipeline!
+* **📚 NEW OS MODULE — `TOOL-07: AUDIOBOOK_CONSTRUCTOR` (Multi-Format Ebook -> Chaptered `.M4B`)**:
+  * Import **EPUB**, **PDF** (`pdfbox-android` + bookmark outline awareness), **TXT**, **MD**, **HTML/XHTML**, **DOCX**, or **FB2** files.
+  * Automatically extracts & splits chapters, lets you curate/check which chapters to include (`ALL` / `STORY ONLY` / `NONE`) or rename/preview chapters.
+  * Construct chapters with **Start / Pause & Save / Resume Later** checkpoint persistence (both completed chapter `.wav` files and mid-chapter chunks persist across restarts!).
+  * Combine finished chapters into a single standard **chaptered `.m4b` audiobook** (`MediaCodec` AAC + `MediaMuxer` + Nero `chpl` chapters & iTunes `stik = 2` metadata atoms) saved to `Downloads/PURR-TTS/Audiobooks/` — ready for Smart AudioBook Player, Voice, Listen, Audiobookshelf, VLC & more.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `16`).
+2. **`PURR-TTS_V1.8.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.7.1 // Crystal Clear Qwen3, NeuTTS-2E Fix & Module Dock Polish
 
 ### ✨ What's New since v1.7.0
