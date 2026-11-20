@@ -11,7 +11,9 @@ import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrProfileRepository
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.engine.litert.LiteRtKokoroEngine
+import com.projectmika.purrtts.engine.onnx.OnnxRuntimeEngine
 import com.projectmika.purrtts.engine.proxy.ExternalProxyEngine
+import com.projectmika.purrtts.engine.qwen3.Qwen3TtsEngine
 import com.projectmika.purrtts.engine.sherpa.SherpaOnnxEngine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -41,6 +43,14 @@ class TtsBackendRouter(
 
     val liteRtEngine = LiteRtKokoroEngine(context)
     val sherpaEngine = SherpaOnnxEngine(
+        context = context,
+        clonedVoicesProvider = { repository.state.value.clonedVoices }
+    )
+    val onnxEngine = OnnxRuntimeEngine(
+        context = context,
+        clonedVoicesProvider = { repository.state.value.clonedVoices }
+    )
+    val qwen3Engine = Qwen3TtsEngine(
         context = context,
         clonedVoicesProvider = { repository.state.value.clonedVoices }
     )
@@ -118,6 +128,24 @@ class TtsBackendRouter(
                         baseOut
                     }
                 }
+            }
+            BackendType.ONNX_NATIVE -> {
+                onnxEngine.synthesizeChunk(
+                    text = chunk.text,
+                    voiceId = voiceId,
+                    speakingRate = effectiveRate,
+                    pitch = effectivePitch,
+                    profile = profile
+                )
+            }
+            BackendType.QWEN3_NATIVE -> {
+                qwen3Engine.synthesizeChunk(
+                    text = chunk.text,
+                    voiceId = voiceId,
+                    speakingRate = effectiveRate,
+                    pitch = effectivePitch,
+                    profile = profile
+                )
             }
             BackendType.CORE_OS -> {
                 if (!repository.isCartridgeSlotted("rom_core_os")) {
@@ -219,6 +247,8 @@ class TtsBackendRouter(
         synthMutex.withLock {
             liteRtEngine.evictResources()
             sherpaEngine.evictResources()
+            onnxEngine.evictResources()
+            qwen3Engine.evictResources()
             proxyEngine.evictResources()
             _telemetry.value = LiveTelemetry(
                 badge = HardwareStatusBadge.IDLE,
@@ -234,8 +264,14 @@ class TtsBackendRouter(
         if (voiceId.startsWith(ExternalProxyEngine.SYS_VOICE_PREFIX) || voiceId == "core_os_auto") {
             return BackendType.CORE_OS
         }
-        val cloned = repository.state.value.clonedVoices.any { it.id == voiceId }
-        if (cloned) return BackendType.SHERPA_ONNX
+        val cloned = repository.state.value.clonedVoices.firstOrNull { it.id == voiceId }
+        if (cloned != null) {
+            return when (cloned.resolvedCloneEngineId) {
+                "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
+                "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
+                else -> BackendType.SHERPA_ONNX
+            }
+        }
 
         val descriptor = repository.allAvailableVoices().firstOrNull { it.id == voiceId }
         if (descriptor != null && repository.isCartridgeSlotted(descriptor.cartridgeId)) {

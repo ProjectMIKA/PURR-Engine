@@ -12,6 +12,7 @@
 /captures
 .externalNativeBuild
 .cxx
+/app/src/main/cpp/third_party/
 *.apk
 *.ap_
 *.aab

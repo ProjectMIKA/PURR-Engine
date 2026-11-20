@@ -199,12 +199,17 @@ class PurrTtsService : TextToSpeechService() {
         val osRateMultiplier = (request.speechRate.coerceIn(25, 400) / 100.0f)
         val osPitchMultiplier = (request.pitch.coerceIn(25, 400) / 100.0f)
 
+        val isCbVoice = profile.primaryVoiceId.startsWith("chatterbox_") ||
+            repo.state.value.clonedVoices.any {
+                it.id == profile.primaryVoiceId && it.resolvedCloneEngineId == "sub_chatterbox_turbo"
+            }
         val chunks = PurrTextProcessor.process(
             rawText = rawText,
             profile = profile,
             customRules = repo.state.value.customPhoneticRules,
             purrModuleActive = repo.isPurrEngineModuleActive(),
-            symbolShieldModuleActive = repo.isSymbolShieldModuleActive()
+            symbolShieldModuleActive = repo.isSymbolShieldModuleActive(),
+            isChatterboxVoice = isCbVoice
         )
 
         val useFloat32 = profile.dspConfig.useFloat32Callback

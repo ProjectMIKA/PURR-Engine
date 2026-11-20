@@ -34,6 +34,7 @@ REQUIRED_FILES = [
     "app/src/main/res/drawable/ic_launcher_purr.xml",
     "app/src/main/java/com/projectmika/purrtts/PurrApplication.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrModels.kt",
+    "app/src/main/java/com/projectmika/purrtts/core/purr/PurrBpeTokenizer.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrSentimentScorer.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrTextProcessor.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrDspProcessor.kt",
@@ -44,7 +45,14 @@ REQUIRED_FILES = [
     "app/src/main/java/com/projectmika/purrtts/engine/ModelCatalogManager.kt",
     "app/src/main/java/com/projectmika/purrtts/engine/litert/LiteRtKokoroEngine.kt",
     "app/src/main/java/com/projectmika/purrtts/engine/sherpa/SherpaOnnxEngine.kt",
+    "app/src/main/java/com/projectmika/purrtts/engine/onnx/OnnxRuntimeEngine.kt",
+    "app/src/main/java/com/projectmika/purrtts/engine/qwen3/Qwen3NativeBridge.kt",
+    "app/src/main/java/com/projectmika/purrtts/engine/qwen3/Qwen3TtsEngine.kt",
     "app/src/main/java/com/projectmika/purrtts/engine/proxy/ExternalProxyEngine.kt",
+    "app/src/main/assets/neutts_2e_refs.json",
+    "app/src/main/cpp/CMakeLists.txt",
+    "app/src/main/cpp/provider_policy_android.cpp",
+    "app/src/main/cpp/purr_qwen3_jni.cpp",
     "app/src/main/java/com/projectmika/purrtts/service/PurrTtsService.kt",
     "app/src/main/java/com/projectmika/purrtts/service/TtsSystemActivities.kt",
     "app/src/main/java/com/projectmika/purrtts/ui/theme/MikaTheme.kt",
@@ -56,6 +64,7 @@ REQUIRED_FILES = [
     "app/src/main/java/com/projectmika/purrtts/ui/forge/ModelCatalogTab.kt",
     "app/src/main/java/com/projectmika/purrtts/ui/forge/VoiceCloneStudioSheet.kt",
     "app/src/test/java/com/projectmika/purrtts/core/purr/PurrTextProcessorTest.kt",
+    "app/src/test/java/com/projectmika/purrtts/core/purr/PurrHeavyEnginesTest.kt",
 ]
 
 

@@ -42,15 +42,26 @@ import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 
 /**
- * ✨ ZERO-SHOT VOICE CLONING STUDIO DIALOG (POCKET TTS / ZIPVOICE) ✨
- * Two reference sources:
- * 1. `REC_5S_WAV` — captures a 5-second 24kHz mono WAV via `AudioRecord`.
- * 2. `IMPORT_CLIP` — imports any audio file (mp3/m4a/ogg/flac/wav/opus) from the device,
- *    with an optional CLEAN_AUDIO toggle that runs the spectral noise/static cleanup
- *    chain before the clip becomes the clone reference.
- * Registering trims the import to the selected family's best-voice window and inserts
- * the zero-shot cloned speaker into the Forge roster.
+ * ✨ ZERO-SHOT VOICE CLONING STUDIO DIALOG (ROM-03 CLONE HUB + ROM-04 QWEN3 BASE) ✨
+ * Supports all 6 local zero-shot cloning engines:
+ * Pocket INT8 / FP32, ZipVoice INT8 / Full, Chatterbox-Turbo 350M & Qwen3-TTS 0.6B Base.
  */
+private data class CloneEngineOption(
+    val id: String,
+    val label: String,
+    val family: SherpaModelFamily,
+    val windowSec: Int
+)
+
+private val CLONE_ENGINE_OPTIONS = listOf(
+    CloneEngineOption("rom_pocket_tts", "Pocket INT8 (5s)", SherpaModelFamily.POCKET_TTS, 5),
+    CloneEngineOption("sub_pocket_fp32", "Pocket FP32 (5s)", SherpaModelFamily.POCKET_TTS, 5),
+    CloneEngineOption("rom_zipvoice", "ZipVoice INT8 (12s)", SherpaModelFamily.ZIPVOICE, 12),
+    CloneEngineOption("sub_zipvoice_full", "ZipVoice Full (12s)", SherpaModelFamily.ZIPVOICE, 12),
+    CloneEngineOption("sub_chatterbox_turbo", "Chatterbox 350M", SherpaModelFamily.POCKET_TTS, 12),
+    CloneEngineOption("sub_qwen3_base_06b", "Qwen3 0.6B Base", SherpaModelFamily.ZIPVOICE, 12)
+)
+
 @Composable
 fun VoiceCloneStudioSheet(
     isRecording: Boolean,
@@ -63,17 +74,17 @@ fun VoiceCloneStudioSheet(
     onToggleCleanAudio: (Boolean) -> Unit,
     onImportClip: (Uri) -> Unit,
     onRecordFiveSeconds: () -> Unit,
-    onRegisterClone: (String, SherpaModelFamily, VoiceGender, String, String) -> Unit,
+    onRegisterClone: (String, SherpaModelFamily, VoiceGender, String, String, String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(onImportClip) }
     var displayName by remember { mutableStateOf("MIKA_CLONE_01") }
-    var selectedFamily by remember { mutableStateOf(SherpaModelFamily.POCKET_TTS) }
+    var selectedEngine by remember { mutableStateOf(CLONE_ENGINE_OPTIONS.first()) }
     var selectedGender by remember { mutableStateOf(VoiceGender.FEMALE) }
     var transcript by remember {
-        mutableStateOf("Hello Master, this five-second sample captures my natural pitch and cadence.")
+        mutableStateOf("Hello Master, this reference sample captures my natural pitch and cadence.")
     }
     var tagsInput by remember { mutableStateOf("cute, teasing, cloned, american") }
 
@@ -111,20 +122,29 @@ fun VoiceCloneStudioSheet(
             }
 
             Text(
-                text = "// Zero-shot 5s voice cloning via sherpa-onnx Pocket TTS or ZipVoice.",
+                text = "// Zero-shot voice cloning across Pocket, ZipVoice, Chatterbox-Turbo & Qwen3 Base.",
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf(SherpaModelFamily.POCKET_TTS, SherpaModelFamily.ZIPVOICE).forEach { fam ->
-                    MikaTagPill(
-                        label = fam.label,
-                        selected = selectedFamily == fam,
-                        activeColor = MikaColors.NeonPurple,
-                        onClick = { selectedFamily = fam }
-                    )
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                CLONE_ENGINE_OPTIONS.chunked(2).forEach { pair ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        pair.forEach { opt ->
+                            Box(modifier = Modifier.weight(1f)) {
+                                MikaTagPill(
+                                    label = opt.label,
+                                    selected = selectedEngine.id == opt.id,
+                                    activeColor = MikaColors.NeonPurple,
+                                    onClick = { selectedEngine = opt }
+                                )
+                            }
+                        }
+                    }
                 }
             }
 
@@ -251,7 +271,7 @@ fun VoiceCloneStudioSheet(
                 ) {
                     Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "🧹 CLEAN_AUDIO // DE_NOISE + DE_STATIC",
+                            text = "CLEAN_AUDIO // DE_NOISE + DE_STATIC",
                             color = MikaColors.TerminalGreen,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Bold,
@@ -381,7 +401,14 @@ fun VoiceCloneStudioSheet(
                     .background(MikaColors.NeonPurple.copy(alpha = 0.22f))
                     .border(1.dp, MikaColors.NeonPurple, RoundedCornerShape(6.dp))
                     .clickable {
-                        onRegisterClone(displayName, selectedFamily, selectedGender, transcript, tagsInput)
+                        onRegisterClone(
+                            displayName,
+                            selectedEngine.family,
+                            selectedGender,
+                            transcript,
+                            tagsInput,
+                            selectedEngine.id
+                        )
                         onDismiss()
                     }
                     .padding(vertical = 11.dp),

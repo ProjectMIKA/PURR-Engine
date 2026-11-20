@@ -5,42 +5,66 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ✨ PURE-JVM TESTS FOR THE PREMIUM TTS TIER (v1.6.0) ✨
- * Guards the heavy-weight cartridge catalog (ROM-08/09/10) and their voice rosters:
- * valid digests, unique bay codes, the 54-voice fp32 reuse, the 103-speaker v1.1 roster,
- * and the Matcha voice. Also guards the heavy-model proxy presets.
+ * ✨ PURE-JVM TESTS FOR THE v1.7.0 8-BAY HUB RACK & HEAVY ENGINE CATALOG ✨
+ * Guards the 8 unified hub bays (ROM-01..ROM-08), nested expansion/upgrade sub-cartridges
+ * (`SUB-02*`, `SUB-03*`, `SUB-04*`, `SUB-07A`, `SUB-08*`), unique voice IDs, and SHA-256 metadata.
  */
 class PurrPremiumCatalogTest {
 
     private val catalog = PurrDefaultPresets.modelCatalog()
+    private val mainTtsHubs = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TTS }
+    private val subTtsChips = catalog.filter { it.isSubCartridge && it.category == CartridgeCategory.TTS }
 
     @Test
-    fun `premium cartridges exist with valid digest format`() {
-        val premium = catalog.filter { it.id in setOf("rom_kokoro_fp32", "rom_kokoro_v11", "rom_matcha_zh_en") }
-        assertEquals(3, premium.size)
-        premium.forEach { spec ->
+    fun `top level tts catalog forms a clean 8-bay hub rack ROM-01 through ROM-08`() {
+        assertEquals(8, mainTtsHubs.size)
+        val codes = mainTtsHubs.map { it.romCode }
+        assertEquals(
+            listOf("ROM-01", "ROM-02", "ROM-03", "ROM-04", "ROM-05", "ROM-06", "ROM-07", "ROM-08"),
+            codes
+        )
+        assertTrue(mainTtsHubs.first { it.id == "rom_clone_hub" }.isHubContainer)
+    }
+
+    @Test
+    fun `heavy sub-cartridges exist with valid digest format and parent hub links`() {
+        val checkedIds = setOf(
+            "rom_kokoro_fp32", "rom_kokoro_v11",
+            "rom_pocket_tts", "sub_pocket_fp32",
+            "rom_zipvoice", "sub_zipvoice_full",
+            "sub_chatterbox_turbo",
+            "sub_qwen3_base_06b", "sub_qwen3_design_17b",
+            "sub_kitten_mini",
+            "sub_melo_en", "rom_supertonic3", "rom_matcha_zh_en"
+        )
+        val found = subTtsChips.filter { it.id in checkedIds }
+        assertEquals(checkedIds.size, found.size)
+        val hubIds = mainTtsHubs.map { it.id }.toSet()
+        found.forEach { spec ->
             assertTrue("${spec.id} sha", spec.expectedSha256.matches(Regex("[0-9a-f]{64}")))
             assertTrue("${spec.id} url", spec.downloadUrl.startsWith("https://"))
-            assertTrue("${spec.id} tar", spec.isArchiveTarBz2)
-            assertTrue("${spec.id} size", spec.approximateSizeMb >= 75)
+            assertTrue("${spec.id} parent hub", spec.parentCartridgeId in hubIds)
+            assertTrue("${spec.id} size", spec.approximateSizeMb >= 40)
         }
     }
 
     @Test
-    fun `premium rom codes follow the rack sequence`() {
-        val codes = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TTS }
-            .map { it.romCode }
-        assertEquals(codes.size, codes.toSet().size)
-        assertTrue("ROM-08 present", "ROM-08" in codes)
-        assertTrue("ROM-09 present", "ROM-09" in codes)
-        assertTrue("ROM-10 present", "ROM-10" in codes)
+    fun `new top-level heavy engines ROM-04 ROM-05 ROM-06 have valid bundles and assets`() {
+        val heavyTop = mainTtsHubs.filter {
+            it.id in setOf("rom_qwen3_custom_06b", "rom_neutts_2e", "rom_soprano_80m")
+        }
+        assertEquals(3, heavyTop.size)
+        heavyTop.forEach { spec ->
+            assertTrue("${spec.id} sha", spec.expectedSha256.matches(Regex("[0-9a-f]{64}")))
+            assertTrue("${spec.id} url", spec.downloadUrl.startsWith("https://"))
+            assertTrue("${spec.id} extraAssets", spec.extraAssets.isNotEmpty())
+        }
     }
 
     @Test
-    fun `matcha cartridge carries a verified 16khz vocos companion`() {
+    fun `matcha sub-cartridge carries a verified 16khz vocos companion under ROM-08`() {
         val matcha = catalog.first { it.id == "rom_matcha_zh_en" }
-        // matcha-icefall-zh-en is a 16kHz model — the vocoder MUST be vocos-16khz-univ
-        // (the 22kHz example vocoder outputs robotic garbage — v1.6.1 scar).
+        assertEquals("rom_piper", matcha.parentCartridgeId)
         assertEquals("vocos-16khz-univ.onnx", matcha.companionFileName)
         assertTrue(matcha.companionUrl.endsWith("vocos-16khz-univ.onnx"))
         assertEquals("b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e", matcha.companionExpectedSha256)
@@ -48,25 +72,24 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `fp32 cartridge reuses the 54-voice roster with isolated mount dirs`() {
-        val fp32Voices = PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == "rom_kokoro_fp32" }
+    fun `fp32 sub-cartridge reuses the 54-voice roster inside Kokoro Hub with unique prefixed ids`() {
+        val fp32Voices = PurrDefaultPresets.builtInVoices().filter { it.requiredSubCartridgeId == "rom_kokoro_fp32" }
         assertEquals(54, fp32Voices.size)
-        assertTrue(fp32Voices.all { it.requiredSubCartridgeId == "rom_kokoro_fp32" })
+        assertTrue(fp32Voices.all { it.cartridgeId == "rom_kokoro_sherpa" })
         assertTrue(fp32Voices.all { it.sherpaFamily == SherpaModelFamily.KOKORO })
-        // v1.6.2: ids are prefixed (fp32_af_heart) — speaker IDs still mirror ROM-02 exactly.
-        val rom02 = PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == "rom_kokoro_sherpa" }
+        val rom02 = PurrDefaultPresets.builtInVoices().filter {
+            it.cartridgeId == "rom_kokoro_sherpa" && it.requiredSubCartridgeId == null
+        }
         assertEquals(rom02.map { it.id }, fp32Voices.map { it.id.removePrefix("fp32_") })
         assertEquals(rom02.map { it.speakerIndex }, fp32Voices.map { it.speakerIndex })
         assertTrue(fp32Voices.all { it.id.startsWith("fp32_") })
     }
 
     @Test
-    fun `kokoro v1_1 roster carries all 103 speakers with correct language split`() {
-        val v11 = PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == "rom_kokoro_v11" }
+    fun `kokoro v1_1 roster carries all 103 speakers inside Kokoro Hub`() {
+        val v11 = PurrDefaultPresets.builtInVoices().filter { it.requiredSubCartridgeId == "rom_kokoro_v11" }
         assertEquals(103, v11.size)
-        val ids = v11.map { it.id }
-        assertEquals(ids.size, ids.toSet().size)
-        // v1.6.2: prefixed ids (v11_af_maple, v11_zf_001...) — speaker IDs mirror the weights.
+        assertTrue(v11.all { it.cartridgeId == "rom_kokoro_sherpa" })
         assertEquals("v11_af_maple", v11[0].id)
         assertEquals(0, v11[0].speakerIndex)
         assertEquals("v11_zf_001", v11[3].id)
@@ -75,30 +98,37 @@ class PurrPremiumCatalogTest {
         assertEquals(58, v11[58].speakerIndex)
         assertEquals("v11_zm_100", v11[102].id)
         assertEquals(102, v11[102].speakerIndex)
-        assertTrue(v11.all { it.requiredSubCartridgeId == "rom_kokoro_v11" })
         assertEquals(3, v11.count { it.languageCode.startsWith("en") })
         assertEquals(100, v11.count { it.languageCode == "zh-CN" })
     }
 
     @Test
     fun `all built-in voice ids are globally unique across cartridges`() {
-        // ✨ v1.6.2 LAW: duplicate voice ids resolve to the WRONG descriptor at synthesis time
-        // (first match wins), fail-softing to CORE_OS. This test guards that law forever.
         val all = PurrDefaultPresets.builtInVoices()
         val ids = all.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
     }
 
     @Test
-    fun `matcha narrator voice is registered with the matcha family`() {
-        val matcha = PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == "rom_matcha_zh_en" }
-        assertEquals(1, matcha.size)
-        assertEquals("matcha_narrator", matcha.first().id)
-        assertEquals(SherpaModelFamily.MATCHA, matcha.first().sherpaFamily)
+    fun `all new v1_7 voices are registered under their expected hub and backend`() {
+        val all = PurrDefaultPresets.builtInVoices().associateBy { it.id }
+        assertEquals(BackendType.QWEN3_NATIVE, all["qwen3_vivian"]?.engine)
+        assertEquals("rom_qwen3_custom_06b", all["qwen3_vivian"]?.cartridgeId)
+        assertEquals("sub_qwen3_design_17b", all["qwen3_design_custom"]?.requiredSubCartridgeId)
+        assertEquals(BackendType.ONNX_NATIVE, all["neutts_emily"]?.engine)
+        assertEquals("rom_neutts_2e", all["neutts_emily"]?.cartridgeId)
+        assertEquals(BackendType.ONNX_NATIVE, all["soprano_studio_32k"]?.engine)
+        assertEquals("rom_soprano_80m", all["soprano_studio_32k"]?.cartridgeId)
+        assertEquals(BackendType.ONNX_NATIVE, all["chatterbox_turbo_default"]?.engine)
+        assertEquals("sub_chatterbox_turbo", all["chatterbox_turbo_default"]?.requiredSubCartridgeId)
+        assertEquals(SherpaModelFamily.MELO_TTS, all["melo_en_us"]?.sherpaFamily)
+        assertEquals("sub_melo_en", all["melo_en_us"]?.requiredSubCartridgeId)
+        assertEquals(BackendType.SHERPA_ONNX, all["matcha_narrator"]?.engine)
+        assertEquals("rom_matcha_zh_en", all["matcha_narrator"]?.requiredSubCartridgeId)
     }
 
     @Test
-    fun `heavy model proxy presets are openai compatible and qwen free`() {
+    fun `heavy model proxy presets remain available`() {
         assertTrue(PurrProxyPresets.PRESETS.isNotEmpty())
         PurrProxyPresets.PRESETS.forEach { preset ->
             assertTrue(preset.baseUrl.startsWith("http"))
@@ -106,6 +136,5 @@ class PurrPremiumCatalogTest {
             assertTrue(preset.model.isNotBlank())
             assertTrue(preset.voice.isNotBlank())
         }
-        assertTrue(PurrProxyPresets.PRESETS.none { it.label.contains("QWEN", ignoreCase = true) })
     }
 }

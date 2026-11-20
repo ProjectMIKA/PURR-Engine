@@ -98,9 +98,9 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - Router Kokoro regex widened to `[a-z0-9]` for the numeric v1.1 roster (zf_001, zm_100).
 - `PurrProxyPresets` (PurrModels) + preset chips in the advanced proxy panel: Kokoro-FastAPI,
   openedai-speech, F5-TTS, OpenAI Cloud — the heavy-model bridge for CosyVoice/F5/XTTS servers.
-- **Qwen TTS verdict**: API-only via DashScope WebSocket (qwen-audio-3.1-tts-*, qwen3-tts-flash-
-  realtime), closed weights, no sherpa/ONNX support — NOT bridgeable via OpenAI-compatible REST.
-  Documented in PurrModels; do not add a Qwen preset without a WebSocket client project.
+- **Qwen3-TTS Native Stack (`v1.7.0`, `ROM-04`)**: Implemented genuinely via native C++ JNI (`app/src/main/cpp/purr_qwen3_jni.cpp` + `Lux-Luna/LunaVox` MIT + `ggml-org/llama.cpp b8470` + `onnxruntime-android:1.31.1`) and `engine/qwen3/Qwen3TtsEngine.kt`. Supports 0.6B CustomVoice (9 multilingual speakers), `SUB-04A` 0.6B Base (3s zero-shot clone), and `SUB-04B` 1.7B VoiceDesign (`profile.voiceDesignPrompt`).
+- **Pure-Kotlin ONNX Runtime Stack (`v1.7.0`, `ROM-05`/`ROM-06`/`SUB-03E`)**: `engine/onnx/OnnxRuntimeEngine.kt` + `core/purr/PurrBpeTokenizer.kt` execute Soprano-80M 32kHz (resampled to 24kHz), NeuTTS-2E Emotional (`assets/neutts_2e_refs.json` + PURR Sentiment emotion control tags + NeuCodec INT8), and Chatterbox-Turbo 350M Q4 (zero-shot cloning + `[laugh]`/`[sigh]`/`[gasp]` paralinguistic tags preserved across Symbol Shield).
+- **Clean 8-Bay Hub Rack (`v1.7.0`)**: Top-level TTS ROMs are unified into `ROM-01..ROM-08`: Kokoro variants (`SUB-02A..D`) nest under `ROM-02`, all 5 cloning engines (`SUB-03A..E`) nest under `ROM-03` container hub (`isHubContainer = true`), Qwen3 expansions nest under `ROM-04`, Kitten Mini (`SUB-07A`) nests under `ROM-07`, and Piper voices + `SUB-08G` MeloTTS English + `SUB-08H` Supertonic 3 + `SUB-08I` Matcha-TTS nest under `ROM-08`. One unified `libonnxruntime.so` (v1.31.1) is enforced in CI by stripping duplicate `jni/*/libonnxruntime.so` from `sherpa-onnx-1.13.8.aar`.
 - **v1.6.1 scars**: (1) `requiredSubCartridgeId` gates ENGINE MOUNTING only — voice AVAILABILITY
   must also accept `modelStates[id] == INSTALLED` for top-level cartridges (they never enter
   `enabledSubCartridges`). (2) **Vocoder sample-rate law**: ALWAYS read the model's README for

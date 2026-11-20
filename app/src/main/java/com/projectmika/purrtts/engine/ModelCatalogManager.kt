@@ -3,6 +3,7 @@ package com.projectmika.purrtts.engine
 import android.content.Context
 import android.util.Log
 import com.projectmika.purrtts.core.purr.BackendType
+import com.projectmika.purrtts.core.purr.BundleAssetFile
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.ModelBundleState
@@ -155,10 +156,17 @@ class ModelCatalogManager(
         if (spec.isArchiveTarBz2 && spec.sherpaFamily != null) {
             runCatching { resolveSherpaExtractDir(spec).deleteRecursively() }
         }
+        if (spec.backend == BackendType.ONNX_NATIVE || spec.backend == BackendType.QWEN3_NATIVE) {
+            runCatching { resolveNativeModelDir(spec.id).deleteRecursively() }
+        }
         repository.updateModelState(spec.id, ModelBundleState(specId = spec.id, state = DownloadState.NOT_INSTALLED))
     }
 
     private suspend fun downloadAndInstall(spec: ModelBundleSpec) = withContext(Dispatchers.IO) {
+        if (spec.extraAssets.isNotEmpty() || spec.backend == BackendType.ONNX_NATIVE || spec.backend == BackendType.QWEN3_NATIVE) {
+            downloadMultiFileNativeBundle(spec)
+            return@withContext
+        }
         val partFile = File(downloadsTempDir, "${spec.fileName}.part")
         val finalFile = resolveDestinationFile(spec)
 
@@ -300,6 +308,141 @@ class ModelCatalogManager(
         }
     }
 
+    /**
+     * ✨ MULTI-FILE NATIVE BUNDLE INSTALLER (v1.7.0) ✨
+     * Downloads primary GGUF/ONNX file + all `extraAssets` (preserving relative subdirs such as
+     * `embeddings/`) into `filesDir/models/native/<specId>/` with HTTP Range resume & SHA-256 checks.
+     */
+    private suspend fun downloadMultiFileNativeBundle(spec: ModelBundleSpec) = withContext(Dispatchers.IO) {
+        val targetDir = resolveNativeModelDir(spec.id).apply { mkdirs() }
+        val extraApproxSum = spec.extraAssets.sumOf { it.approxSizeBytes.coerceAtLeast(1024L) }
+        val totalBytesTarget = spec.approximateSizeMb.toLong() * 1024L * 1024L
+        val primaryApproxBytes = (totalBytesTarget - extraApproxSum).coerceAtLeast(1024L * 1024L)
+        val allAssets = listOf(
+            BundleAssetFile(
+                relativePath = spec.fileName,
+                url = spec.downloadUrl,
+                expectedSha256 = spec.expectedSha256,
+                approxSizeBytes = primaryApproxBytes
+            )
+        ) + spec.extraAssets
+        val totalApproxBytes = allAssets.sumOf { it.approxSizeBytes.coerceAtLeast(1024L) }
+            .coerceAtLeast(totalBytesTarget)
+        var completedBytes = 0L
+
+        try {
+            allAssets.forEachIndexed { idx, asset ->
+                val destFile = File(targetDir, asset.relativePath)
+                destFile.parentFile?.mkdirs()
+                val alreadyValid = destFile.exists() && destFile.length() > 0L && (
+                    asset.expectedSha256.length != 64 ||
+                        computeSha256(destFile).equals(asset.expectedSha256, ignoreCase = true)
+                    )
+                if (alreadyValid) {
+                    completedBytes += destFile.length()
+                    return@forEachIndexed
+                }
+
+                val partFile = File(downloadsTempDir, "${spec.id}_${asset.relativePath.replace('/', '_')}.part")
+                var existingBytes = if (partFile.exists()) partFile.length() else 0L
+                val reqBuilder = Request.Builder().url(asset.url)
+                if (existingBytes > 0L) {
+                    reqBuilder.addHeader("Range", "bytes=$existingBytes-")
+                }
+
+                httpClient.newCall(reqBuilder.build()).execute().use { response ->
+                    if (!response.isSuccessful && response.code != 206) {
+                        throw IllegalStateException("HTTP ${response.code} on ${asset.relativePath}")
+                    }
+                    val isResumed = response.code == 206
+                    if (!isResumed) existingBytes = 0L
+                    val body = response.body ?: throw IllegalStateException("Empty body on ${asset.relativePath}")
+
+                    body.byteStream().use { input ->
+                        FileOutputStream(partFile, isResumed).use { output ->
+                            val buffer = ByteArray(64 * 1024)
+                            var current = existingBytes
+                            var lastUiEmit = 0L
+                            while (true) {
+                                val read = input.read(buffer)
+                                if (read == -1) break
+                                output.write(buffer, 0, read)
+                                current += read
+                                val now = System.currentTimeMillis()
+                                if (now - lastUiEmit >= 200L) {
+                                    lastUiEmit = now
+                                    repository.updateModelState(
+                                        spec.id,
+                                        ModelBundleState(
+                                            specId = spec.id,
+                                            state = DownloadState.DOWNLOADING,
+                                            downloadedBytes = (completedBytes + current).coerceAtMost(totalApproxBytes),
+                                            totalBytes = totalApproxBytes,
+                                            errorMessage = "[${idx + 1}/${allAssets.size}] ${asset.relativePath.substringAfterLast('/')}"
+                                        )
+                                    )
+                                }
+                            }
+                            output.flush()
+                        }
+                    }
+                }
+
+                if (asset.expectedSha256.length == 64) {
+                    repository.updateModelState(
+                        spec.id,
+                        ModelBundleState(
+                            specId = spec.id,
+                            state = DownloadState.VERIFYING,
+                            downloadedBytes = (completedBytes + partFile.length()).coerceAtMost(totalApproxBytes),
+                            totalBytes = totalApproxBytes,
+                            errorMessage = "SHA-256 [${idx + 1}/${allAssets.size}] ${asset.relativePath.substringAfterLast('/')}"
+                        )
+                    )
+                    val actualSha = computeSha256(partFile)
+                    if (!actualSha.equals(asset.expectedSha256, ignoreCase = true)) {
+                        partFile.delete()
+                        throw IllegalStateException("SHA-256 mismatch on ${asset.relativePath}")
+                    }
+                }
+
+                if (destFile.exists()) destFile.delete()
+                if (!partFile.renameTo(destFile)) {
+                    partFile.copyTo(destFile, overwrite = true)
+                    partFile.delete()
+                }
+                completedBytes += destFile.length()
+            }
+
+            repository.updateModelState(
+                spec.id,
+                ModelBundleState(
+                    specId = spec.id,
+                    state = DownloadState.INSTALLED,
+                    downloadedBytes = completedBytes,
+                    totalBytes = completedBytes,
+                    sha256Verified = true,
+                    localPath = targetDir.absolutePath
+                )
+            )
+            Log.i(TAG, "Successfully installed native bundle ${spec.name} (${allAssets.size} files)")
+        } catch (err: Exception) {
+            Log.w(TAG, "Native bundle install failed for ${spec.id}: ${err.message}")
+            repository.updateModelState(
+                spec.id,
+                ModelBundleState(
+                    specId = spec.id,
+                    state = DownloadState.FAILED,
+                    downloadedBytes = completedBytes,
+                    totalBytes = totalApproxBytes,
+                    errorMessage = err.message ?: "Download failed"
+                )
+            )
+        } finally {
+            activeJobs.remove(spec.id)
+        }
+    }
+
     private fun extractTarBz2(archiveFile: File, targetDir: File) {
         targetDir.mkdirs()
         val canonicalRoot = targetDir.canonicalPath
@@ -343,23 +486,40 @@ class ModelCatalogManager(
     private fun resolveDestinationFile(spec: ModelBundleSpec): File = when (spec.backend) {
         BackendType.LITERT_NPU_GPU -> File(context.filesDir, "models/litert/${spec.fileName}")
         BackendType.SHERPA_ONNX -> File(context.filesDir, "models/downloads/${spec.fileName}")
+        BackendType.ONNX_NATIVE,
+        BackendType.QWEN3_NATIVE -> File(resolveNativeModelDir(spec.id), spec.fileName)
         BackendType.CORE_OS,
         BackendType.EXTERNAL_PROXY -> File(context.filesDir, "models/proxy/${spec.fileName}")
     }
 
+    fun resolveNativeModelDir(specId: String): File =
+        File(context.filesDir, "models/native/$specId")
+
     private fun resolveSherpaExtractDir(spec: ModelBundleSpec): File = when (spec.sherpaFamily) {
-        // ✨ PREMIUM TIER (v1.6.0): fp32/v1.1 Kokoro variants extract into per-cartridge dirs
-        // so they never collide with ROM-02's int8 weights (three model.onnx files would fight).
+        // ✨ HUB TIER (v1.7.0): each variant extracts into an isolated dir so weights never collide
         SherpaModelFamily.KOKORO -> if (spec.id != "rom_kokoro_sherpa") {
             File(context.filesDir, "models/sherpa/kokoro_${spec.id}")
         } else {
             File(context.filesDir, "models/sherpa/kokoro")
         }
-        SherpaModelFamily.KITTEN_TTS -> File(context.filesDir, "models/sherpa/kitten")
+        SherpaModelFamily.KITTEN_TTS -> if (spec.id != "rom_kitten_tts") {
+            File(context.filesDir, "models/sherpa/kitten_${spec.id}")
+        } else {
+            File(context.filesDir, "models/sherpa/kitten")
+        }
         SherpaModelFamily.SUPERTONIC_3 -> File(context.filesDir, "models/sherpa/supertonic3")
-        SherpaModelFamily.POCKET_TTS -> File(context.filesDir, "models/sherpa/pocket_tts")
-        SherpaModelFamily.ZIPVOICE -> File(context.filesDir, "models/sherpa/zipvoice")
+        SherpaModelFamily.POCKET_TTS -> if (spec.id != "rom_pocket_tts") {
+            File(context.filesDir, "models/sherpa/pocket_${spec.id}")
+        } else {
+            File(context.filesDir, "models/sherpa/pocket_tts")
+        }
+        SherpaModelFamily.ZIPVOICE -> if (spec.id != "rom_zipvoice") {
+            File(context.filesDir, "models/sherpa/zipvoice_${spec.id}")
+        } else {
+            File(context.filesDir, "models/sherpa/zipvoice")
+        }
         SherpaModelFamily.MATCHA -> File(context.filesDir, "models/sherpa/matcha")
+        SherpaModelFamily.MELO_TTS -> File(context.filesDir, "models/sherpa/melo_${spec.id}")
         SherpaModelFamily.PIPER -> if (spec.isSubCartridge) {
             File(context.filesDir, "models/sherpa/piper_${spec.id}")
         } else {

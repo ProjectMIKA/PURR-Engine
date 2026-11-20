@@ -39,7 +39,23 @@ jobs:
           mkdir -p app/libs
           curl -fSL -o app/libs/sherpa-onnx-1.13.8.aar \
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar"
+          # Keep single unified libonnxruntime.so from onnxruntime-android 1.31.1
+          zip -d app/libs/sherpa-onnx-1.13.8.aar "jni/*/libonnxruntime.so" || true
           ls -lh app/libs/sherpa-onnx-1.13.8.aar
+
+      - name: Fetch Native Qwen3-TTS (LunaVox + llama.cpp b8470 + ORT Headers)
+        run: |
+          TP_DIR="app/src/main/cpp/third_party"
+          rm -rf "$TP_DIR"
+          mkdir -p "$TP_DIR/onnxruntime/include"
+          git clone --depth 1 --branch b8470 https://github.com/ggml-org/llama.cpp.git "$TP_DIR/llama.cpp"
+          git clone --depth 1 https://github.com/Lux-Luna/LunaVox.git "$TP_DIR/lunavox"
+          curl -fSL -o /tmp/ort-android.aar \
+            "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.31.1/onnxruntime-android-1.31.1.aar"
+          unzip -q /tmp/ort-android.aar "headers/*" "jni/arm64-v8a/libonnxruntime.so" "jni/x86_64/libonnxruntime.so" -d "$TP_DIR/onnxruntime"
+          mv "$TP_DIR/onnxruntime/headers/"* "$TP_DIR/onnxruntime/include/"
+          rm -rf /tmp/ort-android.aar "$TP_DIR/onnxruntime/headers"
+          ls -la "$TP_DIR/onnxruntime/include" "$TP_DIR/lunavox/src"
 
       - name: Verify project manifests & structure
         run: python3 scripts/verify_project.py

@@ -33,6 +33,12 @@ object PurrCloneAudioCleaner {
         else -> 5
     }
 
+    /** Optimal reference window in seconds for any Clone Studio engine spec ID. */
+    fun targetClipSecondsForEngine(cloneEngineId: String): Int = when (cloneEngineId) {
+        "rom_zipvoice", "sub_zipvoice_full", "sub_chatterbox_turbo", "sub_qwen3_base_06b" -> 12
+        else -> 5
+    }
+
     enum class NoiseReduction(val beta: Float, val spectralFloor: Float, val label: String) {
         OFF(0f, 1f, "OFF"),
         LIGHT(0.9f, 0.10f, "LIGHT"),
