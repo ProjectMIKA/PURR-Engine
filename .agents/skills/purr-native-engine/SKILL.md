@@ -82,6 +82,26 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - `resolveEffectiveProfile`: requested `voiceName` overrides profile only if the voice exists
   AND its cartridge is slotted.
 
+## PREMIUM TIER + HEAVY-MODEL BRIDGE (v1.6.0)
+- Catalog: ROM-08 `rom_kokoro_fp32` (kokoro-multi-lang-v1_0 fp32, 54 voices — same speaker IDs
+  as ROM-02), ROM-09 `rom_kokoro_v11` (kokoro-int8-multi-lang-v1_1, 103 speakers), ROM-10
+  `rom_matcha_zh_en` (matcha-icefall-zh-en + vocos-22khz-univ vocoder). Real SHA-256 digests
+  pulled from the k2-fsa release API (`gh api .../releases/tags/tts-models --jq '.assets[].digest'`).
+- **Dir collision law**: Kokoro variants extract to `kokoro_${spec.id}` (ROM-02 keeps plain
+  `kokoro`); `SherpaOnnxEngine.familyDir(KOKORO, subCartridgeId)` mirrors it via voice
+  `requiredSubCartridgeId` — three model.onnx files must NEVER share a dir.
+- `ModelBundleSpec.companionUrl/companionFileName/companionExpectedSha256` — resume-capable
+  companion downloads (Matcha's vocoder) verified + copied into the extract dir.
+- `SherpaModelFamily.MATCHA` + engine branch: acoustic = non-vocoder onnx, vocoder =
+  vocos/hifigan onnx, `OfflineTtsMatchaModelConfig(noiseScale = 0.667f)`. AAR 1.13.8 verified
+  to expose it (`android/SherpaOnnxAar/sherpa_onnx/.../Tts.kt` at tag v1.13.8).
+- Router Kokoro regex widened to `[a-z0-9]` for the numeric v1.1 roster (zf_001, zm_100).
+- `PurrProxyPresets` (PurrModels) + preset chips in the advanced proxy panel: Kokoro-FastAPI,
+  openedai-speech, F5-TTS, OpenAI Cloud — the heavy-model bridge for CosyVoice/F5/XTTS servers.
+- **Qwen TTS verdict**: API-only via DashScope WebSocket (qwen-audio-3.1-tts-*, qwen3-tts-flash-
+  realtime), closed weights, no sherpa/ONNX support — NOT bridgeable via OpenAI-compatible REST.
+  Documented in PurrModels; do not add a Qwen preset without a WebSocket client project.
+
 ## MIKA'S ACADEMY + HEADER SYSTEMS (v1.5.0)
 - `core/purr/PurrTutorialSteps.kt` — pure academy data: `TUTORIAL_VERSION` (bump alongside
   versionName on content changes), `PURR_TUTORIAL_STEPS` (8 slides; the boot slide is

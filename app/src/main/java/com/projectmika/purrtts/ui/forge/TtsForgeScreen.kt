@@ -64,6 +64,7 @@ import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrUpdateGate
 import com.projectmika.purrtts.core.purr.PurrForgeState
+import com.projectmika.purrtts.core.purr.PurrProxyPresets
 import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
 import androidx.compose.material3.HorizontalDivider
 import com.projectmika.purrtts.ui.theme.CartridgeSlamOverlay
@@ -578,13 +579,54 @@ fun TtsForgeScreen(
                                 // Expandable LAN Proxy Endpoint (Advanced Voice Network)
                                 item {
                                     ExpandableTerminalSection(
-                                        title = "ADVANCED: LAN OPENAI / KOKORO-FASTAPI PROXY",
+                                        title = "ADVANCED: LAN OPENAI / HEAVY-MODEL PROXY",
                                         subtitle = "Optional remote network endpoint URL",
                                         expanded = showAdvancedProxy,
                                         onToggle = { showAdvancedProxy = !showAdvancedProxy },
                                         accent = MikaColors.NeonCyan
                                     ) {
                                         var proxyUrl by remember(activeProfile.id) { mutableStateOf(activeProfile.proxyConfig.openAiBaseUrl) }
+
+                                        // ✨ HEAVY-MODEL PRESETS (v1.6.0): one tap fills endpoint/model/voice.
+                                        Text(
+                                            text = "> HEAVY_MODEL_PRESETS // TAP_TO_APPLY",
+                                            color = MikaColors.NeonPurple,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 9.sp
+                                        )
+                                        FlowRow(
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            PurrProxyPresets.PRESETS.forEach { preset ->
+                                                MikaTagPill(
+                                                    label = preset.label,
+                                                    selected = proxyUrl == preset.baseUrl,
+                                                    activeColor = MikaColors.NeonPurple,
+                                                    onClick = {
+                                                        proxyUrl = preset.baseUrl
+                                                        viewModel.updateActiveProfile { p ->
+                                                            p.copy(
+                                                                proxyConfig = p.proxyConfig.copy(
+                                                                    openAiBaseUrl = preset.baseUrl,
+                                                                    openAiModel = preset.model,
+                                                                    openAiVoice = preset.voice,
+                                                                    useOpenAiEndpoint = true
+                                                                )
+                                                            )
+                                                        }
+                                                    }
+                                                )
+                                            }
+                                        }
+                                        Text(
+                                            text = "// ${PurrProxyPresets.PRESETS.first().note} — edit URL/voice below to fit your server.",
+                                            color = MikaColors.DimText,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontSize = 8.5.sp
+                                        )
+
                                         OutlinedTextField(
                                             value = proxyUrl,
                                             onValueChange = {

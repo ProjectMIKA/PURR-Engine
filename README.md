@@ -93,7 +93,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.5.1 // Squeaky-Clean Buttons)
+### 🌟 Latest Updates (v1.6.0 // The Heavy Weights)
+
+* **Premium Tier — 10-Bay Rack:** ROM-08 `KOKORO_82M_FP32` (334MB studio weights, same 54 voices as ROM-02, 8GB+ RAM), ROM-09 `KOKORO_V11_MULTILING` (103 speakers — 100 Chinese + 3 English, dual lexicons), ROM-10 `MATCHA_ZH_EN` (flow-matching architecture + Vocos vocoder companion download).
+* **HEAVY_MODEL_PRESETS:** One-tap LAN/cloud presets in the proxy panel — Kokoro-FastAPI, openedai-speech, F5-TTS, OpenAI Cloud — for the true heavyweights on your PC.
+* **Qwen TTS verdict:** API-only (DashScope WebSocket, closed weights) — documented in-source, no preset.
+* **Tests:** `PurrPremiumCatalogTest` — 7 new pure-JVM guards over the premium catalog and rosters. `TUTORIAL_VERSION` → 2 (the Academy auto-pops these patchnotes!).
+
+### 📦 Prior Releases (v1.5.1 // Squeaky-Clean Buttons)
 
 * **Clone Studio Layout Patch:** The `IMPORT_AUDIO_CLIP` and `CLEAN_AUDIO` rows now use weighted label columns with single-line ellipsis; chips read `IMPORT_CLIP` / `ON` / `OFF` on one line, and the format list + recommended hint moved to dim sub-lines. No more wrapped word-salad on narrow screens.
 

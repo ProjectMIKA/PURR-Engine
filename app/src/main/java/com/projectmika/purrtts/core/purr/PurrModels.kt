@@ -8,6 +8,59 @@ import kotlinx.serialization.Serializable
  * Cartridge Bay manager, and the streamlined Compose UI.
  */
 
+/**
+ * ✨ HEAVY-MODEL PROXY PRESETS (v1.6.0) ✨
+ * The "not meant for mobile" tier: any OpenAI-compatible TTS server carries the heavy brain
+ * (CosyVoice, F5-TTS, XTTS-v2, Kokoro fp16 on a GPU box...) while the phone streams audio.
+ * Known-open Qwen TTS verdict: Qwen-Audio-TTS / Qwen3-TTS are DashScope WebSocket-only,
+ * closed weights — NOT reachable through this OpenAI-compatible bridge, so no preset.
+ */
+data class ProxyPreset(
+    val id: String,
+    val label: String,
+    val baseUrl: String,
+    val model: String,
+    val voice: String,
+    val note: String
+)
+
+object PurrProxyPresets {
+    val PRESETS: List<ProxyPreset> = listOf(
+        ProxyPreset(
+            id = "kokoro_fastapi_lan",
+            label = "KOKORO_FASTAPI // LAN",
+            baseUrl = "http://192.168.1.50:8880/v1/audio/speech",
+            model = "kokoro",
+            voice = "af_heart",
+            note = "Kokoro-82M FP16 on your PC — studio quality, GPU speed"
+        ),
+        ProxyPreset(
+            id = "openedai_speech_lan",
+            label = "OPENEDAI_SPEECH // LAN",
+            baseUrl = "http://192.168.1.50:8000/v1/audio/speech",
+            model = "tts-1",
+            voice = "alloy",
+            note = "openedai-speech server — XTTS / Piper mix on your PC"
+        ),
+        ProxyPreset(
+            id = "f5_tts_lan",
+            label = "F5_TTS // LAN",
+            baseUrl = "http://192.168.1.50:8080/v1/audio/speech",
+            model = "f5-tts",
+            voice = "default",
+            note = "F5-TTS OpenAI-compatible wrapper — zero-shot cloning server-side"
+        ),
+        ProxyPreset(
+            id = "openai_official",
+            label = "OPENAI_CLOUD",
+            baseUrl = "https://api.openai.com/v1/audio/speech",
+            model = "gpt-4o-mini-tts",
+            voice = "coral",
+            note = "Official OpenAI TTS — needs an API key, cloud-only"
+        )
+    )
+}
+
 @Serializable
 enum class BackendType(val displayLabel: String) {
     CORE_OS("System Speech (Built-in)"),
@@ -23,7 +76,8 @@ enum class SherpaModelFamily(val label: String) {
     SUPERTONIC_3("Supertonic 3"),
     POCKET_TTS("Pocket TTS (Clone)"),
     ZIPVOICE("ZipVoice (Clone)"),
-    PIPER("Piper VITS")
+    PIPER("Piper VITS"),
+    MATCHA("Matcha-TTS")
 }
 
 @Serializable
@@ -305,6 +359,12 @@ data class ModelBundleSpec(
     val unlocksSummary: String = "",
     val isSubCartridge: Boolean = false,
     val parentCartridgeId: String? = null,
+    // ✨ PREMIUM TIER (v1.6.0): optional companion asset (e.g. Matcha's vocoder) downloaded,
+    // SHA-256-verified and unpacked into the same extract dir as the main archive.
+    val companionUrl: String = "",
+    val companionFileName: String = "",
+    val companionExpectedSha256: String = "",
+    val companionApproxSizeMb: Int = 0,
     val category: CartridgeCategory = CartridgeCategory.TTS
 )
 
@@ -432,7 +492,8 @@ object PurrDefaultPresets {
         cartridgeId: String,
         backend: BackendType,
         idPrefix: String = "",
-        displaySuffix: String = ""
+        displaySuffix: String = "",
+        requiredSubCartridgeId: String? = null
     ): List<VoiceDescriptor> {
         val kokoroIds = listOf(
             "af_heart", "af_alloy", "af_aoede", "af_bella", "af_jessica", "af_kore",
@@ -478,10 +539,70 @@ object PurrDefaultPresets {
                 gender = gender,
                 languageCode = lang,
                 speakerIndex = idx,
-                nativeTags = tags
+                nativeTags = tags,
+                requiredSubCartridgeId = requiredSubCartridgeId
             )
         }
     }
+
+    /**
+     * ✨ KOKORO v1.1-zh ROSTER (ROM-09, 103 speakers) ✨
+     * Speaker IDs 0..102 in weights order: 2 English (af_maple, af_sol, bf_vale = 3),
+     * 55 Chinese female (zf_*), 45 Chinese male (zm_*). sid = list index.
+     */
+    private val KOKORO_V11_ROSTER: List<String> = listOf(
+        "af_maple", "af_sol", "bf_vale",
+        "zf_001", "zf_002", "zf_003", "zf_004", "zf_005", "zf_006", "zf_007", "zf_008", "zf_017",
+        "zf_018", "zf_019", "zf_021", "zf_022", "zf_023", "zf_024", "zf_026", "zf_027", "zf_028",
+        "zf_032", "zf_036", "zf_038", "zf_039", "zf_040", "zf_042", "zf_043", "zf_044", "zf_046",
+        "zf_047", "zf_048", "zf_049", "zf_051", "zf_059", "zf_060", "zf_067", "zf_070", "zf_071",
+        "zf_072", "zf_073", "zf_074", "zf_075", "zf_076", "zf_077", "zf_078", "zf_079", "zf_083",
+        "zf_084", "zf_085", "zf_086", "zf_087", "zf_088", "zf_090", "zf_092", "zf_093", "zf_094",
+        "zf_099",
+        "zm_009", "zm_010", "zm_011", "zm_012", "zm_013", "zm_014", "zm_015", "zm_016", "zm_020",
+        "zm_025", "zm_029", "zm_030", "zm_031", "zm_033", "zm_034", "zm_035", "zm_037", "zm_041",
+        "zm_045", "zm_050", "zm_052", "zm_053", "zm_054", "zm_055", "zm_056", "zm_057", "zm_058",
+        "zm_061", "zm_062", "zm_063", "zm_064", "zm_065", "zm_066", "zm_068", "zm_069", "zm_080",
+        "zm_081", "zm_082", "zm_089", "zm_091", "zm_095", "zm_096", "zm_097", "zm_098", "zm_100"
+    )
+
+    fun kokoroV11Voices(cartridgeId: String, backend: BackendType): List<VoiceDescriptor> =
+        KOKORO_V11_ROSTER.mapIndexed { sid, id ->
+            val prefix = id.substringBefore('_')
+            val gender = if (prefix.endsWith("m")) VoiceGender.MALE else VoiceGender.FEMALE
+            val lang = when (prefix.firstOrNull()) {
+                'z' -> "zh-CN"
+                'b' -> "en-GB"
+                else -> "en-US"
+            }
+            VoiceDescriptor(
+                id = id,
+                displayName = id.split('_').joinToString(" ") { p -> p.replaceFirstChar { it.uppercase() } } +
+                    if (lang == "zh-CN") " (中文)" else "",
+                engine = backend,
+                cartridgeId = cartridgeId,
+                sherpaFamily = SherpaModelFamily.KOKORO,
+                gender = gender,
+                languageCode = lang,
+                speakerIndex = sid,
+                nativeTags = listOf(gender.tag, if (lang == "zh-CN") "chinese" else "american", "kokoro", "v11", "multilingual"),
+                requiredSubCartridgeId = cartridgeId
+            )
+        }
+
+    fun matchaVoices(cartridgeId: String, backend: BackendType): List<VoiceDescriptor> = listOf(
+        VoiceDescriptor(
+            id = "matcha_narrator",
+            displayName = "Matcha Narrator (ZH/EN)",
+            engine = backend,
+            cartridgeId = cartridgeId,
+            sherpaFamily = SherpaModelFamily.MATCHA,
+            gender = VoiceGender.FEMALE,
+            languageCode = "zh-CN",
+            speakerIndex = 0,
+            nativeTags = listOf("female", "narrator", "matcha", "flow", "chinese", "multilingual", "bilingual")
+        )
+    )
 
     fun builtInVoices(): List<VoiceDescriptor> {
         val coreOsVoices = listOf(
@@ -497,6 +618,14 @@ object PurrDefaultPresets {
         )
 
         val kokoroSherpa = kokoroVoices("rom_kokoro_sherpa", BackendType.SHERPA_ONNX)
+        val kokoroFp32 = kokoroVoices(
+            "rom_kokoro_fp32",
+            BackendType.SHERPA_ONNX,
+            displaySuffix = " FP32",
+            requiredSubCartridgeId = "rom_kokoro_fp32"
+        )
+        val kokoroV11 = kokoroV11Voices("rom_kokoro_v11", BackendType.SHERPA_ONNX)
+        val matcha = matchaVoices("rom_matcha_zh_en", BackendType.SHERPA_ONNX)
 
         val kittenVoices = listOf(
             VoiceDescriptor(
@@ -731,7 +860,7 @@ object PurrDefaultPresets {
             )
         )
 
-        return coreOsVoices + kokoroSherpa + kittenVoices + sherpaSpecialized + proxyVoices
+        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + sherpaSpecialized + proxyVoices
     }
 
     /**
@@ -1110,6 +1239,70 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = true,
             hardwareAccelNote = "ONNX Runtime INT8 + Vocos",
             unlocksSummary = "UNLOCKS: High-fidelity flow-matching zero-shot Voice Cloning in the Clone Studio + ZipVoice base voice.",
+            category = CartridgeCategory.TTS
+        ),
+        // =========================================================================
+        // PREMIUM TIER (v1.6.0): heavier, higher-fidelity engines for strong phones
+        // =========================================================================
+        ModelBundleSpec(
+            id = "rom_kokoro_fp32",
+            romCode = "ROM-08",
+            badge = "FP32_STUDIO",
+            accentHex = 0xFFFFD700,
+            name = "KOKORO_82M_FP32",
+            subtitle = "Studio-Precision Full Weights • Same 54 Voices as ROM-02 • 8GB+ RAM",
+            description = "The unquantized full-precision Kokoro-82M weights. Identical 54-voice roster to ROM-02, but with noticeably richer breath, sibilance and emotional depth. Heavy: needs a strong phone and ~350MB of RAM while resident.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.KOKORO,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2",
+            fileName = "kokoro-multi-lang-v1_0.tar.bz2",
+            expectedSha256 = "60703707bc05ccd48d60e1eb723f38b07d6e474795a0b6a588d7220400e0f7a4",
+            approximateSizeMb = 334,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "FP32 CPU • 8GB+ RAM Recommended • 5-min Idle Eviction",
+            unlocksSummary = "UNLOCKS: All 54 Kokoro Voices at full studio precision (fp32 weights, zero quantization).",
+            category = CartridgeCategory.TTS
+        ),
+        ModelBundleSpec(
+            id = "rom_kokoro_v11",
+            romCode = "ROM-09",
+            badge = "103_VOICES_ZH_EN",
+            accentHex = 0xFF00E5FF,
+            name = "KOKORO_V11_MULTILING",
+            subtitle = "Kokoro v1.1-zh INT8 • 103 Speakers • Chinese + English",
+            description = "The newest Kokoro generation: 103 speakers including 100 Chinese voices (55 female zf_*, 45 male zm_*) plus af_maple, af_sol and bf_vale in English. Fully bilingual synthesis in one cartridge.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.KOKORO,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_1.tar.bz2",
+            fileName = "kokoro-int8-multi-lang-v1_1.tar.bz2",
+            expectedSha256 = "259c9c8bc906d6078e4e0570421885dabb68b539c2f970fcbb890a58eeaf3e9c",
+            approximateSizeMb = 140,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "INT8 CPU • ARM64 NEON • Dual Lexicon (EN + ZH)",
+            unlocksSummary = "UNLOCKS: 103 Kokoro v1.1 speakers — 100 Chinese voices + af_maple / af_sol / bf_vale.",
+            category = CartridgeCategory.TTS
+        ),
+        ModelBundleSpec(
+            id = "rom_matcha_zh_en",
+            romCode = "ROM-10",
+            badge = "FLOW_NARRATOR",
+            accentHex = 0xFF9146FF,
+            name = "MATCHA_ZH_EN",
+            subtitle = "Matcha-TTS Flow Synthesis • Chinese + English • + Vocos Vocoder (51MB)",
+            description = "Matcha-TTS flow-matching synthesis — a completely different neural architecture with astonishingly natural prosody and blazing synthesis speed (RTF < 1 even on old hardware). Ships with the Vocos universal vocoder.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.MATCHA,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-zh-en.tar.bz2",
+            fileName = "matcha-icefall-zh-en.tar.bz2",
+            expectedSha256 = "271b804af570400d3bcdcb53bf6e53cc9f75180ee763b9f13eb5eaf2b0d086ef",
+            approximateSizeMb = 75,
+            isArchiveTarBz2 = true,
+            companionUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-22khz-univ.onnx",
+            companionFileName = "vocos-22khz-univ.onnx",
+            companionExpectedSha256 = "0574a135aa1db2de6e181050db2ec528496cacd4a4701fc5d7faf9f9804c0081",
+            companionApproxSizeMb = 51,
+            hardwareAccelNote = "ONNX CPU • Flow-Matching + Vocos Vocoder • Very Fast RTF",
+            unlocksSummary = "UNLOCKS: Matcha-TTS bilingual flow synthesis with the Vocos vocoder.",
             category = CartridgeCategory.TTS
         ),
         // Optional Expansion Sub-Cartridges for ROM-02 (KOKORO_82M_NEURAL)

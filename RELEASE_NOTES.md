@@ -1,3 +1,25 @@
+# 🌌 PURR-TTS v1.6.0 // The Heavy Weights
+
+### ✨ What's New since v1.5.1
+
+The Forge grows a **premium tier** — bigger, heavier, higher-fidelity engines for strong phones, plus a bridge to the true "not meant for mobile" giants. The rack is now **10 bays**! 🏋️🐾
+
+* **🏋️ ROM-08 `KOKORO_82M_FP32` (334MB)**: The unquantized full-precision Kokoro weights — the same 54-voice roster as ROM-02 but with noticeably richer breath, sibilance and emotional depth. Studio grade; needs 8GB+ RAM (warned on the cartridge, protected by the 5-min eviction timer).
+* **🎙️ ROM-09 `KOKORO_V11_MULTILING` (140MB INT8)**: Kokoro v1.1-zh — **103 speakers**: `af_maple`, `af_sol`, `bf_vale` in English plus 100 Chinese voices (55 female `zf_*`, 45 male `zm_*`). Fully bilingual synthesis with dual lexicons (EN + ZH), all offline.
+* **🍵 ROM-10 `MATCHA_ZH_EN` (75MB + 51MB vocoder)**: Matcha-TTS flow-matching synthesis — a completely different neural architecture with astonishingly natural prosody and blazing speed (RTF < 1 even on a Raspberry Pi). The **Vocos vocoder ships as a SHA-256-verified companion download** unpacked into the same cartridge dir.
+* **🌉 HEAVY_MODEL_PRESETS**: The LAN proxy panel gains one-tap presets — **Kokoro-FastAPI**, **openedai-speech**, **F5-TTS wrapper**, and **OpenAI Cloud** — so the true giants (CosyVoice, F5-TTS, XTTS-v2) run on your PC while the phone streams through the full PURR pipeline. (Investigated Qwen TTS: DashScope WebSocket-only, closed weights — not reachable through an OpenAI-compatible bridge, documented in-source.)
+* **🔧 ENGINEERING**: Per-cartridge Kokoro extract dirs (no more `model.onnx` collisions), a new `MATCHA` sherpa family with acoustic+vocoder config, voice routing for the numeric v1.1 roster (`zf_001`), and resume-capable companion-asset downloads.
+* **🧪 +7 PURE-JVM TESTS**: `PurrPremiumCatalogTest` — digest format, bay sequence, companion verification fields, the 54-voice fp32 mirror (byte-identical IDs & speaker indexes to ROM-02), the full 103-speaker v1.1 roster with correct language split, and Qwen-free proxy presets. The patchnotes you're reading? The Academy pops this up automatically — `TUTORIAL_VERSION` bumped to 2!
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.6.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `11`) with the premium cartridge tier, heavy-model proxy presets, and the 10-bay rack.
+2. **`PURR-TTS_V1.6.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.5.1 // Squeaky-Clean Buttons
 
 ### ✨ What's New since v1.5.0

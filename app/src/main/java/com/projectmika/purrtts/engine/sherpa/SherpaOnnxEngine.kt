@@ -7,6 +7,7 @@ import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKittenModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsKokoroModelConfig
+import com.k2fsa.sherpa.onnx.OfflineTtsMatchaModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsPocketModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsSupertonicModelConfig
@@ -239,11 +240,18 @@ class SherpaOnnxEngine(
     }
 
     fun familyDir(family: SherpaModelFamily, subCartridgeId: String? = null): File = when (family) {
-        SherpaModelFamily.KOKORO -> File(modelsBaseDir, "kokoro")
+        // ✨ PREMIUM TIER (v1.6.0): per-cartridge Kokoro dirs — ROM-08 fp32 / ROM-09 v1.1 keep
+        // their weights isolated from ROM-02's int8 (voices carry requiredSubCartridgeId).
+        SherpaModelFamily.KOKORO -> if (subCartridgeId != null) {
+            File(modelsBaseDir, "kokoro_$subCartridgeId")
+        } else {
+            File(modelsBaseDir, "kokoro")
+        }
         SherpaModelFamily.KITTEN_TTS -> File(modelsBaseDir, "kitten")
         SherpaModelFamily.SUPERTONIC_3 -> File(modelsBaseDir, "supertonic3")
         SherpaModelFamily.POCKET_TTS -> File(modelsBaseDir, "pocket_tts")
         SherpaModelFamily.ZIPVOICE -> File(modelsBaseDir, "zipvoice")
+        SherpaModelFamily.MATCHA -> File(modelsBaseDir, "matcha")
         SherpaModelFamily.PIPER -> if (subCartridgeId != null) {
             File(modelsBaseDir, "piper_$subCartridgeId")
         } else {
@@ -332,6 +340,38 @@ class SherpaOnnxEngine(
                         ttsJson = ttsJson,
                         unicodeIndexer = uniIdx,
                         voiceStyle = vStyle
+                    ),
+                    numThreads = 4,
+                    provider = "cpu"
+                )
+            }
+            SherpaModelFamily.MATCHA -> {
+                // Acoustic model + Vocos/HiFi-GAN vocoder (companion asset).
+                val acoustic = files.firstOrNull {
+                    it.extension.equals("onnx", ignoreCase = true) &&
+                        !it.name.contains("vocos", ignoreCase = true) &&
+                        !it.name.contains("hifigan", ignoreCase = true) &&
+                        !it.name.contains("vocoder", ignoreCase = true)
+                }?.absolutePath.orEmpty()
+                val vocoder = files.firstOrNull {
+                    it.extension.equals("onnx", ignoreCase = true) &&
+                        (it.name.contains("vocos", ignoreCase = true) ||
+                            it.name.contains("hifigan", ignoreCase = true) ||
+                            it.name.contains("vocoder", ignoreCase = true))
+                }?.absolutePath.orEmpty()
+                if (acoustic.isEmpty() || vocoder.isEmpty()) {
+                    Log.w(TAG, "Matcha missing required asset (acoustic=$acoustic, vocoder=$vocoder)")
+                    return
+                }
+                OfflineTtsModelConfig(
+                    matcha = OfflineTtsMatchaModelConfig(
+                        acousticModel = acoustic,
+                        vocoder = vocoder,
+                        lexicon = lexicons,
+                        tokens = tokensPath,
+                        dataDir = dataDir,
+                        noiseScale = 0.667f,
+                        lengthScale = 1.0f
                     ),
                     numThreads = 4,
                     provider = "cpu"
@@ -464,6 +504,7 @@ class SherpaOnnxEngine(
             cleanId.contains("pocket", ignoreCase = true) -> SherpaModelFamily.POCKET_TTS
             cleanId.contains("zipvoice", ignoreCase = true) -> SherpaModelFamily.ZIPVOICE
             cleanId.contains("piper", ignoreCase = true) -> SherpaModelFamily.PIPER
+            cleanId.contains("matcha", ignoreCase = true) -> SherpaModelFamily.MATCHA
             else -> defaultFamily
         }
     }
