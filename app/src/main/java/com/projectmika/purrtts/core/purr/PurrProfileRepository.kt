@@ -332,7 +332,13 @@ class PurrProfileRepository(context: Context) {
     fun allAvailableVoices(): List<VoiceDescriptor> {
         val piperBaseInstalled = _state.value.modelStates["rom_piper"]?.state == DownloadState.INSTALLED
         val base = PurrDefaultPresets.builtInVoices().filter { v ->
-            val subOk = v.requiredSubCartridgeId == null || isSubCartridgeEnabled(v.requiredSubCartridgeId)
+            // ✨ v1.6.1 FIX: `requiredSubCartridgeId` gates ENGINE MOUNTING (model dir), so a
+            // voice is available when its dependency is a toggled sub-cartridge OR a top-level
+            // cartridge that is INSTALLED (premium ROMs like rom_kokoro_fp32/v11 live in
+            // modelStates, never in enabledSubCartridges).
+            val subOk = v.requiredSubCartridgeId == null ||
+                isSubCartridgeEnabled(v.requiredSubCartridgeId) ||
+                _state.value.modelStates[v.requiredSubCartridgeId]?.state == DownloadState.INSTALLED
             val basePiperOk = !(v.cartridgeId == "rom_piper" && v.requiredSubCartridgeId == null && !piperBaseInstalled)
             subOk && basePiperOk
         }

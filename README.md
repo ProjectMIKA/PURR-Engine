@@ -93,7 +93,12 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.6.0 // The Heavy Weights)
+### 🌟 Latest Updates (v1.6.1 // The Right Vocoder)
+
+* **Premium Voices Selectable:** The fp32/v1.1 rosters were caught by the sub-cartridge availability gate; voice availability now also accepts an INSTALLED top-level cartridge in `modelStates` — 54 fp32 + 103 v1.1 voices appear as soon as their cartridge is slammed.
+* **Matcha Vocoder Fixed:** `matcha-icefall-zh-en` is a **16kHz** model — companion switched from vocos-22khz (robotic garbage) to **vocos-16khz-univ.onnx**, stale vocoder variants auto-removed, and a silent background migration re-fetches the correct vocoder for existing installs.
+
+### 📦 Prior Releases (v1.6.0 // The Heavy Weights)
 
 * **Premium Tier — 10-Bay Rack:** ROM-08 `KOKORO_82M_FP32` (334MB studio weights, same 54 voices as ROM-02, 8GB+ RAM), ROM-09 `KOKORO_V11_MULTILING` (103 speakers — 100 Chinese + 3 English, dual lexicons), ROM-10 `MATCHA_ZH_EN` (flow-matching architecture + Vocos vocoder companion download).
 * **HEAVY_MODEL_PRESETS:** One-tap LAN/cloud presets in the proxy panel — Kokoro-FastAPI, openedai-speech, F5-TTS, OpenAI Cloud — for the true heavyweights on your PC.

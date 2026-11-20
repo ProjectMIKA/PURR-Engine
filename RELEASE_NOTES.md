@@ -1,3 +1,21 @@
+# 🌌 PURR-TTS v1.6.1 // The Right Vocoder
+
+### ✨ What's New since v1.6.0
+
+Two live-testing fixes for the premium tier — one invisible, one audible! 🐾
+
+* **🎙️ PREMIUM VOICES NOW SELECTABLE (`PurrProfileRepository`)**: The fp32/v1.1 voice rosters were filtered out by the sub-cartridge availability gate (`enabledSubCartridges`), which top-level ROMs never enter. Voice availability now also accepts a top-level cartridge that is **INSTALLED** in `modelStates` — all 54 fp32 voices and all 103 v1.1 speakers appear in the selector the moment their cartridge is slammed.
+* **🍵 MATCHA VOCODER FIXED (16kHz!)**: The `matcha-icefall-zh-en` model card requires **`vocos-16khz-univ.onnx`** — the model is 16kHz and v1.6.0 shipped the 22kHz vocoder, producing robotic garbage. The companion spec now points at the 16kHz vocoder (digest-verified), stale vocoder variants are auto-removed on install, and a **self-healing companion migration** re-fetches the right vocoder for already-installed cartridges on first launch of the update. No manual re-download needed.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.6.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `12`) with the premium voice-availability fix and the correct Matcha vocoder.
+2. **`PURR-TTS_V1.6.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.6.0 // The Heavy Weights
 
 ### ✨ What's New since v1.5.1

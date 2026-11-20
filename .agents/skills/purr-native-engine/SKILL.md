@@ -101,6 +101,12 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - **Qwen TTS verdict**: API-only via DashScope WebSocket (qwen-audio-3.1-tts-*, qwen3-tts-flash-
   realtime), closed weights, no sherpa/ONNX support — NOT bridgeable via OpenAI-compatible REST.
   Documented in PurrModels; do not add a Qwen preset without a WebSocket client project.
+- **v1.6.1 scars**: (1) `requiredSubCartridgeId` gates ENGINE MOUNTING only — voice AVAILABILITY
+  must also accept `modelStates[id] == INSTALLED` for top-level cartridges (they never enter
+  `enabledSubCartridges`). (2) **Vocoder sample-rate law**: ALWAYS read the model's README for
+  its vocoder + rate (matcha-icefall-zh-en = 16kHz + vocos-16khz-univ, NOT the 22kHz example
+  vocoder!) — a rate-mismatched vocoder outputs robotic garbage. Companion installs now scrub
+  stale vocoder variants, and a manager-init migration self-heals already-installed cartridges.
 
 ## MIKA'S ACADEMY + HEADER SYSTEMS (v1.5.0)
 - `core/purr/PurrTutorialSteps.kt` — pure academy data: `TUTORIAL_VERSION` (bump alongside
