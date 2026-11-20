@@ -1,3 +1,22 @@
+# 🌌 PURR-TTS v1.6.2 // One Voice, One Name
+
+### ✨ What's New since v1.6.1
+
+The premium Kokoro cartridges were fail-softing to stock OS voices — root cause found and fixed at the identity level! 🐾
+
+* **🔎 THE VOICE-ID COLLISION FIX**: ROM-08's fp32 roster reused ROM-02's exact voice IDs (`af_heart`, `af_bella`...), and every synthesis-time lookup resolves the FIRST match — ROM-02's descriptor, which mounts the plain `kokoro` weights dir. With ROM-02's int8 not installed, the outcome was empty → the fail-soft router handed the utterance to **CORE_OS stock voices**. Premium rosters now carry **globally unique prefixed IDs** (`fp32_af_heart`, `v11_af_maple`, `v11_zf_001`...) so the router, speaker resolver and weights-dir mount all land on the right cartridge every time.
+* **🔁 SELECTION MIGRATION**: Profiles saved while the bug was live (primary/dialogue voice pointing at bare ids) are remapped to the new prefixed IDs on first launch — no re-selection needed.
+* **🧪 +1 LAW TEST**: `all built-in voice ids are globally unique across cartridges` — this class of routing bug can never compile-ship again.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.6.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `13`) with the unique voice-ID routing fix and selection migration.
+2. **`PURR-TTS_V1.6.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.6.1 // The Right Vocoder
 
 ### ✨ What's New since v1.6.0
