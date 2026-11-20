@@ -141,6 +141,37 @@ object PurrTextProcessor {
     private val STUTTER_DIGRAPHS = setOf("th", "sh", "ch", "ph", "wh", "qu")
     private val HONORIFIC_SUFFIXES = setOf("san", "chan", "kun", "sama", "senpai", "sensei")
 
+    val CHATTERBOX_PARALINGUISTIC_TAGS: Set<String> = setOf(
+        "laugh", "chuckle", "sigh", "gasp", "cough", "clear throat",
+        "groan", "snort", "shush", "whispering", "crying", "yawn",
+        "angry", "excited", "sad", "happy", "surprised", "fearful", "disgusted"
+    )
+    private val CHATTERBOX_TAG_REGEX = Regex("\\[(${CHATTERBOX_PARALINGUISTIC_TAGS.joinToString("|") { Regex.escape(it) }})]", RegexOption.IGNORE_CASE)
+    private val CHATTERBOX_RESTORE_REGEX = Regex("\\bpurrcbtag(\\d+)purr\\b")
+    private val ACTION_LAUGH_REGEX = Regex("\\*(?:laughs?|giggles?)\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_CHUCKLE_REGEX = Regex("\\*(?:chuckles?|snickers?)\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_SIGH_REGEX = Regex("\\*sighs?\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_GASP_REGEX = Regex("\\*gasps?\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_COUGH_REGEX = Regex("\\*coughs?\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_THROAT_REGEX = Regex("\\*clears?\\s+throat\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_GROAN_REGEX = Regex("\\*groans?\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_WHISPER_REGEX = Regex("\\*whispers?\\*", RegexOption.IGNORE_CASE)
+    private val ACTION_YAWN_REGEX = Regex("\\*yawns?\\*", RegexOption.IGNORE_CASE)
+
+    fun mapActionsToChatterboxTags(input: String): String {
+        var s = input
+        s = ACTION_LAUGH_REGEX.replace(s, " [laugh] ")
+        s = ACTION_CHUCKLE_REGEX.replace(s, " [chuckle] ")
+        s = ACTION_SIGH_REGEX.replace(s, " [sigh] ")
+        s = ACTION_GASP_REGEX.replace(s, " [gasp] ")
+        s = ACTION_COUGH_REGEX.replace(s, " [cough] ")
+        s = ACTION_THROAT_REGEX.replace(s, " [clear throat] ")
+        s = ACTION_GROAN_REGEX.replace(s, " [groan] ")
+        s = ACTION_WHISPER_REGEX.replace(s, " [whispering] ")
+        s = ACTION_YAWN_REGEX.replace(s, " [yawn] ")
+        return MULTI_SPACE_REGEX.replace(s, " ").trim()
+    }
+
     private val REPLY_PREFIX_REGEX = Regex("\\[Replying to.*?]", RegexOption.IGNORE_CASE)
     private val EMOJI_VAPORIZER_REGEX = Regex("[\\x{1F300}-\\x{1FAFF}\\x{2600}-\\x{27BF}\\u200B-\\u200D\\uFE0E\\uFE0F]")
     private val ROLE_SPLIT_ACTION_ONLY_REGEX = Regex("(\\*[^*]+\\*)")
@@ -185,10 +216,16 @@ object PurrTextProcessor {
         customRules: List<PhoneticRule> = emptyList(),
         rng: Random = Random(rawText.hashCode()),
         purrModuleActive: Boolean = true,
-        symbolShieldModuleActive: Boolean = true
+        symbolShieldModuleActive: Boolean = true,
+        isChatterboxVoice: Boolean = false
     ): List<PurrChunk> {
-        val strippedReply = normalizeTypography(REPLY_PREFIX_REGEX.replace(rawText, "")).trim()
+        var strippedReply = normalizeTypography(REPLY_PREFIX_REGEX.replace(rawText, "")).trim()
         if (strippedReply.isEmpty()) return emptyList()
+
+        val chatterboxActive = isChatterboxVoice || profile.primaryVoiceId.startsWith("chatterbox_")
+        if (chatterboxActive) {
+            strippedReply = mapActionsToChatterboxTags(strippedReply)
+        }
 
         // Effective profile honors Tool Cartridge slotting (Ejecting TOOL-01 disables PURR rewriting;
         // Ejecting TOOL-03 disables Symbol & Punctuation Shield).
@@ -267,6 +304,7 @@ object PurrTextProcessor {
                 role = segment.role
             )
             val targetVoiceId = resolveTargetVoiceId(segment.role, effectiveProfile)
+            val preserveCb = chatterboxActive || targetVoiceId.startsWith("chatterbox_")
 
             var cursor = 0
             for (match in MIKASTOP_TOKEN_REGEX.findAll(tokenized)) {
@@ -278,7 +316,8 @@ object PurrTextProcessor {
                     prosody = prosody,
                     sentiment = sentiment,
                     profile = effectiveProfile,
-                    out = output
+                    out = output,
+                    preserveChatterboxTags = preserveCb
                 )
 
                 val durationMs = match.groupValues[1].toIntOrNull()?.coerceIn(40, 4000) ?: 250
@@ -296,7 +335,8 @@ object PurrTextProcessor {
                     prosody = prosody,
                     sentiment = sentiment,
                     profile = effectiveProfile,
-                    out = output
+                    out = output,
+                    preserveChatterboxTags = preserveCb
                 )
             }
         }
@@ -323,7 +363,8 @@ object PurrTextProcessor {
         purrModuleActive: Boolean = true,
         symbolShieldModuleActive: Boolean = true,
         targetChunkCharsOverride: Int = 240,
-        paragraphPauseMs: Int = 550
+        paragraphPauseMs: Int = 550,
+        isChatterboxVoice: Boolean = false
     ): List<PurrChunk> {
         val normalized = normalizeTypography(rawText).trim()
         if (normalized.isEmpty()) return emptyList()
@@ -350,7 +391,8 @@ object PurrTextProcessor {
                 profile = exportProfile,
                 customRules = customRules,
                 purrModuleActive = purrModuleActive,
-                symbolShieldModuleActive = symbolShieldModuleActive
+                symbolShieldModuleActive = symbolShieldModuleActive,
+                isChatterboxVoice = isChatterboxVoice
             )
             // Always coalesce complete sentences for smooth long-form exports even if Symbol Shield is off.
             val coalesced = coalesceSentenceChunks(rawParaChunks, effectiveTarget)
@@ -681,10 +723,20 @@ object PurrTextProcessor {
 
     fun sanitizeSpeechChunk(
         rawChunk: String,
-        profile: PurrProfile = PurrProfile(id = "default", name = "Default")
+        profile: PurrProfile = PurrProfile(id = "default", name = "Default"),
+        preserveChatterboxTags: Boolean = false
     ): String {
         var chunk = normalizeTypography(rawChunk).trim()
         if (chunk.isEmpty()) return ""
+
+        val preservedCbTags = mutableListOf<String>()
+        if (preserveChatterboxTags) {
+            chunk = CHATTERBOX_TAG_REGEX.replace(chunk) { m ->
+                val idx = preservedCbTags.size
+                preservedCbTags += "[${m.groupValues[1].lowercase()}]"
+                " purrcbtag${idx}purr "
+            }
+        }
 
         // Ensure phonetic sighs trigger breath artifacts
         chunk = SIGH_REGEX.replace(chunk) { m -> "${m.groupValues[1]}. " }
@@ -766,6 +818,14 @@ object PurrTextProcessor {
         }
 
         if (chunk == "." || chunk == "," || chunk == "!" || chunk == "?") return ""
+        if (preservedCbTags.isNotEmpty()) {
+            chunk = CHATTERBOX_RESTORE_REGEX.replace(chunk) { m ->
+                val idx = m.groupValues[1].toIntOrNull()
+                if (idx != null && idx in preservedCbTags.indices) preservedCbTags[idx] else ""
+            }
+            chunk = COLLISION_SPACE_REGEX.replace(chunk, "$1")
+            chunk = MULTI_SPACE_REGEX.replace(chunk, " ").trim()
+        }
         return chunk
     }
 
@@ -776,9 +836,10 @@ object PurrTextProcessor {
         prosody: PurrSentimentScorer.ProsodyModulation,
         sentiment: SentimentResult,
         profile: PurrProfile,
-        out: MutableList<PurrChunk>
+        out: MutableList<PurrChunk>,
+        preserveChatterboxTags: Boolean = false
     ) {
-        val sanitized = sanitizeSpeechChunk(rawChunk, profile)
+        val sanitized = sanitizeSpeechChunk(rawChunk, profile, preserveChatterboxTags = preserveChatterboxTags)
         if (sanitized.isNotEmpty()) {
             out += PurrChunk.Speech(
                 text = sanitized,

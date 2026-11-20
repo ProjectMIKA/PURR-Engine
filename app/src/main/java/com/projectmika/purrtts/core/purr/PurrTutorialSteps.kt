@@ -14,7 +14,7 @@ package com.projectmika.purrtts.core.purr
  */
 
 /** Bump alongside versionName in app/build.gradle.kts whenever tutorial content changes. */
-const val TUTORIAL_VERSION = 2
+const val TUTORIAL_VERSION = 3
 
 const val PURR_REPO_URL = "https://github.com/ProjectMIKA/PURR-Engine"
 const val PURR_KOFI_URL = "https://ko-fi.com/projectmika"
@@ -64,7 +64,7 @@ val PURR_TUTORIAL_STEPS: List<PurrTutorialStep> = listOf(
         iconGlyph = "💾",
         title = "SLAM_SOME_ENGINES",
         colorHex = 0xFF00E5FF,
-        body = "The CARTRIDGE BAY tab now holds 10 swappable TTS engines. ROM-03: KITTEN_TTS_NANO is the quick win — only 30MB for 8 expressive voices. ROM-02: KOKORO_82M packs 54 neural voices, ROM-09 adds 103 Chinese+English speakers, and ROM-08/ROM-10 are the premium tier: full-precision FP32 weights and the blazing Matcha-TTS flow engine. ROM-01 is your device's built-in speech, free forever. Downloads are SHA-256 verified and resumable."
+        body = "The CARTRIDGE BAY is now an 8-Bay Hub Rack! Every engine family lives under its own Bay: ROM-02 unifies Kokoro INT8, FP32, v1.1 (103 voices) & NPU/GPU accelerators; ROM-03 unifies Pocket, ZipVoice & Chatterbox-Turbo cloning; ROM-04 brings native Qwen3-TTS; ROM-05 brings NeuTTS-2E Emotional; ROM-06 adds Soprano-80M 32kHz; ROM-07 unifies KittenTTS Nano+Mini; and ROM-08 unites Piper, MeloTTS, Matcha & Supertonic 3. ROM-01 stays free forever."
     ),
     PurrTutorialStep(
         id = "CHOOSE_AND_TEST",
@@ -98,32 +98,32 @@ val PURR_TUTORIAL_STEPS: List<PurrTutorialStep> = listOf(
 
 val PURR_WHATS_NEW: List<PurrWhatsNewEntry> = listOf(
     PurrWhatsNewEntry(
-        id = "THE_HEAVY_WEIGHTS",
-        iconGlyph = "🏋️",
+        id = "QWEN3_TTS_NATIVE",
+        iconGlyph = "👑",
         colorHex = 0xFFFFD700,
-        title = "THE_HEAVY_WEIGHTS",
-        body = "Three premium engine cartridges landed in the Bay: ROM-08 KOKORO_82M_FP32 (unquantized studio weights, same 54 voices as ROM-02, 8GB+ RAM), ROM-09 KOKORO_V11_MULTILING (140MB INT8), and ROM-10 MATCHA_ZH_EN — a completely new flow-matching architecture with the Vocos vocoder. The rack is now 10 bays!"
+        title = "QWEN3_TTS_NATIVE_JNI",
+        body = "ROM-04 runs Alibaba Qwen3-TTS completely offline via llama.cpp GGUF + ORT 1.31.1 JNI! Get 9 multilingual speakers on 0.6B CustomVoice (Vivian, Serena, Ryan, Aiden, Ono Anna, Sohee...), 3s multilingual voice cloning with 0.6B Base, or prompt-directed VoiceDesign with 1.7B!"
     ),
     PurrWhatsNewEntry(
-        id = "THE_THOUSAND_VOICES",
-        iconGlyph = "🎙️",
-        colorHex = 0xFF00E5FF,
-        title = "THE_103_SPEAKERS",
-        body = "ROM-09 ships Kokoro v1.1-zh: 103 speakers — af_maple, af_sol and bf_vale in English, plus 100 Chinese voices (55 female zf_*, 45 male zm_*). Fully bilingual synthesis with dual lexicons, all offline."
+        id = "CHATTERBOX_NEUTTS_EMOTION",
+        iconGlyph = "🎭",
+        colorHex = 0xFFFF107A,
+        title = "CHATTERBOX_&_NEUTTS_2E",
+        body = "SUB-03E brings Resemble AI Chatterbox-Turbo 350M Q4 with native [laugh], [chuckle], [sigh], [gasp], [whispering] paralinguistics (*laughs* auto-maps!). ROM-05 brings NeuTTS-2E Emotional where PURR Sentiment drives <|HAPPY|>, <|SAD|>, <|ANGRY|> & <|SURPRISED|> tokens!"
     ),
     PurrWhatsNewEntry(
-        id = "THE_MATCHA_FLOW",
-        iconGlyph = "🍵",
-        colorHex = 0xFF9146FF,
-        title = "THE_MATCHA_FLOW",
-        body = "ROM-10 brings Matcha-TTS flow synthesis — a different neural architecture with astonishingly natural prosody and blazing speed (RTF < 1 even on old hardware). The Vocos vocoder downloads as a verified companion asset."
+        id = "SOPRANO_32KHZ_MELO",
+        iconGlyph = "✨",
+        colorHex = 0xFF38BDF8,
+        title = "SOPRANO_32KHZ_&_HEAVY_UPGRADES",
+        body = "ROM-06 Soprano-80M emits ultra-fast 32kHz Vocos studio audio! Plus KittenTTS Mini 80M (SUB-07A), MeloTTS 5-accent English (SUB-08G), Pocket FP32 Studio (SUB-03B), and ZipVoice Full Non-Distilled (SUB-03D)!"
     ),
     PurrWhatsNewEntry(
-        id = "THE_HEAVY_BRIDGE",
-        iconGlyph = "🌉",
+        id = "EIGHT_BAY_HUB_RACK",
+        iconGlyph = "🧩",
         colorHex = 0xFF00FF41,
-        title = "THE_HEAVY_BRIDGE",
-        body = "The LAN proxy panel now has HEAVY_MODEL_PRESETS: one tap configures Kokoro-FastAPI, openedai-speech, F5-TTS or the official OpenAI TTS — run CosyVoice, F5-TTS or XTTS-v2 on your PC and let the phone stream. (Qwen TTS stays cloud-WebSocket-only, so no preset for it.)"
+        title = "CLEAN_8_BAY_HUB_RACK",
+        body = "Kokoro variants now nest under ROM-02, all 5 Clone engines nest under ROM-03, Kitten Nano/Mini share ROM-07, and Piper/MeloTTS/Matcha/Supertonic unite under ROM-08. Clone Studio supports all 6 zero-shot cloning engines!"
     )
 )
 

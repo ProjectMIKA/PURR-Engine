@@ -440,12 +440,68 @@ fun TtsForgeScreen(
                                                 } else {
                                                     null
                                                 },
-                                                emptyHint = if (slottedSpecs.isEmpty()) {
-                                                    "No TTS cartridge slotted - open Cartridge Bay to slam ROM-01 or a neural cartridge."
-                                                } else {
-                                                    "No voices found for $engineLabel."
-                                                }
+                                                    emptyHint = if (slottedSpecs.isEmpty()) {
+                                                        "No TTS cartridge slotted - open Cartridge Bay to slam ROM-01 or a neural cartridge."
+                                                    } else {
+                                                        "No voices found for $engineLabel."
+                                                    }
                                             )
+
+                                            AnimatedVisibility(
+                                                visible = selectedPrimary?.id == "qwen3_design_custom" ||
+                                                    activeProfile.primaryVoiceId == "qwen3_design_custom"
+                                            ) {
+                                                Column(
+                                                    modifier = Modifier.padding(top = 10.dp),
+                                                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "> QWEN3_1.7B_VOICEDESIGN_PROMPT",
+                                                        color = MikaColors.NeonPink,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        fontWeight = FontWeight.Black,
+                                                        fontSize = 10.sp
+                                                    )
+                                                    OutlinedTextField(
+                                                        value = activeProfile.voiceDesignPrompt,
+                                                        onValueChange = { viewModel.updateVoiceDesignPrompt(it) },
+                                                        minLines = 2,
+                                                        placeholder = {
+                                                            Text(
+                                                                "Describe pitch, warmth, age, cadence...",
+                                                                fontSize = 10.sp,
+                                                                fontFamily = FontFamily.Monospace
+                                                            )
+                                                        },
+                                                        textStyle = TextStyle(
+                                                            color = MikaColors.WarmCream,
+                                                            fontFamily = FontFamily.Monospace,
+                                                            fontSize = 11.sp
+                                                        ),
+                                                        colors = OutlinedTextFieldDefaults.colors(
+                                                            focusedBorderColor = MikaColors.NeonPink,
+                                                            unfocusedBorderColor = MikaColors.NeonPink.copy(alpha = 0.35f),
+                                                            focusedContainerColor = MikaColors.DeepWellBg,
+                                                            unfocusedContainerColor = MikaColors.DeepWellBg
+                                                        ),
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    )
+                                                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                                        listOf(
+                                                            "Warm Anime" to "Warm, expressive young woman with crisp close-mic clarity and playful cadence",
+                                                            "Cinema Narrator" to "Deep, resonant baritone narrator with calm studio warmth and slow deliberate pacing",
+                                                            "Soft ASMR" to "Soft breathy female whisper near microphone, gentle soothing intonation"
+                                                        ).forEach { (chipLabel, chipPrompt) ->
+                                                            MikaTagPill(
+                                                                label = chipLabel,
+                                                                selected = activeProfile.voiceDesignPrompt == chipPrompt,
+                                                                activeColor = MikaColors.NeonPink,
+                                                                onClick = { viewModel.updateVoiceDesignPrompt(chipPrompt) }
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
 
                                             HorizontalDivider(
                                                 modifier = Modifier.padding(vertical = 10.dp),
@@ -741,8 +797,15 @@ fun TtsForgeScreen(
                 onToggleCleanAudio = { viewModel.toggleCleanImportedAudio(it) },
                 onImportClip = { uri -> viewModel.importCloneClip(uri) },
                 onRecordFiveSeconds = { viewModel.recordFiveSecondReferenceSample() },
-                onRegisterClone = { name, family, gender, transcript, tags ->
-                    viewModel.registerClonedVoice(name, family, gender, transcript, tags)
+                onRegisterClone = { name, family, gender, transcript, tags, cloneEngineId ->
+                    viewModel.registerClonedVoice(
+                        displayName = name,
+                        family = family,
+                        gender = gender,
+                        transcript = transcript,
+                        tagsRaw = tags,
+                        cloneEngineId = cloneEngineId
+                    )
                 },
                 onDismiss = { showCloneStudio = false }
             )

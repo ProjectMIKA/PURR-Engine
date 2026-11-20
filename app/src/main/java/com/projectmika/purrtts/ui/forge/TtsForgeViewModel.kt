@@ -174,14 +174,31 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun allAvailableVoices(): List<VoiceDescriptor> = repository.allAvailableVoices()
 
+    private fun isChatterboxVoiceActive(profile: PurrProfile): Boolean {
+        if (profile.primaryVoiceId.startsWith("chatterbox_") ||
+            (profile.enableDualVoiceSplit && profile.dialogueVoiceId.startsWith("chatterbox_"))
+        ) {
+            return true
+        }
+        return repository.state.value.clonedVoices.any { c ->
+            (c.id == profile.primaryVoiceId || (profile.enableDualVoiceSplit && c.id == profile.dialogueVoiceId)) &&
+                c.resolvedCloneEngineId == "sub_chatterbox_turbo"
+        }
+    }
+
     fun previewChunks(text: String, profile: PurrProfile, rules: List<PhoneticRule>): List<PurrChunk> {
         return PurrTextProcessor.process(
             rawText = text,
             profile = profile,
             customRules = rules,
             purrModuleActive = repository.isPurrEngineModuleActive(),
-            symbolShieldModuleActive = repository.isSymbolShieldModuleActive()
+            symbolShieldModuleActive = repository.isSymbolShieldModuleActive(),
+            isChatterboxVoice = isChatterboxVoiceActive(profile)
         )
+    }
+
+    fun updateVoiceDesignPrompt(prompt: String) {
+        repository.updateActiveProfile { p -> p.copy(voiceDesignPrompt = prompt) }
     }
 
     fun selectProfile(profileId: String) {
@@ -319,7 +336,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     profile = effectiveProfile,
                     customRules = repository.state.value.customPhoneticRules,
                     purrModuleActive = repository.isPurrEngineModuleActive(),
-                    symbolShieldModuleActive = repository.isSymbolShieldModuleActive()
+                    symbolShieldModuleActive = repository.isSymbolShieldModuleActive(),
+                    isChatterboxVoice = isChatterboxVoiceActive(effectiveProfile)
                 )
                 if (chunks.isEmpty()) {
                     showToast("Nothing speakable after PURR filter!")
@@ -562,13 +580,14 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         gender: VoiceGender,
         transcript: String,
         tagsRaw: String,
-        wavPathOverride: String? = null
+        wavPathOverride: String? = null,
+        cloneEngineId: String = if (family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
     ) {
         val cleanName = displayName.trim().ifEmpty { "Mika Clone" }
         val wavPath = when {
-            // Imported clip: trim to the selected family's best-voice window and write the WAV.
+            // Imported clip: trim to the selected engine's best-voice window and write the WAV.
             importedCloneSamples != null -> {
-                val targetSeconds = PurrCloneAudioCleaner.targetClipSeconds(family)
+                val targetSeconds = PurrCloneAudioCleaner.targetClipSecondsForEngine(cloneEngineId)
                 val trimmed = PurrCloneAudioCleaner.selectBestClip(
                     importedCloneSamples!!, 24000, targetSeconds
                 )
@@ -579,7 +598,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 importedCloneSamples = null
                 _importedCloneWavPath.value = file.absolutePath
                 _cloneImportStatus.value = null
-                showToast("Reference trimmed to ${targetSeconds}s (${family.label})")
+                showToast("Reference trimmed to ${targetSeconds}s")
                 file.absolutePath
             }
             wavPathOverride != null -> wavPathOverride
@@ -597,7 +616,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             languageCode = "en-US",
             referenceWavPath = wavPath,
             referenceTranscript = transcript.trim().ifEmpty { "Sample reference voice for zero-shot cloning." },
-            tags = parsedTags
+            tags = parsedTags,
+            cloneEngineId = cloneEngineId
         )
         repository.registerClonedVoice(cloned)
         showToast("Registered Cloned Voice [$cleanName]")
@@ -653,7 +673,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     purrModuleActive = purrOn,
                     symbolShieldModuleActive = shieldOn,
                     targetChunkCharsOverride = targetChunkChars,
-                    paragraphPauseMs = paragraphPauseMs
+                    paragraphPauseMs = paragraphPauseMs,
+                    isChatterboxVoice = isChatterboxVoiceActive(activeProfile)
                 )
 
                 val speechCount = chunks.count { it is PurrChunk.Speech }.coerceAtLeast(1)

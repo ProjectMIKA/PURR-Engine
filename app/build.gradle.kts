@@ -13,13 +13,31 @@ android {
         applicationId = "com.projectmika.purrtts"
         minSdk = 26
         targetSdk = 35
-        versionCode = 13
-        versionName = "1.6.2"
+        versionCode = 14
+        versionName = "1.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
         ndk {
             abiFilters += listOf("arm64-v8a", "x86_64")
+        }
+
+        if (file("src/main/cpp/third_party/llama.cpp/CMakeLists.txt").exists()) {
+            externalNativeBuild {
+                cmake {
+                    arguments += listOf("-DANDROID_STL=c++_shared")
+                    cppFlags += "-std=c++17 -O3"
+                }
+            }
+        }
+    }
+
+    if (file("src/main/cpp/third_party/llama.cpp/CMakeLists.txt").exists()) {
+        externalNativeBuild {
+            cmake {
+                path = file("src/main/cpp/CMakeLists.txt")
+                version = "3.22.1"
+            }
         }
     }
 
@@ -95,11 +113,15 @@ android {
 
     androidResources {
         // Prevent compression of neural bundles if bundled directly in assets
-        noCompress += listOf("litertlm", "tflite", "onnx", "ort", "bin")
+        noCompress += listOf("litertlm", "tflite", "onnx", "ort", "bin", "gguf", "npy", "json")
     }
 }
 
 dependencies {
+    // Unified ONNX Runtime v1.31.1 declared BEFORE libs/*.aar so sherpa-onnx,
+    // OnnxRuntimeEngine (Soprano/Chatterbox/NeuTTS-2E), and LunaVox (Qwen3-TTS)
+    // share one ABI-compatible libonnxruntime.so cleanly.
+    implementation(libs.onnxruntime.android)
     implementation(fileTree(mapOf("dir" to "libs", "include" to listOf("*.jar", "*.aar"))))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)

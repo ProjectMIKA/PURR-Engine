@@ -1,3 +1,35 @@
+# 🌌 PURR-TTS v1.7.0 // The Heavy Local Fleet & Clean 8-Bay Hub Rack
+
+### ✨ What's New since v1.6.2
+
+Four heavyweight neural TTS architectures now run **100% locally on Android** — no cloud API, no proxy server required — and the Cartridge Bay is reorganized into a crisp **8-Bay Hub Rack** (`ROM-01..ROM-08`)! 🐾👑
+
+* **👑 `ROM-04: QWEN3_TTS_STUDIO` (Native C++ JNI — `llama.cpp b8470` + `LunaVox` + `ORT 1.31.1`)**:
+  * **Base (`0.6B CustomVoice`, ~1.05 GB)**: 9 multilingual studio speakers (`Vivian`, `Serena`, `Ryan`, `Aiden`, `Dylan`, `Eric`, `Ono Anna`, `Sohee`, `Uncle Fu`) across EN/ZH/JA/KO/EU with automatic language detection.
+  * **`SUB-04A: QWEN3_06B_BASE_CLONER` (~1.17 GB)**: 3-second multilingual zero-shot voice cloning in Clone Studio.
+  * **`SUB-04B: QWEN3_17B_VOICEDESIGN` (~2.1 GB, 12GB+ RAM)**: Type any natural-language voice description right inside the Voice tab (`Warm Anime`, `Cinema Baritone`, `Soft ASMR`, or custom prompt) to synthesize bespoke voices on-device.
+* **🎭 `ROM-05: NEUTTS_2E_EMOTIONAL` (`Qwen3-236M INT8 ONNX` + `NeuCodec INT8`, ~654 MB)**:
+  * Four expressive English voices (`Emily`, `Paul`, `Sophie`, `Steven`) with bundled NeuCodec speaker codes and automatic **PURR Sentiment → `<|HAPPY|>` / `<|SAD|>` / `<|ANGRY|>` / `<|SURPRISED|>`** emotion control injection.
+* **✨ `ROM-06: SOPRANO_32KHZ_LLM` (`ekwek/Soprano-80M ONNX`, ~362 MB)**:
+  * Compact 80M Qwen3-backbone neural TTS emitting ultra-crisp 32kHz Vocos audio (master-resampled to 24kHz) with tiny latency.
+* **🤣 `SUB-03E: CHATTERBOX_TURBO_350M` (`ResembleAI/chatterbox-turbo-ONNX Q4`, ~691 MB)**:
+  * Zero-shot cloning PLUS native paralinguistic reaction tags (`[laugh]`, `[chuckle]`, `[sigh]`, `[gasp]`, `[cough]`, `[clear throat]`, `[whispering]`, and more)! PURR's Symbol Shield protects native tags automatically and maps RP `*laughs*`/`*sighs*` actions directly to Chatterbox tags.
+* **🧩 CLEAN 8-BAY HUB RACK & CLONE STUDIO UPGRADE (`ROM-01..ROM-08`)**:
+  * **ROM-02 `KOKORO_NEURAL_HUB`** now nests Hexagon NPU (`SUB-02A`), Adreno GPU (`SUB-02B`), Kokoro FP32 (`SUB-02C`), and Kokoro v1.1 103-Speaker (`SUB-02D`).
+  * **ROM-03 `VOICE_CLONE_HUB`** unites all 5 dedicated cloning sub-engines: Pocket INT8 (`SUB-03A`), **Pocket FP32 Studio (`SUB-03B`)**, ZipVoice INT8 (`SUB-03C`), **ZipVoice Full Non-Distilled (`SUB-03D`)**, and **Chatterbox-Turbo 350M (`SUB-03E`)**. Clone Studio supports all 6 local cloning engines (including `SUB-04A` Qwen3 0.6B Base).
+  * **ROM-07 `KITTEN_TTS_HUB`** adds **KittenTTS Mini 80M (`SUB-07A`)** alongside 30MB Nano.
+  * **ROM-08 `NARRATOR_VITS_FLOW_HUB`** unites Piper Lessac Base, 6 Piper expansion voices, **MeloTTS English 5-Accent (`SUB-08G`)**, Supertonic 3 (`SUB-08H`), and Matcha-TTS + 16kHz Vocos (`SUB-08I`).
+* **🔁 State Migration & Pure-JVM Tests**: Automatically migrates `v1.6.2` saved slotting/cartridge state into the new 8-Bay Hubs; adds `PurrHeavyEnginesTest` and updates `PurrPremiumCatalogTest`. `TUTORIAL_VERSION` bumped to `3`!
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.7.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `14`) with Qwen3-TTS JNI, Chatterbox-Turbo Q4, NeuTTS-2E, Soprano-80M, MeloTTS, Kitten Mini, FP32/Full clones & the 8-Bay Hub Rack.
+2. **`PURR-TTS_V1.7.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.6.2 // One Voice, One Name
 
 ### ✨ What's New since v1.6.1

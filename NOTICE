@@ -35,3 +35,13 @@ NAMING & ATTRIBUTION NOTICE
    This NOTICE file, including the attribution and naming conditions above,
    must be preserved and included in all copies or substantial portions of
    the Software and in any derived distribution.
+
+4. THIRD-PARTY OPEN SOURCE RUNTIMES & WEIGHTS (v1.7.0)
+   - llama.cpp (ggml-org/llama.cpp): MIT License
+   - LunaVox C++ Qwen3-TTS Inference Engine (Lux-Luna/LunaVox): MIT License
+   - ONNX Runtime (microsoft/onnxruntime): MIT License
+   - Qwen3-TTS Model Weights (Qwen/Qwen3-TTS): Apache License 2.0
+   - Chatterbox-Turbo ONNX (ResembleAI/chatterbox-turbo-ONNX): MIT License
+   - NeuTTS-2E & NeuCodec (neuphonic/neutts-2e, neuphonic/neucodec): Apache License 2.0
+   - Soprano-80M (ekwek/Soprano-80M, KevinAHM/soprano-onnx): Apache License 2.0
+   - sherpa-onnx (k2-fsa/sherpa-onnx) & MeloTTS (myshell-ai/MeloTTS): Apache 2.0 / MIT License

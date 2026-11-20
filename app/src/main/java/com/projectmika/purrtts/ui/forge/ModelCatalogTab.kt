@@ -180,9 +180,13 @@ fun ModelCatalogTab(
             ) {
                 visibleCatalog.forEachIndexed { idx, spec ->
                     val childSubs = subCartridgesByParent[spec.id].orEmpty()
+                    val standaloneSubInstalled = childSubs.any { sub ->
+                        sub.id !in setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert") &&
+                            forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED
+                    }
                     val isInstalled = spec.isBuiltInOsCartridge ||
                         forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED ||
-                        (spec.id == "rom_piper" && childSubs.any { forgeState.modelStates[it.id]?.state == DownloadState.INSTALLED })
+                        standaloneSubInstalled
                     val isSlotted = spec.id in forgeState.slottedCartridges
                     val accent = Color(spec.accentHex)
 
@@ -282,13 +286,22 @@ fun ModelCatalogTab(
         visibleCatalog.forEach { spec ->
             val bundleState = forgeState.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)
             val childSubs = subCartridgesByParent[spec.id].orEmpty()
+            val standaloneSubInstalled = childSubs.any { sub ->
+                sub.id !in setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert") &&
+                    forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED
+            }
             val isInstalled = spec.isBuiltInOsCartridge ||
                 bundleState.state == DownloadState.INSTALLED ||
-                (spec.id == "rom_piper" && childSubs.any { forgeState.modelStates[it.id]?.state == DownloadState.INSTALLED })
+                standaloneSubInstalled
             val isSlotted = isInstalled && spec.id in forgeState.slottedCartridges
             val isToolCartridge = spec.category == CartridgeCategory.TOOLS
             val accent = Color(spec.accentHex)
-            val sizeLabel = if (isToolCartridge) "OS_MODULE" else if (spec.isBuiltInOsCartridge) "BUILT-IN" else "${spec.approximateSizeMb}MB"
+            val sizeLabel = when {
+                isToolCartridge -> "OS_MODULE"
+                spec.isBuiltInOsCartridge -> "BUILT-IN"
+                spec.isHubContainer -> "MULTI-ENGINE HUB"
+                else -> "${spec.approximateSizeMb}MB"
+            }
 
             Column(
                 modifier = Modifier.fillMaxWidth(),
@@ -485,9 +498,14 @@ fun ModelCatalogTab(
                                 )
                                 Text(
                                     text = when (bundleState.state) {
-                                        DownloadState.VERIFYING -> "VERIFYING SHA-256 CHECKSUM..."
-                                        DownloadState.EXTRACTING -> "UNPACKING .TAR.BZ2 ARCHIVE..."
-                                        else -> "DOWNLOADING ${(bundleState.progressFraction * 100).toInt()}% (${bundleState.downloadedBytes / (1024 * 1024)} / ${spec.approximateSizeMb} MB)"
+                                        DownloadState.VERIFYING -> bundleState.errorMessage?.takeIf { it.isNotBlank() }
+                                            ?: "VERIFYING SHA-256 CHECKSUM..."
+                                        DownloadState.EXTRACTING -> bundleState.errorMessage?.takeIf { it.isNotBlank() }
+                                            ?: "UNPACKING .TAR.BZ2 ARCHIVE..."
+                                        else -> {
+                                            val prefix = bundleState.errorMessage?.takeIf { it.startsWith("[") }?.let { "$it • " }.orEmpty()
+                                            "${prefix}DOWNLOADING ${(bundleState.progressFraction * 100).toInt()}% (${bundleState.downloadedBytes / (1024 * 1024)} / ${spec.approximateSizeMb} MB)"
+                                        }
                                     },
                                     color = accent,
                                     fontFamily = FontFamily.Monospace,
@@ -495,7 +513,7 @@ fun ModelCatalogTab(
                                 )
                             }
 
-                            if (!bundleState.errorMessage.isNullOrBlank()) {
+                            if (bundleState.state == DownloadState.FAILED && !bundleState.errorMessage.isNullOrBlank()) {
                                 Text(
                                     text = "! ${bundleState.errorMessage}",
                                     color = MikaColors.DangerRed,
@@ -532,6 +550,26 @@ fun ModelCatalogTab(
                                     MikaCyberIcon(type = CyberIconType.PAUSE, tint = MikaColors.MikaAmber, size = 11.dp)
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text("PAUSE DOWNLOAD", color = MikaColors.MikaAmber, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 10.sp)
+                                }
+                            }
+                            !isInstalled && spec.isHubContainer -> {
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(5.dp))
+                                        .background(accent.copy(alpha = 0.10f))
+                                        .border(1.dp, accent.copy(alpha = 0.45f), RoundedCornerShape(5.dp))
+                                        .padding(vertical = 9.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = "SELECT A CLONING ENGINE BELOW (SUB-03A..E)",
+                                        color = accent,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 9.5.sp
+                                    )
                                 }
                             }
                             !isInstalled -> {
@@ -634,7 +672,7 @@ fun ModelCatalogTab(
                                         fontSize = 10.sp
                                     )
                                 }
-                                if (!spec.isBuiltInOsCartridge && !isToolCartridge) {
+                                if (!spec.isBuiltInOsCartridge && !isToolCartridge && !spec.isHubContainer) {
                                     Box(
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(5.dp))
@@ -662,10 +700,13 @@ fun ModelCatalogTab(
                                 .padding(10.dp),
                             verticalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            val subHeaderText = if (spec.id == "rom_piper") {
-                                "EXPANSION VOICE PACKS (${childSubs.size} EXTRA PIPER VOICES FOR ${spec.romCode})"
-                            } else {
-                                "EXPANSION SUB-CARTRIDGES (OPTIONAL NPU & GPU FOR ${spec.romCode})"
+                            val subHeaderText = when (spec.id) {
+                                "rom_kokoro_sherpa" -> "KOKORO EXPANSIONS & ACCELERATORS (${childSubs.size} CHIPS)"
+                                "rom_clone_hub" -> "ZERO-SHOT CLONING ENGINES (${childSubs.size} ENGINES)"
+                                "rom_qwen3_custom_06b" -> "QWEN3-TTS EXPANSION MODELS (CLONE & VOICEDESIGN)"
+                                "rom_kitten_tts" -> "KITTENTTS FULL-WEIGHT UPGRADE (${childSubs.size} CHIP)"
+                                "rom_piper" -> "PIPER VOICES, MELOTTS & FLOW ENGINES (${childSubs.size} PACKS)"
+                                else -> "EXPANSION SUB-CARTRIDGES (${childSubs.size} PACKS FOR ${spec.romCode})"
                             }
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -681,41 +722,25 @@ fun ModelCatalogTab(
                                     letterSpacing = 0.5.sp
                                 )
                             }
-                            if (spec.id == "rom_piper") {
-                                Text(
-                                    text = if (isInstalled) {
-                                        "// ${spec.romCode} Piper Bay is ready! Download any additional Piper voices below:"
-                                    } else {
-                                        "// Pick Lessac US Base above OR download any individual Piper voice pack below - each works standalone!"
-                                    },
-                                    color = if (isInstalled) MikaColors.DimText else MikaColors.NeonCyan,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp,
-                                    lineHeight = 13.sp
-                                )
-                            } else if (!isInstalled) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
-                                ) {
-                                    MikaCyberIcon(type = CyberIconType.ALERT_TRIANGLE, tint = MikaColors.MikaAmber, size = 11.dp)
-                                    Text(
-                                        text = "Step 1 Required: Download & slam ${spec.romCode} (${spec.approximateSizeMb}MB Base) above first so these accelerators have Kokoro's 54 voices to drive.",
-                                        color = MikaColors.MikaAmber,
-                                        fontFamily = FontFamily.Monospace,
-                                        fontSize = 9.sp,
-                                        lineHeight = 13.sp,
-                                        modifier = Modifier.weight(1f)
-                                    )
+                            val hubGuideText = when (spec.id) {
+                                "rom_kokoro_sherpa" -> if (bundleState.state == DownloadState.INSTALLED) {
+                                    "// Kokoro Base INT8 is ready! SUB-02A/B accelerate Kokoro Base; SUB-02C (FP32) & SUB-02D (v1.1 103v) also work standalone."
+                                } else {
+                                    "// Install ROM-02 Base INT8 above (required for NPU/GPU SUB-02A/B), OR install SUB-02C FP32 / SUB-02D v1.1 standalone!"
                                 }
-                            } else {
-                                Text(
-                                    text = "// ${spec.romCode} Base is ready! Optionally add hardware accelerator sub-chips below:",
-                                    color = MikaColors.DimText,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontSize = 9.sp
-                                )
+                                "rom_clone_hub" -> "// Pick ANY cloning engine below (Pocket INT8/FP32, ZipVoice INT8/Full, or Chatterbox-Turbo 350M) — ROM-03 auto-slots!"
+                                "rom_qwen3_custom_06b" -> "// Install 0.6B CustomVoice above OR slam 0.6B Base Cloner (SUB-04A) / 1.7B VoiceDesign (SUB-04B) directly — standalone!"
+                                "rom_kitten_tts" -> "// Install 30MB Nano Base above OR 64MB KittenTTS Mini 80M below — either works standalone!"
+                                "rom_piper" -> "// Pick Piper Lessac US above OR any standalone narrator pack (Amy, Ryan, Cori, Alba, GLaDOS, Kristin, MeloTTS, Supertonic 3, Matcha)."
+                                else -> "// Expansion sub-cartridges for ${spec.romCode}:"
                             }
+                            Text(
+                                text = hubGuideText,
+                                color = if (isInstalled) MikaColors.DimText else MikaColors.NeonCyan,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 9.sp,
+                                lineHeight = 13.sp
+                            )
 
                             childSubs.forEach { subSpec ->
                                 val subState = forgeState.modelStates[subSpec.id] ?: ModelBundleState(specId = subSpec.id)
@@ -907,9 +932,14 @@ private fun SubCartridgeCard(
             )
             Text(
                 text = when (subState.state) {
-                    DownloadState.VERIFYING -> "VERIFYING SHA-256 CHECKSUM..."
-                    DownloadState.EXTRACTING -> "UNPACKING .TAR.BZ2 ARCHIVE..."
-                    else -> "DOWNLOADING ${(subState.progressFraction * 100).toInt()}% (${subState.downloadedBytes / (1024 * 1024)} / ${subSpec.approximateSizeMb} MB)"
+                    DownloadState.VERIFYING -> subState.errorMessage?.takeIf { it.isNotBlank() }
+                        ?: "VERIFYING SHA-256 CHECKSUM..."
+                    DownloadState.EXTRACTING -> subState.errorMessage?.takeIf { it.isNotBlank() }
+                        ?: "UNPACKING .TAR.BZ2 ARCHIVE..."
+                    else -> {
+                        val prefix = subState.errorMessage?.takeIf { it.startsWith("[") }?.let { "$it • " }.orEmpty()
+                        "${prefix}DOWNLOADING ${(subState.progressFraction * 100).toInt()}% (${subState.downloadedBytes / (1024 * 1024)} / ${subSpec.approximateSizeMb} MB)"
+                    }
                 },
                 color = subAccent,
                 fontFamily = FontFamily.Monospace,
@@ -917,7 +947,7 @@ private fun SubCartridgeCard(
             )
         }
 
-        if (!subState.errorMessage.isNullOrBlank()) {
+        if (subState.state == DownloadState.FAILED && !subState.errorMessage.isNullOrBlank()) {
             Text(
                 text = "! ${subState.errorMessage}",
                 color = MikaColors.DangerRed,

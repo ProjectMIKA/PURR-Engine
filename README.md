@@ -11,7 +11,7 @@ Nyaa~ Hello, traveler! I'm **M.I.K.A.** — ProjectMIKA's fiercely possessive, u
 ## ✨ What Makes It Special
 
 * **🎤 System-Wide Neural Voice** — registers as a real Android TTS engine and streams 24kHz mono PCM into *every* app that can speak. Choose it once in `Settings › Accessibility › Text-to-Speech output`.
-* **🎛️ Swappable Engine Cartridges** — a Cyberdeck Cartridge Bay with 7 slam-in engines: **Kokoro-82M** (54 voices, GPU FP16 + NPU G2P), **KittenTTS Nano** (30MB, 8 voices), **Supertonic 3**, a **6-pack Piper VITS collection** (Amy, Ryan, Cori, Alba, GLaDOS, Kristin), **Pocket TTS** (5-second zero-shot cloning), **ZipVoice** (flow-matching cloning), plus your device's built-in voices and a **LAN OpenAI-compatible proxy**.
+* **🎛️ 8-Bay Hub Cartridge Rack (`ROM-01..ROM-08`)** — every neural engine family neatly organized: **Kokoro Hub** (INT8, FP32, v1.1 103 speakers, Hexagon NPU & Adreno GPU chips), **Voice Clone Hub** (Pocket INT8/FP32, ZipVoice INT8/Full, Chatterbox-Turbo 350M Q4 with native `[laugh]`/`[sigh]`/`[gasp]`), **Qwen3-TTS Studio** (`0.6B CustomVoice`, `0.6B Base 3s Clone`, `1.7B VoiceDesign` via native `llama.cpp` + ORT JNI), **NeuTTS-2E Emotional** (`Qwen3-236M` + `NeuCodec` sentiment-controlled emotions), **Soprano-80M 32kHz LLM**, **KittenTTS Hub** (`Nano 30MB` + `Mini 80M`), and **Narrator/Flow Hub** (7 Piper VITS packs, **MeloTTS 5-accent EN**, **Matcha-TTS**, **Supertonic 3**), plus device OS voices & a LAN OpenAI proxy.
 * **⏸️ MIKASTOP Pause Injection** — ellipses, em-dashes, `[pause:500ms]` tags, sentences, and breath commas become *exact* zero-filled silence buffers instead of letting neural models hallucinate on punctuation trails. Pauses you can set your watch to.
 * **🎭 RP-Aware Text Bending** — `*action blocks*` and `"dialogue"` are split and can be narrated softer, skipped, or dual-voice routed to a second character. ~100 texting slang expansions, anime honorifics (`senpai → sen-pie`), and organic stutters (`w-what → wuh-what`) — with strict `mika` immunity, obviously.
 * **❤️ Sentiment Acting** — five emotion axes (joy / love / anger / sadness / flustered) scored live per sentence, modulating pacing and emphasis through configurable archetype curves (tsundere, yandere, kuudere, genki, dominant, robot...).
@@ -93,7 +93,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.6.2 // One Voice, One Name)
+### 🌟 Latest Updates (v1.7.0 // Heavy Local Fleet & 8-Bay Hub Rack)
+
+* **Qwen3-TTS Native JNI (`ROM-04`):** Pure on-device `llama.cpp b8470` + `Lux-Luna/LunaVox` + `ORT 1.31.1` JNI running 0.6B CustomVoice (9 multilingual speakers), 0.6B Base 3s multilingual cloning (`SUB-04A`), and prompt-driven 1.7B VoiceDesign (`SUB-04B`).
+* **Chatterbox-Turbo 350M Q4 (`SUB-03E`):** Zero-shot cloning + 19 native paralinguistic reaction tags (`[laugh]`, `[sigh]`, `[gasp]`, `[whispering]`...) with automatic RP `*laughs*` -> `[laugh]` conversion.
+* **NeuTTS-2E Emotional (`ROM-05`) & Soprano-80M (`ROM-06`):** On-device Qwen3-236M emotional synthesis driven by PURR Sentiment (`<|HAPPY|>`, `<|SAD|>`, `<|ANGRY|>`) plus ultra-fast 32kHz Soprano Vocos TTS.
+* **Clean 8-Bay Hub Rack + Heavy Sherpa Upgrades:** Kokoro variants nested under `ROM-02`, all 5 Clone engines under `ROM-03`, Kitten Nano+Mini (`SUB-07A`) under `ROM-07`, and Piper + MeloTTS English (`SUB-08G`) + Supertonic 3 + Matcha under `ROM-08`. Clone Studio now supports all 6 cloning engines!
+
+### 📦 Prior Releases (v1.6.2 // One Voice, One Name)
 
 * **Voice-ID Collision Fix:** Premium Kokoro rosters now carry globally unique prefixed IDs (`fp32_*`, `v11_*`) — synthesis-time lookups previously resolved ROM-02's descriptor first, mounting the wrong weights dir and fail-softing to stock OS voices when ROM-02's int8 wasn't installed.
 * **Selection Migration:** Saved primary/dialogue voice selections on the premium cartridges are remapped to the prefixed IDs on first launch.

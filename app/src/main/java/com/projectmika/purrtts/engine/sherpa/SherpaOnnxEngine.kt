@@ -175,7 +175,7 @@ class SherpaOnnxEngine(
         resetIdleTimer()
 
         mutex.withLock {
-            ensureFamilyLoadedLocked(clonedVoice.family)
+            ensureFamilyLoadedLocked(clonedVoice.family, clonedVoice.resolvedCloneEngineId)
             val tts = activeOfflineTts
             if (tts == null) {
                 return@withContext SynthesisOutcome(
@@ -240,18 +240,30 @@ class SherpaOnnxEngine(
     }
 
     fun familyDir(family: SherpaModelFamily, subCartridgeId: String? = null): File = when (family) {
-        // ✨ PREMIUM TIER (v1.6.0): per-cartridge Kokoro dirs — ROM-08 fp32 / ROM-09 v1.1 keep
-        // their weights isolated from ROM-02's int8 (voices carry requiredSubCartridgeId).
-        SherpaModelFamily.KOKORO -> if (subCartridgeId != null) {
+        // ✨ HUB TIER (v1.7.0): isolated variant directories so weights never collide
+        SherpaModelFamily.KOKORO -> if (subCartridgeId != null && subCartridgeId != "rom_kokoro_sherpa") {
             File(modelsBaseDir, "kokoro_$subCartridgeId")
         } else {
             File(modelsBaseDir, "kokoro")
         }
-        SherpaModelFamily.KITTEN_TTS -> File(modelsBaseDir, "kitten")
+        SherpaModelFamily.KITTEN_TTS -> if (subCartridgeId != null && subCartridgeId != "rom_kitten_tts") {
+            File(modelsBaseDir, "kitten_$subCartridgeId")
+        } else {
+            File(modelsBaseDir, "kitten")
+        }
         SherpaModelFamily.SUPERTONIC_3 -> File(modelsBaseDir, "supertonic3")
-        SherpaModelFamily.POCKET_TTS -> File(modelsBaseDir, "pocket_tts")
-        SherpaModelFamily.ZIPVOICE -> File(modelsBaseDir, "zipvoice")
+        SherpaModelFamily.POCKET_TTS -> if (subCartridgeId != null && subCartridgeId != "rom_pocket_tts") {
+            File(modelsBaseDir, "pocket_$subCartridgeId")
+        } else {
+            File(modelsBaseDir, "pocket_tts")
+        }
+        SherpaModelFamily.ZIPVOICE -> if (subCartridgeId != null && subCartridgeId != "rom_zipvoice") {
+            File(modelsBaseDir, "zipvoice_$subCartridgeId")
+        } else {
+            File(modelsBaseDir, "zipvoice")
+        }
         SherpaModelFamily.MATCHA -> File(modelsBaseDir, "matcha")
+        SherpaModelFamily.MELO_TTS -> File(modelsBaseDir, "melo_${subCartridgeId ?: "sub_melo_en"}")
         SherpaModelFamily.PIPER -> if (subCartridgeId != null) {
             File(modelsBaseDir, "piper_$subCartridgeId")
         } else {
@@ -377,14 +389,19 @@ class SherpaOnnxEngine(
                     provider = "cpu"
                 )
             }
-            SherpaModelFamily.PIPER -> {
+            SherpaModelFamily.PIPER,
+            SherpaModelFamily.MELO_TTS -> {
                 val onnx = files.firstOrNull { it.extension.equals("onnx", ignoreCase = true) }?.absolutePath.orEmpty()
                 if (onnx.isEmpty()) return
                 OfflineTtsModelConfig(
                     vits = OfflineTtsVitsModelConfig(
                         model = onnx,
+                        lexicon = lexicons,
                         tokens = tokensPath,
-                        dataDir = dataDir
+                        dataDir = dataDir,
+                        noiseScale = 0.667f,
+                        noiseScaleW = 0.8f,
+                        lengthScale = 1.0f
                     ),
                     numThreads = 4,
                     provider = "cpu"
@@ -436,7 +453,7 @@ class SherpaOnnxEngine(
         runCatching {
             val config = OfflineTtsConfig(
                 model = modelConfig,
-                ruleFsts = if (family == SherpaModelFamily.KOKORO) ruleFsts else ""
+                ruleFsts = if (family == SherpaModelFamily.KOKORO || family == SherpaModelFamily.MELO_TTS) ruleFsts else ""
             )
             activeOfflineTts = OfflineTts(assetManager = null, config = config)
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
@@ -499,7 +516,8 @@ class SherpaOnnxEngine(
         val cleanId = voiceId.substringAfter(':')
         return when {
             cleanId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) -> SherpaModelFamily.KOKORO
-            cleanId.contains("kitten", ignoreCase = true) -> SherpaModelFamily.KITTEN_TTS
+            cleanId.contains("kitten", ignoreCase = true) || cleanId.startsWith("kmini_") -> SherpaModelFamily.KITTEN_TTS
+            cleanId.contains("melo", ignoreCase = true) -> SherpaModelFamily.MELO_TTS
             cleanId.contains("supertonic", ignoreCase = true) -> SherpaModelFamily.SUPERTONIC_3
             cleanId.contains("pocket", ignoreCase = true) -> SherpaModelFamily.POCKET_TTS
             cleanId.contains("zipvoice", ignoreCase = true) -> SherpaModelFamily.ZIPVOICE
