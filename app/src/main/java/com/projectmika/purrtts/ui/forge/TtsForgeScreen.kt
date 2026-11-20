@@ -238,7 +238,8 @@ fun TtsForgeScreen(
                         Box(
                             contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .size(26.dp)
+                                .width(26.dp)
+                                .height(26.dp)
                                 .clip(RoundedCornerShape(4.dp))
                                 .background(MikaColors.DimText.copy(alpha = 0.12f))
                                 .border(1.dp, MikaColors.DimText.copy(alpha = 0.55f), RoundedCornerShape(4.dp))
