@@ -385,7 +385,34 @@ class PurrProfileRepository(context: Context) {
                     )
                 }
             }
-            decoded.copy(modelStates = normalizedModelStates)
+            // ✨ v1.6.2 MIGRATION: premium cartridges briefly shipped bare voice ids (colliding
+            // with ROM-02's roster, fail-softing to CORE_OS). Remap saved selections to the new
+            // prefixed ids (fp32_/v11_) so users keep their chosen voices.
+            val premiumPrefixByCartridge = mapOf(
+                "rom_kokoro_fp32" to "fp32_",
+                "rom_kokoro_v11" to "v11_"
+            )
+            val remappedProfiles = decoded.profiles.map { profile ->
+                val prefix = premiumPrefixByCartridge[profile.selectedCartridgeId]
+                if (prefix == null) {
+                    profile
+                } else {
+                    val needsPrimary = !profile.primaryVoiceId.startsWith(prefix) &&
+                        PurrDefaultPresets.builtInVoices().any { it.id == prefix + profile.primaryVoiceId }
+                    val needsDialogue = profile.dialogueVoiceId.isNotBlank() &&
+                        !profile.dialogueVoiceId.startsWith(prefix) &&
+                        PurrDefaultPresets.builtInVoices().any { it.id == prefix + profile.dialogueVoiceId }
+                    if (needsPrimary || needsDialogue) {
+                        profile.copy(
+                            primaryVoiceId = if (needsPrimary) prefix + profile.primaryVoiceId else profile.primaryVoiceId,
+                            dialogueVoiceId = if (needsDialogue) prefix + profile.dialogueVoiceId else profile.dialogueVoiceId
+                        )
+                    } else {
+                        profile
+                    }
+                }
+            }
+            decoded.copy(modelStates = normalizedModelStates, profiles = remappedProfiles)
         }.getOrElse {
             PurrForgeState()
         }

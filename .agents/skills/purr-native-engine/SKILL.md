@@ -107,6 +107,12 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   its vocoder + rate (matcha-icefall-zh-en = 16kHz + vocos-16khz-univ, NOT the 22kHz example
   vocoder!) — a rate-mismatched vocoder outputs robotic garbage. Companion installs now scrub
   stale vocoder variants, and a manager-init migration self-heals already-installed cartridges.
+- **v1.6.2 law — ONE VOICE, ONE NAME**: voice IDs must be globally unique across cartridges
+  (`fp32_*`, `v11_*` prefixes). ROM-08 originally reused ROM-02's bare ids; `builtInVoices()`
+  lists ROM-02 first, so every synthesis lookup resolved ROM-02's descriptor (null
+  requiredSubCartridgeId → int8 weights dir → empty if not installed → CORE_OS fail-soft).
+  `loadInitialState` migrates stale bare-id selections via the premium prefix map. Guarded by
+  the global-uniqueness test in PurrPremiumCatalogTest.
 
 ## MIKA'S ACADEMY + HEADER SYSTEMS (v1.5.0)
 - `core/purr/PurrTutorialSteps.kt` — pure academy data: `TUTORIAL_VERSION` (bump alongside

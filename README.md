@@ -93,7 +93,13 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.6.1 // The Right Vocoder)
+### 🌟 Latest Updates (v1.6.2 // One Voice, One Name)
+
+* **Voice-ID Collision Fix:** Premium Kokoro rosters now carry globally unique prefixed IDs (`fp32_*`, `v11_*`) — synthesis-time lookups previously resolved ROM-02's descriptor first, mounting the wrong weights dir and fail-softing to stock OS voices when ROM-02's int8 wasn't installed.
+* **Selection Migration:** Saved primary/dialogue voice selections on the premium cartridges are remapped to the prefixed IDs on first launch.
+* **Law Test:** Global voice-ID uniqueness across all cartridges is now test-guarded forever.
+
+### 📦 Prior Releases (v1.6.1 // The Right Vocoder)
 
 * **Premium Voices Selectable:** The fp32/v1.1 rosters were caught by the sub-cartridge availability gate; voice availability now also accepts an INSTALLED top-level cartridge in `modelStates` — 54 fp32 + 103 v1.1 voices appear as soon as their cartridge is slammed.
 * **Matcha Vocoder Fixed:** `matcha-icefall-zh-en` is a **16kHz** model — companion switched from vocos-22khz (robotic garbage) to **vocos-16khz-univ.onnx**, stale vocoder variants auto-removed, and a silent background migration re-fetches the correct vocoder for existing installs.

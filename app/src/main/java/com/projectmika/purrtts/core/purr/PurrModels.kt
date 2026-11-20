@@ -576,7 +576,10 @@ object PurrDefaultPresets {
                 else -> "en-US"
             }
             VoiceDescriptor(
-                id = id,
+                // ✨ v1.6.2: "v11_" prefix — voice IDs must be globally unique across cartridges
+                // (ROM-02 and ROM-08 share base names; a bare id would resolve to the WRONG
+                // descriptor + mount the wrong weights dir, fail-softing to CORE_OS).
+                id = "v11_$id",
                 displayName = id.split('_').joinToString(" ") { p -> p.replaceFirstChar { it.uppercase() } } +
                     if (lang == "zh-CN") " (中文)" else "",
                 engine = backend,
@@ -621,6 +624,7 @@ object PurrDefaultPresets {
         val kokoroFp32 = kokoroVoices(
             "rom_kokoro_fp32",
             BackendType.SHERPA_ONNX,
+            idPrefix = "fp32_",
             displaySuffix = " FP32",
             requiredSubCartridgeId = "rom_kokoro_fp32"
         )

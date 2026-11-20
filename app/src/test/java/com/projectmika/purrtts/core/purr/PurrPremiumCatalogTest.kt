@@ -53,10 +53,11 @@ class PurrPremiumCatalogTest {
         assertEquals(54, fp32Voices.size)
         assertTrue(fp32Voices.all { it.requiredSubCartridgeId == "rom_kokoro_fp32" })
         assertTrue(fp32Voices.all { it.sherpaFamily == SherpaModelFamily.KOKORO })
-        // Speaker IDs must mirror ROM-02's roster exactly (drop-in premium upgrade).
+        // v1.6.2: ids are prefixed (fp32_af_heart) — speaker IDs still mirror ROM-02 exactly.
         val rom02 = PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == "rom_kokoro_sherpa" }
-        assertEquals(rom02.map { it.id }, fp32Voices.map { it.id })
+        assertEquals(rom02.map { it.id }, fp32Voices.map { it.id.removePrefix("fp32_") })
         assertEquals(rom02.map { it.speakerIndex }, fp32Voices.map { it.speakerIndex })
+        assertTrue(fp32Voices.all { it.id.startsWith("fp32_") })
     }
 
     @Test
@@ -65,20 +66,27 @@ class PurrPremiumCatalogTest {
         assertEquals(103, v11.size)
         val ids = v11.map { it.id }
         assertEquals(ids.size, ids.toSet().size)
-        assertEquals(55, v11.count { it.id.startsWith("zf_") })
-        assertEquals(45, v11.count { it.id.startsWith("zm_") })
-        // Roster order == speaker IDs in the weights: af_maple = 0, zf_001 = 3, zm_009 = 58, zm_100 = 102.
-        assertEquals("af_maple", v11[0].id)
+        // v1.6.2: prefixed ids (v11_af_maple, v11_zf_001...) — speaker IDs mirror the weights.
+        assertEquals("v11_af_maple", v11[0].id)
         assertEquals(0, v11[0].speakerIndex)
-        assertEquals("zf_001", v11[3].id)
+        assertEquals("v11_zf_001", v11[3].id)
         assertEquals(3, v11[3].speakerIndex)
-        assertEquals("zm_009", v11[58].id)
+        assertEquals("v11_zm_009", v11[58].id)
         assertEquals(58, v11[58].speakerIndex)
-        assertEquals("zm_100", v11[102].id)
+        assertEquals("v11_zm_100", v11[102].id)
         assertEquals(102, v11[102].speakerIndex)
         assertTrue(v11.all { it.requiredSubCartridgeId == "rom_kokoro_v11" })
         assertEquals(3, v11.count { it.languageCode.startsWith("en") })
         assertEquals(100, v11.count { it.languageCode == "zh-CN" })
+    }
+
+    @Test
+    fun `all built-in voice ids are globally unique across cartridges`() {
+        // ✨ v1.6.2 LAW: duplicate voice ids resolve to the WRONG descriptor at synthesis time
+        // (first match wins), fail-softing to CORE_OS. This test guards that law forever.
+        val all = PurrDefaultPresets.builtInVoices()
+        val ids = all.map { it.id }
+        assertEquals(ids.size, ids.toSet().size)
     }
 
     @Test
