@@ -50,3 +50,14 @@ Phasing Transitions & Custom Cyberdeck SVG Icons) · v1.3.2 (Crystal-Clear Audio
 ## Keystore
 CI generates `release.keystore` via keytool (passes default `purrtts`); local builds use debug
 signing if no keystore exists. Never commit keystores (`.gitignore` covers `*.keystore`).
+
+## Release scar (do not re-learn)
+- **v1.8.1 `gh release create --target <branch>` ref-cache race**: creating the release with
+  `--target main` IMMEDIATELY after `git push origin main` resolved main to the PREVIOUS head —
+  the v1.8.1 tag got created on the v1.8.0 commit, CI built the old code and attached
+  `V1.8.0`-named APKs to the v1.8.1 release. ALWAYS pass the explicit commit SHA
+  (`gh release create vX.Y.Z --target <sha>`) or push the tag with git FIRST
+  (`git push origin vX.Y.Z`) and create the release after. If wrong assets land:
+  `gh release delete-asset`, delete the remote tag, re-push the local tag (git push can't race),
+  and either let the fresh tag-CI attach or `gh run download <run-id> -n PURR-TTS-Release-APKs`
+  + `gh release upload vX.Y.Z *.apk --clobber` manually.
