@@ -276,7 +276,13 @@ data class PurrProfile(
     val symbolShieldConfig: SymbolShieldConfig = SymbolShieldConfig(),
     val proxyConfig: ProxyEndpointConfig = ProxyEndpointConfig(),
     val voiceDesignPrompt: String = "Warm, expressive young woman with crisp close-mic clarity and gentle natural pacing",
-    val autoBypassEnhancersForNeuralModels: Boolean = true
+    val autoBypassEnhancersForNeuralModels: Boolean = true,
+    // ✨ SLANG CARVE-OUT: slang & honorifics expansion is TEXT NORMALIZATION — it can HELP
+    // heavyweight neural voices pronounce texting shorthand (`omg` → `oh my god`) correctly,
+    // unlike the truly intrusive enhancers (Drama-Matrix stutters, comma-chopping, micro-chunking,
+    // EQ coloring) which stay bypassed. When true, flagship voices stay inside the slang pipeline
+    // even while the rest of Neural Pure remains active (see PurrNeuralBypass.shouldBypassSlang).
+    val slangDuringNeuralPure: Boolean = false
 )
 
 @Serializable
@@ -560,6 +566,18 @@ object PurrNeuralBypass {
         profile: PurrProfile,
         clonedVoices: List<ClonedVoiceProfile> = emptyList()
     ): Boolean = profile.autoBypassEnhancersForNeuralModels && isAdvancedNeuralVoice(profile, clonedVoices)
+
+    /**
+     * ✨ SLANG CARVE-OUT ✨
+     * Neural Pure bypasses slang & honorifics along with everything else — but slang expansion
+     * is pure text normalization (pronunciation aid), not an intrusive prosody enhancer. This
+     * second gate lets users put large TTS models back INTO the slang pipeline (profile
+     * `slangDuringNeuralPure`) while stutters, comma-chopping, micro-chunking & EQ stay bypassed.
+     */
+    fun shouldBypassSlang(
+        profile: PurrProfile,
+        clonedVoices: List<ClonedVoiceProfile> = emptyList()
+    ): Boolean = shouldBypassEnhancers(profile, clonedVoices) && !profile.slangDuringNeuralPure
 }
 
 object PurrDefaultPresets {

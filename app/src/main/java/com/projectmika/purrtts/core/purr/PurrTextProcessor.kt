@@ -230,12 +230,15 @@ object PurrTextProcessor {
 
         val neuralPureActive = PurrNeuralBypass.shouldBypassEnhancers(profile, clonedVoices)
         val effectivePurrRewriting = purrModuleActive && !neuralPureActive
+        // ✨ SLANG CARVE-OUT: slang & honorifics can ride along on flagship neural voices while
+        // the rest of Neural Pure (stutters, comma-chopping, micro-chunking) stays bypassed.
+        val slangBypassed = PurrNeuralBypass.shouldBypassSlang(profile, clonedVoices)
 
         // Effective profile honors Tool Cartridge slotting AND automatically disables intrusive
         // enhancers when running heavyweight neural LLM TTS engines (`PurrNeuralBypass`).
         val effectiveProfile = if (neuralPureActive) {
             profile.copy(
-                enableSlangAndHonorifics = false,
+                enableSlangAndHonorifics = !slangBypassed && profile.enableSlangAndHonorifics,
                 enableMikaStopPauses = false,
                 enableSymbolShield = symbolShieldModuleActive && profile.enableSymbolShield,
                 symbolShieldConfig = profile.symbolShieldConfig.copy(

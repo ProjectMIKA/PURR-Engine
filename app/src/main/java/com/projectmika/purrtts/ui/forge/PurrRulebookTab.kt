@@ -727,6 +727,16 @@ private fun PurrEngineModuleWindowBody(
             icon = CyberIconType.BOLT_ACCEL,
             onToggle = { v -> viewModel.updateActiveProfile { it.copy(autoBypassEnhancersForNeuralModels = v) } }
         )
+        // ✨ SLANG CARVE-OUT: lets flagship neural voices stay in the slang pipeline (text
+        // normalization aid) while the intrusive Neural Pure bypasses remain active.
+        SimplePurrToggle(
+            title = "Slang & Honorifics on Flagship Voices",
+            subtitle = "Keeps slang expansion ('omg' → 'oh my god', 'senpai' → 'sen-pie') active on Qwen3/NeuTTS/Chatterbox-class voices even while Neural Pure still bypasses stutters, comma-chopping & EQ.",
+            checked = activeProfile.slangDuringNeuralPure,
+            accent = MikaColors.NeonCyan,
+            icon = CyberIconType.CHAT_SLANG,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(slangDuringNeuralPure = v) } }
+        )
         if (neuralPureActive) {
             Row(
                 modifier = Modifier
