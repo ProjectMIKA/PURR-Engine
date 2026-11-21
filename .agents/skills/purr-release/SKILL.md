@@ -39,7 +39,8 @@ v1.0.0 The Neural Voice Forge · v1.1.0 The Cartridge Bay Overhaul · v1.2.0 (St
 Dropdown, Ejectable System Cartridge & NPU Models) · v1.3.0 (KittenTTS, 6 Piper Voice Packs,
 Bottom HUD, Cyberdeck OS Modules & Audio Media Exporter) · v1.3.1 (Glassmorphic Icon HUD,
 Phasing Transitions & Custom Cyberdeck SVG Icons) · v1.3.2 (Crystal-Clear Audio, KittenTTS Fix
-& Full OOV Word Pronunciation).
+& Full OOV Word Pronunciation) · v1.7.0 The Heavy Local Fleet · v1.8.0 The Audiobook Constructor
+· v1.8.1 The Trust Renewal · v1.8.2 The Adreno Offload.
 
 ## CI gates that can fail the release
 - `verify_project.py`: missing/empty required file, invalid XML, manifest missing TTS service
