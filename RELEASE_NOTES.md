@@ -1,3 +1,23 @@
+# 🌌 PURR-TTS v1.8.2 // The Adreno Offload
+
+### ✨ What's New since v1.8.1
+
+Qwen3 gets a GPU lane and large models get their slang back! 🎮🐾
+
+* **🎮 OPTIONAL ADRENO OPENCL GPU OFFLOAD (QWEN3)**: New **"Qwen3 GPU Offload (Adreno OpenCL)"** toggle in the P.U.R.R. Rulebook (default OFF). ON = the Qwen3 talker & predictor llama models run on your Adreno GPU via a newly-built `libggml-opencl.so` (embedded OpenCL kernels + Qualcomm's Adreno-optimized matmul kernels) instead of CPU — big synthesis speedup on Snapdragon flagships. Engineered to your law: **fail-soft everywhere** — unsupported tensor types and devices without a vendor `libOpenCL.so` fall back per-tensor (or fully) to CPU automatically, never fail-open; toggling mid-session re-mounts the engine (no restart); the status badge flips to `[GPU FP16]`, telemetry appends `• Adreno OpenCL`, and logcat names the engaged backend.
+* **🛠️ NATIVE ENGINEERING BEHIND IT**: Vendored Khronos OpenCL-Headers (`Apache-2.0`, see NOTICE) plus a link-only stub `libOpenCL.so` generated at configure time (never packaged — runtime resolves the device's vendor lib); OpenCL symbols stay undefined at link time (`-Wl,-z,undefs`) and resolve from the device; LunaVox's hardcoded `n_gpu_layers=-1` is now a runtime gate via `patches/lunavox_opencl_gpu_offload.patch` (applied fail-closed in CI). NPU (Hexagon) remains impractical for Qwen3 — the experimental `ggml-hexagon` backend lacks q5_k support and needs Qualcomm's proprietary QNN SDK; the Kokoro NPU chip stays the NPU lane.
+* **🗣️ SLANG DEFAULT ON FOR FLAGSHIP VOICES**: `slangDuringNeuralPure` now defaults **ON** — large TTS models (Qwen3, NeuTTS-2E, Chatterbox, Soprano, Studio FP32 clones) read texting shorthand meaningfully (`omg` → "oh my god", `senpai` → "sen-pie") instead of verbatim gibberish, while the truly intrusive Neural Pure bypasses (Drama-Matrix stutters, comma-chopping, micro-chunking, EQ coloring, MIKASTOP injection) stay active. The **"Slang & Honorifics on Flagship Voices"** Rulebook toggle (added in v1.8.1) now ships checked; flip it off to restore the full v1.8.0 silence.
+* **🧪 Test suite updated** for the new carve-out semantics (three-way coverage: carve-out default, explicit full bypass, Neural-Pure-off override).
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `18`).
+2. **`PURR-TTS_V1.8.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.1 // The Trust Renewal
 
 ### ✨ What's New since v1.8.0

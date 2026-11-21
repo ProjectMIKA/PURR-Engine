@@ -93,7 +93,14 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.8.1 // The Trust Renewal)
+### 🌟 Latest Updates (v1.8.2 // The Adreno Offload)
+
+* **🎮 Optional Adreno OpenCL GPU Offload (Qwen3):** New **"Qwen3 GPU Offload (Adreno OpenCL)"** toggle in the P.U.R.R. Rulebook (default OFF). ON = the Qwen3 talker & predictor run on your Adreno GPU via a newly-built `libggml-opencl.so` (embedded kernels + Qualcomm's Adreno-optimized matmul kernels) — big synthesis speedup on Snapdragon flagships. Fail-soft everywhere: per-tensor/full CPU fallback on unsupported devices, mid-session toggle re-mounts the engine, `[GPU FP16]` badge + `• Adreno OpenCL` telemetry.
+* **🛠️ Native engineering:** vendored Khronos OpenCL-Headers + link-only stub `libOpenCL.so` (configure-time, never packaged); OpenCL symbols resolve from the device at runtime (`-Wl,-z,undefs`); `patches/lunavox_opencl_gpu_offload.patch` makes LunaVox's hardcoded `n_gpu_layers` a runtime gate (applied fail-closed in CI). Hexagon NPU stays impractical for Qwen3 (experimental `ggml-hexagon`, no q5_k, QNN SDK required) — Kokoro keeps the NPU lane.
+* **🗣️ Slang default ON for flagship voices:** `slangDuringNeuralPure` now defaults ON — large TTS models read texting shorthand meaningfully (`omg` → "oh my god") while stutters, comma-chopping, micro-chunking & EQ stay bypassed. The "Slang & Honorifics on Flagship Voices" toggle now ships checked; flip off to restore the full v1.8.0 Neural Pure.
+* **🧪 Test suite updated** for the carve-out semantics (default / explicit full bypass / Neural-Pure-off).
+
+### 📦 Prior Releases (v1.8.1 // The Trust Renewal)
 
 * **🔧 Stale Pin Hotfix (Pocket TTS downloads fixed):** k2-fsa silently re-uploaded both `sherpa-onnx-pocket-tts-*-2026-01-26.tar.bz2` assets under the same `tts-models` release tag (2026-11-21), so every fresh Pocket TTS / clone install failed the fail-closed SHA-256 check (`Expected 2f3b8882…, got f4da7c7b…`). Both catalog pins now match the live upstream digests.
 * **🛡️ Self-Healing Hash Manifest:** New `model_manifest.json` (regenerate with `scripts/refresh_model_manifest.py`, drift-audit with `--check`) carries the current verified SHA-256 for all 27 network catalog assets. The app resolves `live manifest → baked pin` at download/verify time, force-refreshes once on any mismatch, and caches the last-good copy offline — future upstream re-uploads self-heal with a manifest commit, not an APK. Fail-closed SHA-256 law unchanged.
