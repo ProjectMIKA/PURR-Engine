@@ -62,6 +62,11 @@ signing if no keystore exists. Never commit keystores (`.gitignore` covers `*.ke
   `gh release delete-asset`, delete the remote tag, re-push the local tag (git push can't race),
   and either let the fresh tag-CI attach or `gh run download <run-id> -n PURR-TTS-Release-APKs`
   + `gh release upload vX.Y.Z *.apk --clobber` manually.
+- **`--target <sha>` can ALSO be rejected** ("Release.target_commitish is invalid") during
+  API replication lag even when the commit exists — fallback: confirm `main` via
+  `git ls-remote origin refs/heads/main` (the authoritative git endpoint, not the REST cache)
+  and use `--target main`, then IMMEDIATELY verify `git ls-remote origin refs/tags/vX.Y.Z`
+  equals the expected SHA before relying on the tag CI.
 - **Deleting a release's tag CONVERTS the release into a DRAFT** (invisible to users and to
   `releases/latest` — v1.8.1 sat as a draft with correct APKs while v1.8.0 still looked "latest").
   After any tag delete/re-push recovery, ALWAYS re-publish:
