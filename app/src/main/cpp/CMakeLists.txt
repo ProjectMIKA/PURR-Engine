@@ -34,9 +34,19 @@ endif()
 set(OPENCL_STUB_DIR "${CMAKE_CURRENT_BINARY_DIR}/opencl_stub")
 file(MAKE_DIRECTORY "${OPENCL_STUB_DIR}")
 file(WRITE "${OPENCL_STUB_DIR}/opencl_stub.c" "static int purr_opencl_stub_guard;\n")
-separate_arguments(_purr_c_flags NATIVE_COMMAND "${CMAKE_C_FLAGS}")
+# Compile the stub with the SAME target triple + sysroot the toolchain uses (the NDK keeps
+# --target/--sysroot in CMAKE_C_COMPILER_TARGET / CMAKE_SYSROOT, NOT in CMAKE_C_FLAGS —
+# a plain compiler invocation would emit a host-arch ELF that the link step rejects).
+set(_purr_stub_cmd ${CMAKE_C_COMPILER})
+if(CMAKE_C_COMPILER_TARGET)
+    list(APPEND _purr_stub_cmd "--target=${CMAKE_C_COMPILER_TARGET}")
+endif()
+if(CMAKE_SYSROOT)
+    list(APPEND _purr_stub_cmd "--sysroot=${CMAKE_SYSROOT}")
+endif()
+list(APPEND _purr_stub_cmd -shared -fPIC -o "${OPENCL_STUB_DIR}/libOpenCL.so" "${OPENCL_STUB_DIR}/opencl_stub.c")
 execute_process(
-    COMMAND ${CMAKE_C_COMPILER} ${_purr_c_flags} -shared -fPIC -o "${OPENCL_STUB_DIR}/libOpenCL.so" "${OPENCL_STUB_DIR}/opencl_stub.c"
+    COMMAND ${_purr_stub_cmd}
     RESULT_VARIABLE _opencl_stub_result
 )
 if(NOT _opencl_stub_result EQUAL 0)
