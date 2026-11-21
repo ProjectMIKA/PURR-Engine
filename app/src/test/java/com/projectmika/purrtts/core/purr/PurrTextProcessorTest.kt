@@ -316,15 +316,32 @@ class PurrTextProcessorTest {
         val qwenSpeech = qwenChunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
         val qwenSilences = qwenChunks.filterIsInstance<PurrChunk.Silence>()
 
-        // No slang expansion, stutter phoneticizing, honorific mangling, or comma micro-slicing
-        assertFalse(qwenSpeech.contains("oh my god", ignoreCase = true))
-        assertFalse(qwenSpeech.contains("for real", ignoreCase = true))
-        assertFalse(qwenSpeech.contains("sen-pie", ignoreCase = true))
-        assertFalse(qwenSpeech.contains("oh-oh", ignoreCase = true))
-        assertTrue(qwenSpeech.contains("omg"))
+        // ✨ SLANG CARVE-OUT (default ON): slang expansion, organic stutters & honorifics ride
+        // along on flagship voices — texting shorthand must be spoken meaningfully...
+        assertTrue(qwenSpeech.contains("oh my god", ignoreCase = true))
+        assertTrue(qwenSpeech.contains("for real", ignoreCase = true))
+        assertTrue(qwenSpeech.contains("sen-pie", ignoreCase = true))
+        assertTrue(qwenSpeech.contains("oh-oh", ignoreCase = true))
+        assertFalse(qwenSpeech.contains("omg"))
+        // ...while the intrusive enhancers stay bypassed: commas kept raw, quotes intact,
+        // MIKASTOP pause injection off (0 silences), no sentiment-driven micro-slicing.
         assertTrue(qwenSpeech.contains(","))
         assertTrue(qwenSpeech.contains("\"Are you serious right now?!\""))
         assertEquals(0, qwenSilences.size)
+
+        // Explicitly disabling the carve-out restores the full v1.8.0 bypass (slang included)
+        val fullBypassChunks = PurrTextProcessor.process(
+            sample,
+            qwenProfile.copy(slangDuringNeuralPure = false)
+        )
+        val fullBypassSpeech = fullBypassChunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        assertFalse(fullBypassSpeech.contains("oh my god", ignoreCase = true))
+        assertFalse(fullBypassSpeech.contains("for real", ignoreCase = true))
+        assertFalse(fullBypassSpeech.contains("sen-pie", ignoreCase = true))
+        assertTrue(fullBypassSpeech.contains("omg"))
+        assertTrue(fullBypassSpeech.contains(","))
+        assertTrue(fullBypassSpeech.contains("\"Are you serious right now?!\""))
+        assertEquals(0, fullBypassChunks.filterIsInstance<PurrChunk.Silence>().size)
 
         // Flagship user override works: turning off Neural Pure re-enables classic PURR middleware
         val overrideChunks = PurrTextProcessor.process(
