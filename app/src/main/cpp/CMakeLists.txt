@@ -83,6 +83,14 @@ foreach(_tgt IN ITEMS llama ggml ggml-base ggml-cpu ggml-opencl)
     endif()
 endforeach()
 
+# ✨ OpenCL symbols resolve at RUNTIME from the device's vendor libOpenCL.so (see the stub note
+# above). The NDK's default `-Wl,--no-undefined` would reject them at link time — allow undefined
+# for this backend only; a device without a usable libOpenCL.so makes the backend dlopen fail and
+# ggml simply skips it (fail-soft to CPU, doctrine law #1).
+if(TARGET ggml-opencl)
+    target_link_options(ggml-opencl PRIVATE -Wl,-z,undefs)
+endif()
+
 # Import unified libonnxruntime.so (v1.31.1 from onnxruntime-android AAR)
 add_library(onnxruntime_android SHARED IMPORTED)
 set_target_properties(onnxruntime_android PROPERTIES
