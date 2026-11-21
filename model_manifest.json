@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "generatedAtUtc": "2026-11-21T19:50:51Z",
+  "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
+  "assets": {
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
+      "sha256": "72c347230107ef8a31098ec4d468a605244beef5f1ed00db97efa13518800653",
+      "sizeBytes": 132353410
+    },
+    "https://huggingface.co/wkwong/Lunavox-Qwen3-TTS-GGUF/resolve/main/custom_small/qwen3_tts_talker.q5_k.gguf": {
+      "sha256": "b95606a3dd0c659f975af6bd6cc18c9580367da16bacbf95742cd0712e49f444",
+      "sizeBytes": 315663040
+    },
+    "https://huggingface.co/Danny-Dasilva/neutts-2e-onnx/resolve/main/model_int8.onnx": {
+      "sha256": "ead89cf159e98db93605f5ebc1985993e30c8500ee18393b823ca06a57e44cc0",
+      "sizeBytes": 349402919
+    },
+    "https://huggingface.co/KevinAHM/soprano-onnx/resolve/main/onnx/soprano_backbone_kv.onnx": {
+      "sha256": "46989d2bf5615d26ed6adea563d53498ee79ce1ad33731f26ba97e5299917681",
+      "sizeBytes": 319548418
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_8-int8.tar.bz2": {
+      "sha256": "6fa5be852612ce761094ba74ee6123b4fc4acfefa79bf64dc63acae4a83af2fd",
+      "sizeBytes": 31220690
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-high.tar.bz2": {
+      "sha256": "8619d204c7005866fe4f420181dfa79622af6a6222389f0b0818d2af31e0db0e",
+      "sizeBytes": 115545841
+    },
+    "https://huggingface.co/litert-community/Kokoro-G2P-en-US/resolve/main/dp_g2p_litert.tflite": {
+      "sha256": "f8d6bbd16197b2468f53273de13f971a0e1e8657709d7f4285f2cd1c31f26620",
+      "sizeBytes": 50969672
+    },
+    "https://huggingface.co/litert-community/Kokoro-82M/resolve/main/kokoro_int8_gpu_fp16.litertlm": {
+      "sha256": "1ef178b127ec48c737daf17eabb4cea5f6b3ffbc510aced270fe5c267bbeac52",
+      "sizeBytes": 294750530
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-multi-lang-v1_0.tar.bz2": {
+      "sha256": "60703707bc05ccd48d60e1eb723f38b07d6e474795a0b6a588d7220400e0f7a4",
+      "sizeBytes": 349886476
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_1.tar.bz2": {
+      "sha256": "259c9c8bc906d6078e4e0570421885dabb68b539c2f970fcbb890a58eeaf3e9c",
+      "sizeBytes": 147052523
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2": {
+      "sha256": "f4da7c7bd465f7b91e89191487fe90504396a51d6f0bcf94d0787633e2657293",
+      "sizeBytes": 98337865
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-2026-01-26.tar.bz2": {
+      "sha256": "cb2eab02aa70db813129d6d601cd5134ab0fcf55b557d0ee12460f2332200321",
+      "sizeBytes": 168148772
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2": {
+      "sha256": "77219c8b40f4ee8d73a7f902305ff6c1128ef9b54461c41b4ca6ed890b6c2803",
+      "sizeBytes": 109162785
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-zh-en-emilia.tar.bz2": {
+      "sha256": "098feeb0566875751eb8776b87060b9889b32b17d3649504e4514ce2b6a85100",
+      "sizeBytes": 634731511
+    },
+    "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/main/onnx/language_model_q4.onnx_data": {
+      "sha256": "2c029dc0acf48752473d8c74c72b5ceaaad76b9886fe106eaf2022142d5b5d5e",
+      "sizeBytes": 204456572
+    },
+    "https://huggingface.co/wkwong/Lunavox-Qwen3-TTS-GGUF/resolve/main/base_small/qwen3_tts_talker.q5_k.gguf": {
+      "sha256": "21e5780209f969c2293daa0f17eb96b436377ab75f280b0f0f10fb52ebad1b43",
+      "sizeBytes": 315663040
+    },
+    "https://huggingface.co/wkwong/Lunavox-Qwen3-TTS-GGUF/resolve/main/design/qwen3_tts_talker.q5_k.gguf": {
+      "sha256": "16950c48333f1ecbdcc85c32824b086da18e05fc4497557cd7df3ee4ded947ed",
+      "sizeBytes": 1006244544
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-mini-en-v0_8.tar.bz2": {
+      "sha256": "518f9b130320f690d5b5476df77bde4215fca67773cda16710318e5081234b9d",
+      "sizeBytes": 67547594
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2": {
+      "sha256": "9a5d1fc497f85e8022b785bff5f8105203b1e33099ee6265203efc70b0cb0264",
+      "sizeBytes": 67223746
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ryan-high.tar.bz2": {
+      "sha256": "6a71edf4d308b9cb2eaeadc8d1f3c6bf96120ecb7fe52c29a2b6e139c59760ed",
+      "sizeBytes": 115630708
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-cori-high.tar.bz2": {
+      "sha256": "42922f07738fcde2e49eed4e959635692f73b933de35a6b7c1010162ff566292",
+      "sizeBytes": 115574061
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alba-medium.tar.bz2": {
+      "sha256": "fcd45962906933eec4431d3688f7d74aaac8713c87c6717f91fd3b23463aa1a1",
+      "sizeBytes": 67212349
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-glados-high.tar.bz2": {
+      "sha256": "dcb52d4be94200d42b4d97ebb82ec398be27039f4719207283fa5e7d931b1cf3",
+      "sizeBytes": 115586982
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-kristin-medium.tar.bz2": {
+      "sha256": "c2206f572df2956c50b1ae3367eebce3853c663e890cba8048cd62b1e4dbe6c7",
+      "sizeBytes": 67259230
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-supertonic-3-tts-int8-2026-05-11.tar.bz2": {
+      "sha256": "82fa96f91c4ef8abaae3a14a3f4153facf88bed821d1f7331cec2700f432c427",
+      "sizeBytes": 128774318
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-zh-en.tar.bz2": {
+      "sha256": "271b804af570400d3bcdcb53bf6e53cc9f75180ee763b9f13eb5eaf2b0d086ef",
+      "sizeBytes": 79033838
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-16khz-univ.onnx": {
+      "sha256": "b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e",
+      "sizeBytes": 53882848
+    }
+  }
+}

@@ -93,7 +93,15 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.8.0 // Audiobook Constructor (.M4B), VoiceDesign Studio & Persistent Signing)
+### 🌟 Latest Updates (v1.8.1 // The Trust Renewal)
+
+* **🔧 Stale Pin Hotfix (Pocket TTS downloads fixed):** k2-fsa silently re-uploaded both `sherpa-onnx-pocket-tts-*-2026-01-26.tar.bz2` assets under the same `tts-models` release tag (2026-11-21), so every fresh Pocket TTS / clone install failed the fail-closed SHA-256 check (`Expected 2f3b8882…, got f4da7c7b…`). Both catalog pins now match the live upstream digests.
+* **🛡️ Self-Healing Hash Manifest:** New `model_manifest.json` (regenerate with `scripts/refresh_model_manifest.py`, drift-audit with `--check`) carries the current verified SHA-256 for all 27 network catalog assets. The app resolves `live manifest → baked pin` at download/verify time, force-refreshes once on any mismatch, and caches the last-good copy offline — future upstream re-uploads self-heal with a manifest commit, not an APK. Fail-closed SHA-256 law unchanged.
+* **⛑️ HTTP 416 Self-Heal:** A leftover complete `.part` file used to dead-end every retry with `HTTP 416`. Resume now verifies the complete file and promotes it into the cartridge, or restarts clean automatically — previously-downloaded Pocket TTS installs on first tap without re-downloading.
+* **📣 Cartridge-Coded Failure Messages:** Missing-voice errors now name the ROM bay to download (e.g. `Af Heart offline — ROM-02 KOKORO_NEURAL_HUB cartridge not installed`) plus `[MOUNT_MISS]` logcat diagnostics.
+* **🎛️ Calmer Audition + Live Progress:** Default test line no longer packs ellipses/stutters/action blocks (they read as "stuck processing" on slow engines like Qwen3), and the test bench shows live `[n/total] NEURAL` chunk progress.
+
+### 📦 Prior Releases (v1.8.0 // Audiobook Constructor (.M4B), VoiceDesign Studio & Persistent Signing)
 
 * **Audiobook Constructor (`TOOL-07`):** Import `EPUB`, `PDF`, `TXT`, `MD`, `HTML`, `DOCX`, or `FB2` ebooks, select/edit chapters, synthesize per-chapter with Pause/Resume checkpoints across restarts, and mux into a universal **chaptered `.M4B` audiobook** (`MediaCodec` AAC + Nero `chpl` & iTunes audiobook atoms).
 * **Qwen3 VoiceDesign Studio (`TOOL-06`):** Dedicated Cyberdeck OS prompt builder for `Qwen3-TTS 1.7B VoiceDesign` covering Gender, Age, Pitch, multi-select Timbre, Pace, Emotion Delivery, Accent/Language, Mic Acoustics, curated templates, saved presets, and Design→Clone identity locking.

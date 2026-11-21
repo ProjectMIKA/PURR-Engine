@@ -158,8 +158,23 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 ## Model catalog (`ModelCatalogManager` + `PurrDefaultPresets.modelCatalog()`)
 - Resumable HTTP Range downloads into `filesDir/models/downloads`, streaming SHA-256 verify
   against `expectedSha256`, `.tar.bz2` unpack via commons-compress into `filesDir/models/…`.
+- ✨ **TRUST RENEWAL (v1.8.1)** — upstream hosts are MUTABLE, so expected hashes resolve
+  `live manifest → baked pin`: `model_manifest.json` (repo root, raw.githubusercontent) carries
+  the current verified digest per asset URL (GitHub release digests + HF LFS oids; regenerate
+  with `scripts/refresh_model_manifest.py`, drift-audit with `--check`). The manager preloads it
+  at init/download start, force-refreshes ONCE on any SHA mismatch before failing closed, and
+  caches the last-good copy at `filesDir/models/manifest_cache.json` for offline. The fail-closed
+  SHA-256 law itself is UNCHANGED — a download only ever commits after matching a trusted digest.
+- **416 self-heal (`streamAssetToPart`)**: a leftover COMPLETE `.part` file (stale-pin rejection
+  or upstream size change) is hash-verified + promoted instead of dead-ending every retry with
+  `HTTP 416`; if the part is genuinely stale it is deleted and restarted clean from byte 0.
+- All three download paths (single archive, multi-file native bundle, companion) share the
+  helper pipeline: `streamAssetToPart` → `verifyAgainstExpectedSha` (manifest rescue) → commit.
 - Tool cartridges (`tool_purr_engine`, `tool_dsp_rack`, `tool_symbol_shield`, `tool_clone_studio`,
   `tool_audio_exporter`, `tool_voice_design`, `tool_audiobook_constructor`) are always INSTALLED/builtin; TTS cartridges slam/eject via UI.
+- Failure UX names the ROM bay, not the voice (`cartridgeLabelFor` in `SherpaOnnxEngine`):
+  `Af Heart offline — ROM-02 KOKORO_NEURAL_HUB cartridge not installed (download it in Tab 3)`;
+  `ensureFamilyLoadedLocked` logs `[MOUNT_MISS]` with the exact directory checked.
 
 ## Scar log (do not re-learn)
 - AGP 8.7.2 Lint UAST crash → toolchain aligned at Kotlin 2.4.0; keep AGP/Kotlin aligned.
@@ -171,3 +186,11 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   slots (see mika-compose-ui skill).
 - **v1.7.1 Qwen3 & NeuTTS-2E scars**: (1) `custom_small` (`0.6B CustomVoice`) sets `"instruct_support": false` in `model_profile.json`, so passing non-empty sentiment `instruct` makes LunaVox reject `synthesize_custom`; ALWAYS read `instruct_support` before sending `instruct`. (2) NeuTTS-2E has 151k vocab + 65k `<|speech_N|>` added_tokens (`23MB tokenizer.json`) and a `217,226`-logit prefill matrix (`387MB` on long prompts); load tokenizers via streaming `StreamingTokenizerJsonReader`, read ONLY the final sequence step vector in `OnnxRuntimeEngine`, and keep `android:largeHeap="true"`. (3) Never use unaligned overlap-add time-scaling (causes metallic phase-comb reverb); use pitch-synchronous `PurrDspProcessor.timeScaleWsola` and keep `0.94x..1.06x` bypassed bit-exact.
 - **v1.8.0 scars**: (1) NEVER set `GraphOptimizationLevel::ORT_ENABLE_ALL` on Android ARM64 CPU EP for Qwen3 FP16 ONNX graphs — `ORT_ENABLE_ALL` triggers `NhwcTransformer`, rewriting FP16 `Conv` nodes into `NhwcFused` and crashing `speaker_encoder.fp16.onnx` (`Non-zero status code returned while running NhwcFused`); ALWAYS keep `ORT_ENABLE_BASIC` in `provider_policy_android.cpp`. (2) Never generate release signing keystores inside CI runs — always decode the persistent keystore from `PURR_RELEASE_KEYSTORE_B64` secret so upgrades stay compatible in-place. (3) Heavyweight neural TTS voices (`PurrNeuralBypass`) sound far cleaner when slang expansion, stutters, comma-stripping, and micro-chopping are auto-bypassed. (4) `TOOL-06` (`QwenVoiceDesignBuilder`) & `TOOL-07` (`EbookParser` + `EbookPdfExtractor` + `AudiobookConstructorManager` + `M4bAudiobookMuxer` + `Mp4ChapterAtomWriter` writing Nero `chpl` + iTunes `stik=2`) provide structured VoiceDesign prompt editing and resumable `.m4b` audiobook creation.
+- **v1.8.1 trust-renewal scar**: upstream model hosts are MUTABLE — k2-fsa re-uploads assets
+  under the SAME `tts-models` tag (Pocket INT8/FP32 on 2026-11-21, Kokoro packs on 2026-10-26)
+  and HuggingFace `resolve/main` moves with the branch tip, so baked catalog pins rot and the
+  fail-closed law then bricks every fresh download ("SHA-256 mismatch! Expected 2f3b8882…").
+  NEVER trust a baked pin alone: `model_manifest.json` wins over pins (refresh via
+  `scripts/refresh_model_manifest.py`, audit via `--check`), a mismatch force-refreshes the
+  manifest ONCE before failing closed, and a leftover complete `.part` must be 416-verified and
+  promoted — never resumed into an eternal "HTTP 416" retry trap.

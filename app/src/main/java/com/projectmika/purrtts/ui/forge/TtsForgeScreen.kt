@@ -105,6 +105,7 @@ fun TtsForgeScreen(
     val cartridgeAnim by viewModel.cartridgeAnim.collectAsState()
     val testText by viewModel.testInputText.collectAsState()
     val isPlaying by viewModel.isPlayingPreview.collectAsState()
+    val auditionProgress by viewModel.auditionProgress.collectAsState()
     val isRecordingClone by viewModel.isRecordingClone.collectAsState()
     val recordingProgress by viewModel.recordingProgress.collectAsState()
     val lastRecordedWav by viewModel.lastRecordedWavPath.collectAsState()
@@ -349,6 +350,18 @@ fun TtsForgeScreen(
                                                     fontSize = 11.sp
                                                 )
                                             }
+                                        }
+                                        if (isPlaying && auditionProgress != null) {
+                                            // ✨ TRUST RENEWAL UX (v1.8.1): live per-chunk audition progress —
+                                            // slow neural engines (Qwen3 ≈ 30s/clip) never look frozen mid-test.
+                                            Text(
+                                                text = auditionProgress ?: "",
+                                                color = MikaColors.NeonCyan,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontSize = 9.sp,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
                                         }
                                     }
                                 }

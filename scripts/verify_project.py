@@ -7,6 +7,7 @@ package headers & balanced delimiters, and checks model catalog checksum format.
 
 import os
 import re
+import json
 import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -236,6 +237,23 @@ def main() -> int:
     sha_matches = re.findall(r'expectedSha256\s*=\s*"([0-9a-fA-F]{64})"', models_text)
     if len(sha_matches) < 6:
         failures.append(f"Expected 6 SHA-256 verified catalog bundles, found {len(sha_matches)}")
+
+    # 6. Self-healing model hash manifest (v1.8.1) — must exist, parse, and cover the catalog
+    manifest_path = ROOT / "model_manifest.json"
+    if not manifest_path.exists():
+        failures.append("model_manifest.json missing — the self-healing hash manifest is required (v1.8.1)")
+    else:
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            assets = manifest.get("assets") or {}
+            if manifest.get("version") != 1:
+                failures.append("model_manifest.json: unsupported schema version")
+            if len(assets) < 20:
+                failures.append(f"model_manifest.json: expected >=20 verified asset pins, found {len(assets)}")
+            if not any("pocket-tts" in url for url in assets):
+                failures.append("model_manifest.json: Pocket TTS pins missing from the manifest")
+        except json.JSONDecodeError as exc:
+            failures.append(f"model_manifest.json is not valid JSON: {exc}")
 
     if failures:
         print("VERIFICATION FAILED:")

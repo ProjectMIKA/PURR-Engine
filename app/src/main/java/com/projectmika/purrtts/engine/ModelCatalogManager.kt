@@ -8,6 +8,7 @@ import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.ModelBundleState
 import com.projectmika.purrtts.core.purr.PurrDefaultPresets
+import com.projectmika.purrtts.core.purr.PurrHashManifest
 import com.projectmika.purrtts.core.purr.PurrProfileRepository
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import java.io.BufferedInputStream
@@ -41,13 +42,39 @@ class ModelCatalogManager(
 
     companion object {
         private const val TAG = "PurrCatalog"
+
+        // ✨ TRUST RENEWAL (v1.8.1): upstream model hosts are MUTABLE — k2-fsa re-uploads release
+        // assets under the same `tts-models` tag (Pocket INT8/FP32 on 2026-11-21, Kokoro packs on
+        // 2026-10-26) and HuggingFace `resolve/main` moves with the branch tip. Baked catalog pins
+        // rot and the fail-closed SHA-256 law then rejects every fresh download forever. This
+        // manifest is the live source of truth; baked pins are the offline floor only.
+        private const val MANIFEST_URL =
+            "https://raw.githubusercontent.com/ProjectMIKA/PURR-Engine/main/model_manifest.json"
     }
 
     val catalog: List<ModelBundleSpec> = PurrDefaultPresets.modelCatalog()
 
     private val activeJobs = ConcurrentHashMap<String, Job>()
 
+    // ✨ TRUST RENEWAL (v1.8.1): live expected-hash registry (assetUrl → sha256). Fetched from the
+    // manifest at download start, force-refreshed ONCE on any SHA mismatch, cached to disk so an
+    // offline device still gets the last-good truth instead of a rotten baked pin.
+    @Volatile
+    private var manifestByAssetUrl: Map<String, String> = emptyMap()
+    private val manifestClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .build()
+    private val manifestCacheFile: File by lazy {
+        File(context.filesDir, "models/manifest_cache.json")
+    }
+
     init {
+        // ✨ TRUST RENEWAL (v1.8.1): preload the manifest so every download/verify resolves the
+        // freshest known-good expected hash before the baked pin is ever consulted.
+        scope.launch { runCatching { refreshManifest(force = false) } }
+
         // ✨ SELF-HEALING COMPANION MIGRATION (v1.6.1): if a companion spec changed (e.g. the
         // Matcha vocoder switched 22kHz -> 16kHz), existing INSTALLED cartridges are missing the
         // new companion file — re-fetch it silently in the background so the engine never mounts
@@ -110,6 +137,11 @@ class ModelCatalogManager(
         val target = resolveDestinationFile(spec)
         if (!target.exists()) return@withContext false
 
+        // ✨ TRUST RENEWAL (v1.8.1): verify against the live manifest digest when available —
+        // an upstream re-publish must not brand a previously-valid install as corrupt.
+        refreshManifest(force = false)
+        val expectedSha = expectedSha256For(spec.downloadUrl, spec.expectedSha256)
+
         repository.updateModelState(
             spec.id,
             (repository.state.value.modelStates[spec.id] ?: ModelBundleState(spec.id))
@@ -117,7 +149,7 @@ class ModelCatalogManager(
         )
 
         val digest = computeSha256(target)
-        val matched = digest.equals(spec.expectedSha256, ignoreCase = true)
+        val matched = digest.equals(expectedSha, ignoreCase = true)
         repository.updateModelState(
             spec.id,
             ModelBundleState(
@@ -127,7 +159,7 @@ class ModelCatalogManager(
                 totalBytes = target.length(),
                 sha256Verified = matched,
                 localPath = target.absolutePath,
-                errorMessage = if (matched) null else "SHA-256 mismatch ($digest)"
+                errorMessage = if (matched) null else "SHA-256 mismatch ($digest vs expected ${expectedSha.take(12)}...)"
             )
         )
         matched
@@ -171,64 +203,27 @@ class ModelCatalogManager(
         val finalFile = resolveDestinationFile(spec)
 
         try {
-            var existingBytes = if (partFile.exists()) partFile.length() else 0L
-            val reqBuilder = Request.Builder().url(spec.downloadUrl)
-            if (existingBytes > 0L) {
-                reqBuilder.addHeader("Range", "bytes=$existingBytes-")
-            }
-
-            httpClient.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful && response.code != 206) {
-                    throw IllegalStateException("HTTP ${response.code}: ${response.message}")
-                }
-
-                val isResumed = response.code == 206
-                if (!isResumed) {
-                    existingBytes = 0L
-                }
-
-                val body = response.body ?: throw IllegalStateException("Empty HTTP body")
-                val contentLength = body.contentLength()
-                val totalBytes = if (contentLength > 0L) existingBytes + contentLength else existingBytes
-
+            // ✨ TRUST RENEWAL (v1.8.1): resolve the expected hash from the live manifest first
+            // (baked pin = offline floor), then stream with Range resume + the 416 self-heal.
+            refreshManifest(force = false)
+            val bakedSha = spec.expectedSha256
+            val expectedSha = expectedSha256For(spec.downloadUrl, bakedSha)
+            val streamed = streamAssetToPart(
+                assetUrl = spec.downloadUrl,
+                partFile = partFile,
+                expectedSha = expectedSha
+            ) { downloaded, total ->
                 repository.updateModelState(
                     spec.id,
                     ModelBundleState(
                         specId = spec.id,
                         state = DownloadState.DOWNLOADING,
-                        downloadedBytes = existingBytes,
-                        totalBytes = totalBytes
+                        downloadedBytes = downloaded,
+                        totalBytes = total
                     )
                 )
-
-                body.byteStream().use { input ->
-                    FileOutputStream(partFile, isResumed).use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var current = existingBytes
-                        var lastUiEmit = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            output.write(buffer, 0, read)
-                            current += read
-                            val now = System.currentTimeMillis()
-                            if (now - lastUiEmit >= 200L) {
-                                lastUiEmit = now
-                                repository.updateModelState(
-                                    spec.id,
-                                    ModelBundleState(
-                                        specId = spec.id,
-                                        state = DownloadState.DOWNLOADING,
-                                        downloadedBytes = current,
-                                        totalBytes = totalBytes
-                                    )
-                                )
-                            }
-                        }
-                        output.flush()
-                    }
-                }
             }
+            if (!streamed) throw IllegalStateException("Empty HTTP body")
 
             // SHA-256 Verification before unpacking / committing
             repository.updateModelState(
@@ -240,10 +235,7 @@ class ModelCatalogManager(
                     totalBytes = partFile.length()
                 )
             )
-            val actualSha = computeSha256(partFile)
-            if (!actualSha.equals(spec.expectedSha256, ignoreCase = true)) {
-                throw IllegalStateException("SHA-256 mismatch! Expected ${spec.expectedSha256.take(12)}..., got ${actualSha.take(12)}...")
-            }
+            verifyAgainstExpectedSha(spec, partFile, bakedSha, spec.downloadUrl, spec.fileName)
 
             finalFile.parentFile?.mkdirs()
             if (finalFile.exists()) finalFile.delete()
@@ -309,6 +301,173 @@ class ModelCatalogManager(
     }
 
     /**
+     * ✨ TRUST RENEWAL (v1.8.1): resolves the expected SHA-256 for an asset. The live manifest
+     * wins when it carries a well-formed digest for the URL; the baked catalog pin is the
+     * offline floor only. Fail-closed law unchanged: bytes are only ever committed after
+     * matching a trusted expected hash.
+     */
+    fun expectedSha256For(assetUrl: String, bakedPin: String): String {
+        val fromManifest = manifestByAssetUrl[assetUrl]
+        return if (fromManifest != null && PurrHashManifest.isWellFormedSha256(fromManifest)) fromManifest else bakedPin
+    }
+
+    /**
+     * ✨ TRUST RENEWAL (v1.8.1): fetches [MANIFEST_URL] and updates the in-memory registry +
+     * last-good disk cache. `force = false` no-ops when a manifest is already loaded (download
+     * start); `force = true` runs on any SHA mismatch before failing closed. Network failure
+     * degrades gracefully: last-good cache → baked catalog pins.
+     */
+    suspend fun refreshManifest(force: Boolean): Boolean = withContext(Dispatchers.IO) {
+        if (!force && manifestByAssetUrl.isNotEmpty()) return@withContext true
+        try {
+            val body = manifestClient.newCall(Request.Builder().url(MANIFEST_URL).build()).execute().use { resp ->
+                if (!resp.isSuccessful) throw IllegalStateException("HTTP ${resp.code}")
+                resp.body?.string() ?: throw IllegalStateException("Empty manifest body")
+            }
+            val parsed = PurrHashManifest.parse(body)
+            if (parsed.isEmpty()) throw IllegalStateException("Manifest parsed empty")
+            manifestByAssetUrl = parsed
+            runCatching {
+                manifestCacheFile.parentFile?.mkdirs()
+                manifestCacheFile.writeText(body)
+            }
+            Log.i(TAG, "[TRUST_RENEWAL] Live manifest refreshed: ${parsed.size} assets")
+            true
+        } catch (err: Exception) {
+            val cached = runCatching { PurrHashManifest.parse(manifestCacheFile.readText()) }.getOrDefault(emptyMap())
+            if (cached.isNotEmpty() && manifestByAssetUrl.isEmpty()) {
+                manifestByAssetUrl = cached
+                Log.w(TAG, "[TRUST_RENEWAL] Manifest fetch failed (${err.message}); using last-good cached manifest")
+            } else {
+                Log.w(TAG, "[TRUST_RENEWAL] Manifest unavailable (${err.message}); using baked catalog pins")
+            }
+            false
+        }
+    }
+
+    /**
+     * ✨ TRUST RENEWAL (v1.8.1) STREAM HELPER ✨
+     * Streams a remote asset into [partFile] with HTTP-Range resume and the 416 self-heal:
+     * a leftover COMPLETE `.part` file (typical after a stale-pin rejection, or when an
+     * upstream re-upload changed the asset size) previously dead-ended every retry with
+     * "HTTP 416" — now it is hash-verified and promoted, or cleaned and restarted from byte 0.
+     * Returns true when [partFile] holds bytes worth hash-verifying.
+     */
+    private fun streamAssetToPart(
+        assetUrl: String,
+        partFile: File,
+        expectedSha: String,
+        onProgress: (downloaded: Long, total: Long) -> Unit
+    ): Boolean {
+        var cleanAttemptDone = false
+        while (true) {
+            val existingBytes = if (cleanAttemptDone) 0L else if (partFile.exists()) partFile.length() else 0L
+            val reqBuilder = Request.Builder().url(assetUrl)
+            if (existingBytes > 0L) {
+                reqBuilder.addHeader("Range", "bytes=$existingBytes-")
+            }
+
+            var rangeUnsatisfiable = false
+            var streamed = false
+            httpClient.newCall(reqBuilder.build()).execute().use { response ->
+                when {
+                    response.code == 416 && existingBytes > 0L -> {
+                        rangeUnsatisfiable = true
+                        Log.i(TAG, "Range unsatisfiable — .part file (${partFile.length()} bytes) already spans the remote asset; verifying instead of dead-ending")
+                    }
+                    !response.isSuccessful && response.code != 206 -> {
+                        throw IllegalStateException("HTTP ${response.code}: ${response.message}")
+                    }
+                    else -> {
+                        streamed = true
+                        val isResumed = response.code == 206
+                        val base = if (isResumed) existingBytes else 0L
+                        val body = response.body ?: throw IllegalStateException("Empty HTTP body")
+                        val contentLength = body.contentLength()
+                        val totalBytes = if (contentLength > 0L) base + contentLength else base
+
+                        onProgress(base, totalBytes)
+
+                        body.byteStream().use { input ->
+                            FileOutputStream(partFile, isResumed).use { output ->
+                                val buffer = ByteArray(64 * 1024)
+                                var current = base
+                                var lastUiEmit = 0L
+                                while (true) {
+                                    val read = input.read(buffer)
+                                    if (read == -1) break
+                                    output.write(buffer, 0, read)
+                                    current += read
+                                    val now = System.currentTimeMillis()
+                                    if (now - lastUiEmit >= 200L) {
+                                        lastUiEmit = now
+                                        onProgress(current, totalBytes)
+                                    }
+                                }
+                                output.flush()
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (streamed) return true
+            if (rangeUnsatisfiable) {
+                if (computeSha256(partFile).equals(expectedSha, ignoreCase = true)) return true
+                if (cleanAttemptDone) return false
+                Log.w(TAG, "Leftover .part failed SHA pre-check (${partFile.length()} bytes) — restarting clean")
+                runCatching { partFile.delete() }
+                cleanAttemptDone = true
+                continue
+            }
+            return false
+        }
+    }
+
+    /**
+     * ✨ TRUST RENEWAL (v1.8.1) VERIFY ✨ — hashes [file] against the manifest-resolved expected
+     * digest; on mismatch, force-refreshes the manifest ONCE and re-verifies (an upstream
+     * re-publish between catalog releases rescues itself). Throws an actionable error when the
+     * fail-closed law still rejects the bytes.
+     */
+    private suspend fun verifyAgainstExpectedSha(
+        spec: ModelBundleSpec,
+        file: File,
+        bakedPin: String,
+        assetUrl: String,
+        label: String
+    ) {
+        val firstSha = expectedSha256For(assetUrl, bakedPin)
+        // Legacy semantics preserved: assets with no trusted digest configured are not verified.
+        if (!PurrHashManifest.isWellFormedSha256(firstSha)) return
+
+        val actual = computeSha256(file)
+        if (actual.equals(firstSha, ignoreCase = true)) return
+
+        val rescuedSha = runCatching {
+            refreshManifest(force = true)
+            val refreshed = expectedSha256For(assetUrl, bakedPin)
+            if (!refreshed.equals(firstSha, ignoreCase = true) &&
+                computeSha256(file).equals(refreshed, ignoreCase = true)
+            ) {
+                refreshed
+            } else {
+                null
+            }
+        }.getOrNull()
+
+        if (rescuedSha != null) {
+            Log.i(TAG, "[TRUST_RENEWAL] Manifest refresh rescued $label for ${spec.id} — new expected hash accepted")
+            return
+        }
+
+        throw IllegalStateException(
+            "Upstream asset changed — SHA-256 mismatch on $label (got ${actual.take(12)}...). " +
+                "Bytes rejected by the fail-closed trust law; update model_manifest.json / catalog pins."
+        )
+    }
+
+    /**
      * ✨ MULTI-FILE NATIVE BUNDLE INSTALLER (v1.7.0) ✨
      * Downloads primary GGUF/ONNX file + all `extraAssets` (preserving relative subdirs such as
      * `embeddings/`) into `filesDir/models/native/<specId>/` with HTTP Range resume & SHA-256 checks.
@@ -334,9 +493,11 @@ class ModelCatalogManager(
             allAssets.forEachIndexed { idx, asset ->
                 val destFile = File(targetDir, asset.relativePath)
                 destFile.parentFile?.mkdirs()
+                // ✨ TRUST RENEWAL (v1.8.1): manifest-resolved expected hash (baked pin = floor).
+                val expectedSha = expectedSha256For(asset.url, asset.expectedSha256)
                 val alreadyValid = destFile.exists() && destFile.length() > 0L && (
-                    asset.expectedSha256.length != 64 ||
-                        computeSha256(destFile).equals(asset.expectedSha256, ignoreCase = true)
+                    expectedSha.length != 64 ||
+                        computeSha256(destFile).equals(expectedSha, ignoreCase = true)
                     )
                 if (alreadyValid) {
                     completedBytes += destFile.length()
@@ -344,51 +505,25 @@ class ModelCatalogManager(
                 }
 
                 val partFile = File(downloadsTempDir, "${spec.id}_${asset.relativePath.replace('/', '_')}.part")
-                var existingBytes = if (partFile.exists()) partFile.length() else 0L
-                val reqBuilder = Request.Builder().url(asset.url)
-                if (existingBytes > 0L) {
-                    reqBuilder.addHeader("Range", "bytes=$existingBytes-")
+                val streamed = streamAssetToPart(
+                    assetUrl = asset.url,
+                    partFile = partFile,
+                    expectedSha = expectedSha
+                ) { downloaded, _ ->
+                    repository.updateModelState(
+                        spec.id,
+                        ModelBundleState(
+                            specId = spec.id,
+                            state = DownloadState.DOWNLOADING,
+                            downloadedBytes = (completedBytes + downloaded).coerceAtMost(totalApproxBytes),
+                            totalBytes = totalApproxBytes,
+                            errorMessage = "[${idx + 1}/${allAssets.size}] ${asset.relativePath.substringAfterLast('/')}"
+                        )
+                    )
                 }
+                if (!streamed) throw IllegalStateException("Empty body on ${asset.relativePath}")
 
-                httpClient.newCall(reqBuilder.build()).execute().use { response ->
-                    if (!response.isSuccessful && response.code != 206) {
-                        throw IllegalStateException("HTTP ${response.code} on ${asset.relativePath}")
-                    }
-                    val isResumed = response.code == 206
-                    if (!isResumed) existingBytes = 0L
-                    val body = response.body ?: throw IllegalStateException("Empty body on ${asset.relativePath}")
-
-                    body.byteStream().use { input ->
-                        FileOutputStream(partFile, isResumed).use { output ->
-                            val buffer = ByteArray(64 * 1024)
-                            var current = existingBytes
-                            var lastUiEmit = 0L
-                            while (true) {
-                                val read = input.read(buffer)
-                                if (read == -1) break
-                                output.write(buffer, 0, read)
-                                current += read
-                                val now = System.currentTimeMillis()
-                                if (now - lastUiEmit >= 200L) {
-                                    lastUiEmit = now
-                                    repository.updateModelState(
-                                        spec.id,
-                                        ModelBundleState(
-                                            specId = spec.id,
-                                            state = DownloadState.DOWNLOADING,
-                                            downloadedBytes = (completedBytes + current).coerceAtMost(totalApproxBytes),
-                                            totalBytes = totalApproxBytes,
-                                            errorMessage = "[${idx + 1}/${allAssets.size}] ${asset.relativePath.substringAfterLast('/')}"
-                                        )
-                                    )
-                                }
-                            }
-                            output.flush()
-                        }
-                    }
-                }
-
-                if (asset.expectedSha256.length == 64) {
+                if (expectedSha.length == 64) {
                     repository.updateModelState(
                         spec.id,
                         ModelBundleState(
@@ -399,11 +534,8 @@ class ModelCatalogManager(
                             errorMessage = "SHA-256 [${idx + 1}/${allAssets.size}] ${asset.relativePath.substringAfterLast('/')}"
                         )
                     )
-                    val actualSha = computeSha256(partFile)
-                    if (!actualSha.equals(asset.expectedSha256, ignoreCase = true)) {
-                        partFile.delete()
-                        throw IllegalStateException("SHA-256 mismatch on ${asset.relativePath}")
-                    }
+                    // ✨ TRUST RENEWAL (v1.8.1): manifest-rescue + actionable mismatch errors.
+                    verifyAgainstExpectedSha(spec, partFile, asset.expectedSha256, asset.url, asset.relativePath)
                 }
 
                 if (destFile.exists()) destFile.delete()
@@ -538,57 +670,26 @@ class ModelCatalogManager(
         if (finalFile.exists() && finalFile.length() > 0L) return@withContext
 
         try {
-            var existingBytes = if (partFile.exists()) partFile.length() else 0L
-            val reqBuilder = Request.Builder().url(spec.companionUrl)
-            if (existingBytes > 0L) {
-                reqBuilder.addHeader("Range", "bytes=$existingBytes-")
-            }
-
-            httpClient.newCall(reqBuilder.build()).execute().use { response ->
-                if (!response.isSuccessful && response.code != 206) {
-                    throw IllegalStateException("Companion HTTP ${response.code}: ${response.message}")
-                }
-                val isResumed = response.code == 206
-                if (!isResumed) existingBytes = 0L
-                val body = response.body ?: throw IllegalStateException("Empty companion body")
-                val contentLength = body.contentLength()
-                val totalBytes = if (contentLength > 0L) existingBytes + contentLength else existingBytes
-
-                body.byteStream().use { input ->
-                    FileOutputStream(partFile, isResumed).use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        var current = existingBytes
-                        var lastUiEmit = 0L
-                        while (true) {
-                            val read = input.read(buffer)
-                            if (read == -1) break
-                            output.write(buffer, 0, read)
-                            current += read
-                            val now = System.currentTimeMillis()
-                            if (now - lastUiEmit >= 200L) {
-                                lastUiEmit = now
-                                repository.updateModelState(
-                                    spec.id,
-                                    (repository.state.value.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)).copy(
-                                        state = DownloadState.EXTRACTING,
-                                        downloadedBytes = current,
-                                        totalBytes = totalBytes,
-                                        errorMessage = "Fetching companion: ${spec.companionFileName}"
-                                    )
-                                )
-                            }
-                        }
-                        output.flush()
-                    }
-                }
-            }
-
-            val actualSha = computeSha256(partFile)
-            if (!actualSha.equals(spec.companionExpectedSha256, ignoreCase = true)) {
-                throw IllegalStateException(
-                    "Companion SHA-256 mismatch! Expected ${spec.companionExpectedSha256.take(12)}..., got ${actualSha.take(12)}..."
+            // ✨ TRUST RENEWAL (v1.8.1): manifest-resolved companion hash + 416 self-heal streaming.
+            val expectedSha = expectedSha256For(spec.companionUrl, spec.companionExpectedSha256)
+            val streamed = streamAssetToPart(
+                assetUrl = spec.companionUrl,
+                partFile = partFile,
+                expectedSha = expectedSha
+            ) { downloaded, total ->
+                repository.updateModelState(
+                    spec.id,
+                    (repository.state.value.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)).copy(
+                        state = DownloadState.EXTRACTING,
+                        downloadedBytes = downloaded,
+                        totalBytes = total,
+                        errorMessage = "Fetching companion: ${spec.companionFileName}"
+                    )
                 )
             }
+            if (!streamed) throw IllegalStateException("Empty companion body")
+
+            verifyAgainstExpectedSha(spec, partFile, spec.companionExpectedSha256, spec.companionUrl, spec.companionFileName)
             extractDir.mkdirs()
             // ✨ VOCODER HYGIENE (v1.6.1 scar): remove stale vocoder variants (e.g. the wrong-rate
             // vocos-22khz from v1.6.0) so the engine's first-match vocoder pick can never grab a

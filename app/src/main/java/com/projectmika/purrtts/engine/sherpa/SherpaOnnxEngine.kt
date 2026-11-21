@@ -125,11 +125,20 @@ class SherpaOnnxEngine(
             ensureFamilyLoadedLocked(targetFamily, subCartridgeId)
             val tts = activeOfflineTts
             if (tts == null) {
+                // ✨ TRUST RENEWAL UX (v1.8.1): name the CARTRIDGE to slam, not just the voice —
+                // "Af Heart cartridge not installed" sent users hunting for a voice they had
+                // already downloaded while the actual missing piece was its parent ROM bay.
+                val voiceLabel = voiceDesc?.displayName ?: targetFamily.label
+                val cartridgeLabel = cartridgeLabelFor(
+                    cartridgeId = voiceDesc?.cartridgeId,
+                    subCartridgeId = voiceDesc?.requiredSubCartridgeId,
+                    family = targetFamily
+                )
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "${voiceDesc?.displayName ?: targetFamily.label} cartridge not installed",
+                    engineSummary = "$voiceLabel offline — $cartridgeLabel cartridge not installed (download it in Tab 3)",
                     isFallbackNeuralPreview = true
                 )
             }
@@ -178,11 +187,14 @@ class SherpaOnnxEngine(
             ensureFamilyLoadedLocked(clonedVoice.family, clonedVoice.resolvedCloneEngineId)
             val tts = activeOfflineTts
             if (tts == null) {
+                // ✨ TRUST RENEWAL UX (v1.8.1): name the clone engine cartridge that is missing.
+                val cloneSpec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == clonedVoice.resolvedCloneEngineId }
+                val cartridgeLabel = cloneSpec?.let { "${it.romCode} ${it.name}" } ?: clonedVoice.family.label
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "${clonedVoice.family.label} cartridge not installed",
+                    engineSummary = "$cartridgeLabel cartridge not installed (needed by clone ${clonedVoice.displayName} — download it in Tab 3)",
                     isFallbackNeuralPreview = true
                 )
             }
@@ -271,6 +283,19 @@ class SherpaOnnxEngine(
         }
     }.apply { mkdirs() }
 
+    /**
+     * ✨ TRUST RENEWAL UX (v1.8.1): resolves the human-facing cartridge label (ROM code + name)
+     * for a missing voice mount, so failure messages name the downloadable piece instead of
+     * making users hunt for a voice they may have already installed.
+     */
+    private fun cartridgeLabelFor(cartridgeId: String?, subCartridgeId: String?, family: SherpaModelFamily): String {
+        val catalog = PurrDefaultPresets.modelCatalog()
+        val spec = subCartridgeId?.let { id -> catalog.firstOrNull { it.id == id } }
+            ?: cartridgeId?.let { id -> catalog.firstOrNull { it.id == id } }
+            ?: catalog.firstOrNull { it.sherpaFamily == family && !it.isSubCartridge }
+        return spec?.let { "${it.romCode} ${it.name}" } ?: family.label
+    }
+
     private fun ensureFamilyLoadedLocked(family: SherpaModelFamily, subCartridgeId: String? = null) {
         val mountKey = subCartridgeId ?: family.name
         if (activeOfflineTts != null && activeMountKey == mountKey) return
@@ -280,7 +305,12 @@ class SherpaOnnxEngine(
 
         val dir = familyDir(family, subCartridgeId)
         val files = dir.walkTopDown().filter { it.isFile }.toList()
-        if (files.none { it.extension.equals("onnx", ignoreCase = true) }) return
+        if (files.none { it.extension.equals("onnx", ignoreCase = true) }) {
+            // ✨ TRUST RENEWAL (v1.8.1): say WHY the mount refused — support gold when a user
+            // swears they downloaded a cartridge but every voice fail-softs to OS speech.
+            Log.w(TAG, "[MOUNT_MISS] family=$family sub=$subCartridgeId — no .onnx under ${dir.absolutePath} (${files.size} files present)")
+            return
+        }
 
         val tokensPath = files.firstOrNull { it.name == "tokens.txt" }?.absolutePath.orEmpty()
         val dataDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }?.absolutePath.orEmpty()
@@ -302,7 +332,10 @@ class SherpaOnnxEngine(
             SherpaModelFamily.KOKORO -> {
                 val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
-                if (onnx.isEmpty() || voices.isEmpty()) return
+                if (onnx.isEmpty() || voices.isEmpty()) {
+                    Log.w(TAG, "[MOUNT_MISS] kokoro missing required assets (onnx=$onnx, voices=$voices)")
+                    return
+                }
                 OfflineTtsModelConfig(
                     kokoro = OfflineTtsKokoroModelConfig(
                         model = onnx,

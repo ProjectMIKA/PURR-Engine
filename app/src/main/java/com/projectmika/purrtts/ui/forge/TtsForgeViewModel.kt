@@ -109,13 +109,21 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     private val _cartridgeAnim = MutableStateFlow<CartridgeAnimEvent?>(null)
     val cartridgeAnim: StateFlow<CartridgeAnimEvent?> = _cartridgeAnim.asStateFlow()
 
+    // ✨ TRUST RENEWAL UX (v1.8.1): a calm audition line — the old default packed ellipses,
+    // a phonetic stutter, and an action block, which MIKASTOP + chunking turned into a
+    // minutes-long gauntlet on slow neural engines (Qwen3) that looked "stuck processing".
     private val _testInputText = MutableStateFlow(
-        "O-oh! Wait... *blushes deeply* \"Are you serious right now, Master?!\" omg fr nya~"
+        "Hey Master! It is really me, your PURR Engine, speaking in every app on this phone now. Nyaa!"
     )
     val testInputText: StateFlow<String> = _testInputText.asStateFlow()
 
     private val _isPlayingPreview = MutableStateFlow(false)
     val isPlayingPreview: StateFlow<Boolean> = _isPlayingPreview.asStateFlow()
+
+    // ✨ TRUST RENEWAL UX (v1.8.1): per-chunk audition progress so slow neural engines
+    // (Qwen3 ≈ 30s per 5-8s clip) never look frozen mid-audition.
+    private val _auditionProgress = MutableStateFlow<String?>(null)
+    val auditionProgress: StateFlow<String?> = _auditionProgress.asStateFlow()
 
     private val _isRecordingClone = MutableStateFlow(false)
     val isRecordingClone: StateFlow<Boolean> = _isRecordingClone.asStateFlow()
@@ -502,11 +510,15 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 var playedAnyAudio = false
                 var showedFallbackToast = false
                 var lastEmptySummary: String? = null
+                // ✨ TRUST RENEWAL UX (v1.8.1): per-chunk progress for the audition HUD.
+                val speechTotal = chunks.count { it is PurrChunk.Speech }
+                var speechIndex = 0
 
-                for (chunk in chunks) {
+                for ((chunkIndex, chunk) in chunks.withIndex()) {
                     if (!isActive) break
                     when (chunk) {
                         is PurrChunk.Silence -> {
+                            _auditionProgress.value = "[MIKASTOP] +${chunk.durationMs}ms pause • chunk ${chunkIndex + 1}/${chunks.size}"
                             backendRouter.emitSilenceTelemetry(chunk.durationMs, chunk.reason)
                             val silenceBytes = PurrDspProcessor.createSilencePcm16Le(sampleRate, chunk.durationMs)
                             var offset = 0
@@ -517,6 +529,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                             }
                         }
                         is PurrChunk.Speech -> {
+                            speechIndex++
+                            _auditionProgress.value = "[$speechIndex/$speechTotal] NEURAL • ${chunk.text.take(26)}"
                             val outcome = backendRouter.synthesizeSpeechChunk(chunk, effectiveProfile)
                             if (outcome.pcmFloat24k.isNotEmpty()) {
                                 playedAnyAudio = true
@@ -579,6 +593,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     audioTrack?.release()
                 }
                 backendRouter.markIdle()
+                _auditionProgress.value = null
                 _isPlayingPreview.value = false
             }
         }
@@ -588,6 +603,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         activePlaybackJob?.cancel()
         backendRouter.proxyEngine.stopDirectAudition()
         backendRouter.markIdle()
+        _auditionProgress.value = null
         _isPlayingPreview.value = false
     }
 
