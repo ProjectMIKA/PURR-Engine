@@ -50,6 +50,12 @@ jobs:
           mkdir -p "$TP_DIR/onnxruntime/include"
           git clone --depth 1 --branch b8470 https://github.com/ggml-org/llama.cpp.git "$TP_DIR/llama.cpp"
           git clone --depth 1 https://github.com/Lux-Luna/LunaVox.git "$TP_DIR/lunavox"
+          # ✨ GPU OFFLOAD PATCH (v1.8.2): LunaVox hardcodes n_gpu_layers=-1 for the talker and
+          # predictor llama models. This patch routes them through a runtime-settable gate
+          # (0 = CPU-only default; -1 = offload to the Adreno OpenCL backend when the user's
+          # "Qwen3 GPU Offload" toggle is on). Fail-closed if the patch no longer applies.
+          git -C "$TP_DIR/lunavox" apply "$GITHUB_WORKSPACE/patches/lunavox_opencl_gpu_offload.patch" \
+            || patch -d "$TP_DIR/lunavox" -p1 < "$GITHUB_WORKSPACE/patches/lunavox_opencl_gpu_offload.patch"
           curl -fSL -o /tmp/ort-android.aar \
             "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.31.1/onnxruntime-android-1.31.1.aar"
           unzip -q /tmp/ort-android.aar "headers/*" "jni/arm64-v8a/libonnxruntime.so" "jni/x86_64/libonnxruntime.so" -d "$TP_DIR/onnxruntime"

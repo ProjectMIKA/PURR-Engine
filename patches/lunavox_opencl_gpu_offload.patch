@@ -1,0 +1,58 @@
+diff --git a/src/llama_wrapper.cpp b/src/llama_wrapper.cpp
+index 010b042..fddb1fa 100644
+--- a/src/llama_wrapper.cpp
++++ b/src/llama_wrapper.cpp
+@@ -51,6 +51,19 @@ bool try_load_fn(void * handle, const char * name, T & fn_ptr) {
+ 
+ } // namespace
+ 
++// ✨ PURR GPU-OFFLOAD GATE: 0 keeps every tensor on CPU (the previous, CPU-only
++// behavior); -1 lets llama.cpp offload the whole talker/predictor to a registered GPU
++// backend (Adreno OpenCL). The host app sets this before lunavox_create().
++static int32_t g_default_n_gpu_layers = 0;
++
++void set_default_n_gpu_layers(int32_t n_gpu_layers) {
++    g_default_n_gpu_layers = n_gpu_layers;
++}
++
++int32_t default_n_gpu_layers() {
++    return g_default_n_gpu_layers;
++}
++
+ LlamaLibrary & LlamaLibrary::instance() {
+     static LlamaLibrary lib;
+     return lib;
+diff --git a/src/llama_wrapper.h b/src/llama_wrapper.h
+index 6f75211..f616d75 100644
+--- a/src/llama_wrapper.h
++++ b/src/llama_wrapper.h
+@@ -21,6 +21,12 @@ enum llama_log_level {
+ 
+ typedef void (*llama_log_callback)(enum llama_log_level level, const char * text, void * user_data);
+ 
++// ✨ PURR GPU-OFFLOAD GATE: runtime-settable llama_model_params.n_gpu_layers used by
++// TalkerPredictor::load. 0 = keep every tensor on CPU (previous behavior); -1 = offload all
++// layers to the best registered backend (Adreno OpenCL when the host app enables it).
++void set_default_n_gpu_layers(int32_t n_gpu_layers);
++int32_t default_n_gpu_layers();
++
+ struct llama_model_params {
+     void * devices;
+     void * tensor_buft_overrides;
+diff --git a/src/talker_predictor_llama.cpp b/src/talker_predictor_llama.cpp
+index 37e780e..6446947 100644
+--- a/src/talker_predictor_llama.cpp
++++ b/src/talker_predictor_llama.cpp
+@@ -47,10 +47,10 @@ bool TalkerPredictor::load(
+         return false;
+     }
+ 
+-    if (!talker_model_.load(talker_model_path, -1, error_msg_)) {
++    if (!talker_model_.load(talker_model_path, default_n_gpu_layers(), error_msg_)) {
+         return false;
+     }
+-    if (!predictor_model_.load(predictor_model_path, -1, error_msg_)) {
++    if (!predictor_model_.load(predictor_model_path, default_n_gpu_layers(), error_msg_)) {
+         return false;
+     }
+ 

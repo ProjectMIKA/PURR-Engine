@@ -44,7 +44,15 @@ class PurrNeuralBypassTest {
     }
 
     @Test
-    fun `slang stays bypassed during neural pure by default`() {
+    fun `flagship voices keep slang by default after the carve-out`() {
+        // slangDuringNeuralPure defaults to TRUE — large models read texting shorthand verbatim
+        // otherwise, so slang expansion is on unless the user explicitly disables it.
+        val defaultProfile = PurrProfile(id = "test", name = "Test").copy(primaryVoiceId = "qwen3_vivian")
+        assertFalse(PurrNeuralBypass.shouldBypassSlang(defaultProfile))
+    }
+
+    @Test
+    fun `slang stays bypassed during neural pure when the carve-out is explicitly off`() {
         assertTrue(PurrNeuralBypass.shouldBypassSlang(profile("qwen3_vivian")))
     }
 

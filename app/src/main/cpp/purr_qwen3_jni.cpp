@@ -50,7 +50,8 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeCreate(
     jobject /* thiz */,
     jstring modelDir,
     jstring nativeLibDir,
-    jint nThreads) {
+    jint nThreads,
+    jint nGpuLayers) {
     std::call_once(g_log_init_once, []() {
         lunavox_set_log_callback([](LunavoxLogLevel level, const char * message, void * /* user_data */) {
             if (!message) return;
@@ -68,6 +69,11 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeCreate(
     if (c_lib_dir) env->ReleaseStringUTFChars(nativeLibDir, c_lib_dir);
 
     std::string llama_err;
+    // ✨ ADRENO OPENCL GPU OFFLOAD: 0 = every tensor stays on CPU (default); -1 = llama.cpp
+    // offloads the talker/predictor to the best registered GPU backend (Adreno OpenCL, built
+    // into libggml-opencl.so). Fail-soft either way: unsupported tensor types / a missing
+    // vendor libOpenCL.so fall back to CPU per-tensor automatically.
+    lunavox::set_default_n_gpu_layers(nGpuLayers);
     if (!lunavox::LlamaLibrary::instance().ensure_loaded(lib_path, llama_err)) {
         set_global_error("Failed to load libllama/libggml from " + lib_path + ": " + llama_err);
         __android_log_print(ANDROID_LOG_ERROR, PURR_LOG_TAG, "%s", g_last_global_error.c_str());

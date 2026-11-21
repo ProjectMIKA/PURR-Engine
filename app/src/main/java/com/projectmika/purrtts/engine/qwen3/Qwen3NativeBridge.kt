@@ -40,7 +40,7 @@ object Qwen3NativeBridge {
     fun nativeLibDir(context: Context): String =
         context.applicationInfo?.nativeLibraryDir.orEmpty()
 
-    external fun nativeCreate(modelDir: String, nativeLibDir: String, nThreads: Int): Long
+    external fun nativeCreate(modelDir: String, nativeLibDir: String, nThreads: Int, nGpuLayers: Int): Long
 
     external fun nativeSynthesizeCustom(
         handle: Long,

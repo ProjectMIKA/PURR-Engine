@@ -46,3 +46,5 @@ NAMING & ATTRIBUTION NOTICE
    - Soprano-80M (ekwek/Soprano-80M, KevinAHM/soprano-onnx): Apache License 2.0
    - sherpa-onnx (k2-fsa/sherpa-onnx) & MeloTTS (myshell-ai/MeloTTS): Apache 2.0 / MIT License
    - PdfBox-Android (TomRoush/PdfBox-Android): Apache License 2.0
+   - OpenCL-Headers (KhronosGroup/OpenCL-Headers): Apache License 2.0 (vendored under
+     `app/src/main/cpp/opencl_headers/CL` for the Adreno OpenCL GPU-offload backend build)

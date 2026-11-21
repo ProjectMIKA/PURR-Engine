@@ -280,9 +280,16 @@ data class PurrProfile(
     // ✨ SLANG CARVE-OUT: slang & honorifics expansion is TEXT NORMALIZATION — it can HELP
     // heavyweight neural voices pronounce texting shorthand (`omg` → `oh my god`) correctly,
     // unlike the truly intrusive enhancers (Drama-Matrix stutters, comma-chopping, micro-chunking,
-    // EQ coloring) which stay bypassed. When true, flagship voices stay inside the slang pipeline
-    // even while the rest of Neural Pure remains active (see PurrNeuralBypass.shouldBypassSlang).
-    val slangDuringNeuralPure: Boolean = false
+    // EQ coloring) which stay bypassed. DEFAULT ON (Master's call): large TTS models read
+    // texting shorthand verbatim otherwise, so slang makes the speech make sense; flip off to
+    // restore the full v1.8.0 Neural Pure bypass (see PurrNeuralBypass.shouldBypassSlang).
+    val slangDuringNeuralPure: Boolean = true,
+    // ✨ ADRENO OPENCL GPU OFFLOAD: runs the Qwen3 talker/predictor llama models on the Adreno
+    // GPU (OpenCL backend compiled into the JNI stack) instead of CPU. DEFAULT OFF — the toggle
+    // is purely optional per Master's law. OFF = n_gpu_layers 0 → byte-identical CPU behavior;
+    // ON = n_gpu_layers -1 → llama.cpp offloads every layer it can (unsupported tensor types
+    // and devices without OpenCL fall back to CPU automatically, never fail-open).
+    val qwen3GpuOffload: Boolean = false
 )
 
 @Serializable

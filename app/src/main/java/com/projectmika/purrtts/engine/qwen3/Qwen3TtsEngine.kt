@@ -119,6 +119,7 @@ class Qwen3TtsEngine(
     private var activeHandle: Long = 0L
     private var activeSpecId: String? = null
     private var activeInstructSupport: Boolean = false
+    private var activeGpuOffload: Boolean = false
 
     private fun modelDirForSpec(specId: String): File =
         File(context.filesDir, "models/native/$specId")
@@ -139,7 +140,7 @@ class Qwen3TtsEngine(
         mutex.withLock {
             val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
             val targetSpec = resolveSpecForVoice(cleanVoiceId)
-            ensureEngineLoadedLocked(targetSpec)
+            ensureEngineLoadedLocked(targetSpec, profile.qwen3GpuOffload)
         }
         resetIdleTimer()
     }
@@ -189,7 +190,7 @@ class Qwen3TtsEngine(
                 )
             }
 
-            val handle = ensureEngineLoadedLocked(targetSpec)
+            val handle = ensureEngineLoadedLocked(targetSpec, profile.qwen3GpuOffload)
             if (handle == 0L) {
                 val err = Qwen3NativeBridge.nativeGetLastError(0L).ifBlank { "nativeCreate failed" }
                 return@withContext SynthesisOutcome(
@@ -268,7 +269,7 @@ class Qwen3TtsEngine(
                 )
             }
 
-            _statusFlow.value = HardwareStatusBadge.CPU_NEON
+            _statusFlow.value = if (activeGpuOffload) HardwareStatusBadge.GPU_FP16 else HardwareStatusBadge.CPU_NEON
             var shaped = rawAudio
             // Only time-scale when rate deviates meaningfully from 1.0x (1.0x stays bit-exact studio)
             if (speakingRate !in 0.94f..1.06f) {
@@ -284,7 +285,7 @@ class Qwen3TtsEngine(
                 clonedVoice != null -> "Qwen3 0.6B Clone • ${clonedVoice.displayName}"
                 targetSpec == SPEC_DESIGN_17B -> "Qwen3 1.7B VoiceDesign"
                 else -> "Qwen3 0.6B • ${(SPEAKER_MAP[cleanVoiceId] ?: "vivian").replaceFirstChar { it.uppercase() }}"
-            }
+            } + if (activeGpuOffload) " • Adreno OpenCL" else ""
             SynthesisOutcome(
                 pcmFloat24k = finalPcm,
                 sampleRateHz = SAMPLE_RATE_HZ,
@@ -301,6 +302,7 @@ class Qwen3TtsEngine(
                 activeHandle = 0L
                 activeSpecId = null
                 activeInstructSupport = false
+                activeGpuOffload = false
                 _statusFlow.value = HardwareStatusBadge.IDLE
                 Log.i(TAG, "[QWEN3_EVICT] Destroyed native LunavoxEngine instance.")
             }
@@ -313,8 +315,8 @@ class Qwen3TtsEngine(
         else -> SPEC_CUSTOM_06B
     }
 
-    private fun ensureEngineLoadedLocked(specId: String): Long {
-        if (activeHandle != 0L && activeSpecId == specId) {
+    private fun ensureEngineLoadedLocked(specId: String, gpuOffload: Boolean): Long {
+        if (activeHandle != 0L && activeSpecId == specId && activeGpuOffload == gpuOffload) {
             return activeHandle
         }
         if (activeHandle != 0L) {
@@ -328,15 +330,20 @@ class Qwen3TtsEngine(
         if (!isSpecDownloaded(specId)) return 0L
         val nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
         val libDir = Qwen3NativeBridge.nativeLibDir(context)
-        val handle = Qwen3NativeBridge.nativeCreate(dir.absolutePath, libDir, nThreads)
+        // ✨ ADRENO OPENCL GPU OFFLOAD: OFF = n_gpu_layers 0 (byte-identical CPU path);
+        // ON = n_gpu_layers -1 (llama.cpp offloads every layer it can — unsupported tensor
+        // types / missing vendor OpenCL fall back to CPU per-tensor, never fail-open).
+        val nGpuLayers = if (gpuOffload) -1 else 0
+        val handle = Qwen3NativeBridge.nativeCreate(dir.absolutePath, libDir, nThreads, nGpuLayers)
         if (handle != 0L) {
             activeHandle = handle
             activeSpecId = specId
+            activeGpuOffload = gpuOffload
             activeInstructSupport = runCatching {
                 parseInstructSupport(File(dir, "model_profile.json").readText())
             }.getOrDefault(false)
-            _statusFlow.value = HardwareStatusBadge.CPU_NEON
-            Log.i(TAG, "Mounted Qwen3-TTS [$specId] (instruct=$activeInstructSupport) from ${dir.absolutePath}")
+            _statusFlow.value = if (gpuOffload) HardwareStatusBadge.GPU_FP16 else HardwareStatusBadge.CPU_NEON
+            Log.i(TAG, "Mounted Qwen3-TTS [$specId] (instruct=$activeInstructSupport, gpu=${if (gpuOffload) "Adreno OpenCL" else "off"}) from ${dir.absolutePath}")
         }
         return handle
     }

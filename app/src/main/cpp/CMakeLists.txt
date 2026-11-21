@@ -20,6 +20,34 @@ if(NOT EXISTS "${ORT_DIR}/include/onnxruntime_cxx_api.h")
     message(FATAL_ERROR "ONNX Runtime headers missing at ${ORT_DIR}/include")
 endif()
 
+# ✨ MIKA'S ADRENO OPENCL GPU OFFLOAD (v1.8.2) ✨
+# Builds the OpenCL backend next to ggml-cpu so the Qwen3 talker/predictor can offload to the
+# Adreno GPU when the user's "Qwen3 GPU Offload" toggle is on (profile qwen3GpuOffload →
+# n_gpu_layers -1; OFF stays n_gpu_layers 0 = byte-identical CPU behavior). Fail-soft by law:
+# unsupported tensor types and devices without a vendor libOpenCL.so simply fall back to CPU.
+# Android NDK has no OpenCL SDK: pre-seed CMake's FindOpenCL with vendored Khronos headers plus
+# a link-only stub libOpenCL.so generated at configure time (NEVER packaged — at runtime the
+# device's vendor libOpenCL.so resolves, and is skipped gracefully when absent).
+if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/opencl_headers/CL/cl.h")
+    message(FATAL_ERROR "OpenCL headers missing at ${CMAKE_CURRENT_SOURCE_DIR}/opencl_headers/CL (vendored KhronosGroup/OpenCL-Headers)")
+endif()
+set(OPENCL_STUB_DIR "${CMAKE_CURRENT_BINARY_DIR}/opencl_stub")
+file(MAKE_DIRECTORY "${OPENCL_STUB_DIR}")
+file(WRITE "${OPENCL_STUB_DIR}/opencl_stub.c" "static int purr_opencl_stub_guard;\n")
+separate_arguments(_purr_c_flags NATIVE_COMMAND "${CMAKE_C_FLAGS}")
+execute_process(
+    COMMAND ${CMAKE_C_COMPILER} ${_purr_c_flags} -shared -fPIC -o "${OPENCL_STUB_DIR}/libOpenCL.so" "${OPENCL_STUB_DIR}/opencl_stub.c"
+    RESULT_VARIABLE _opencl_stub_result
+)
+if(NOT _opencl_stub_result EQUAL 0)
+    message(FATAL_ERROR "Failed to build the OpenCL link stub (see compiler output above)")
+endif()
+set(OpenCL_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/opencl_headers" CACHE PATH "" FORCE)
+set(OpenCL_LIBRARY "${OPENCL_STUB_DIR}/libOpenCL.so" CACHE FILEPATH "" FORCE)
+set(GGML_OPENCL ON CACHE BOOL "" FORCE)
+set(GGML_OPENCL_EMBED_KERNELS ON CACHE BOOL "" FORCE)
+set(GGML_OPENCL_USE_ADRENO_KERNELS ON CACHE BOOL "" FORCE)
+
 # Configure llama.cpp cleanly for Android NDK (no OpenMP, OpenSSL, or tools)
 set(BUILD_SHARED_LIBS ON CACHE BOOL "" FORCE)
 set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
@@ -39,7 +67,7 @@ set(LLAMA_TOOLS_INSTALL OFF CACHE BOOL "" FORCE)
 add_subdirectory("${LLAMA_DIR}" llama_build EXCLUDE_FROM_ALL)
 
 # Strip .so.<version> suffixes so Android APK packaging & dlopen load unversioned .so files cleanly
-foreach(_tgt IN ITEMS llama ggml ggml-base ggml-cpu)
+foreach(_tgt IN ITEMS llama ggml ggml-base ggml-cpu ggml-opencl)
     if(TARGET ${_tgt})
         set_target_properties(${_tgt} PROPERTIES VERSION "" SOVERSION "")
     endif()

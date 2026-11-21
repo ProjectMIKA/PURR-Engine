@@ -180,6 +180,25 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   `Af Heart offline — ROM-02 KOKORO_NEURAL_HUB cartridge not installed (download it in Tab 3)`;
   `ensureFamilyLoadedLocked` logs `[MOUNT_MISS]` with the exact directory checked.
 
+## Qwen3 GPU offload (Adreno OpenCL, v1.8.2)
+- Native stack ships `libggml-opencl.so` alongside `ggml-cpu` (CMake: `GGML_OPENCL ON`,
+  `GGML_OPENCL_EMBED_KERNELS ON`, `GGML_OPENCL_USE_ADRENO_KERNELS ON` — kernels embedded, no
+  runtime files; Adreno-optimized matmul kernels for Snapdragon flagships).
+- Android NDK has no OpenCL SDK: `app/src/main/cpp/opencl_headers` vendors KhronosGroup headers
+  (Apache-2.0, see NOTICE) and CMake generates a **link-only stub `libOpenCL.so`** at configure
+  time (never packaged — at runtime the device's vendor `libOpenCL.so` resolves via the vendor
+  public-libraries list, and is skipped gracefully when absent).
+- LunaVox hardcodes `n_gpu_layers=-1` in `TalkerPredictor::load` → **`patches/lunavox_opencl_gpu_offload.patch`**
+  (applied by CI after the clone, fail-closed) routes it through `lunavox::set_default_n_gpu_layers`:
+  **0 = CPU-only (default), -1 = offload all layers**. `ggml_backend_load_all_from_path` in
+  LunaVox's `ensure_loaded` auto-registers the packaged OpenCL backend — the ONLY gate is the
+  n_gpu_layers value, so toggling works mid-session with no lib unloading.
+- Kotlin: profile `qwen3GpuOffload` (default OFF) → `Qwen3NativeBridge.nativeCreate(..., nGpuLayers)`;
+  badge flips to `GPU_FP16`, engine summary appends `• Adreno OpenCL`, and the mount log names the
+  engaged backend. Toggle-off destroys and re-mounts the engine on CPU (mid-session, no restart).
+- q5_k tensors may lack OpenCL kernels → llama.cpp falls back per-tensor to CPU automatically
+  (partial offload is fine); a full-GPU q4_0 talker variant is the future upgrade if needed.
+
 ## Scar log (do not re-learn)
 - AGP 8.7.2 Lint UAST crash → toolchain aligned at Kotlin 2.4.0; keep AGP/Kotlin aligned.
 - sherpa-onnx v2.0.0 dropped espeak-ng G2P → KittenTTS + OOV words broke → pinned v1.13.8.

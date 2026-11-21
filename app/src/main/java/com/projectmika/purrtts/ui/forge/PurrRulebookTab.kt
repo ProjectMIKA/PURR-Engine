@@ -797,6 +797,17 @@ private fun PurrEngineModuleWindowBody(
             },
             accent = MikaColors.NeonPink
         )
+        // ✨ ADRENO OPENCL GPU OFFLOAD: purely optional accelerator — OFF keeps the Qwen3
+        // talker byte-identical on CPU; ON lets llama.cpp offload to the Adreno GPU with
+        // per-tensor CPU fallback on unsupported devices or quant types.
+        SimplePurrToggle(
+            title = "Qwen3 GPU Offload (Adreno OpenCL)",
+            subtitle = "Runs the Qwen3 talker on your Adreno GPU instead of CPU — big synthesis speedup on Snapdragon flagships. Per-tensor CPU fallback on unsupported devices or quant types.",
+            checked = activeProfile.qwen3GpuOffload,
+            accent = MikaColors.MikaAmber,
+            icon = CyberIconType.BOLT_ACCEL,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(qwen3GpuOffload = v) } }
+        )
     }
 
     // 3. MIKASTOP Timings + Acting Intensity + Live Chunk Preview
