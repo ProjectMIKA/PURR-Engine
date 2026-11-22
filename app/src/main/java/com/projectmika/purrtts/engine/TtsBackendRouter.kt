@@ -53,7 +53,8 @@ class TtsBackendRouter(
     )
     val qwen3Engine = Qwen3TtsEngine(
         context = context,
-        clonedVoicesProvider = { repository.state.value.clonedVoices }
+        clonedVoicesProvider = { repository.state.value.clonedVoices },
+        gpuOffloadProvider = { repository.state.value.qwen3GpuOffload }
     )
     val proxyEngine = ExternalProxyEngine(context)
 

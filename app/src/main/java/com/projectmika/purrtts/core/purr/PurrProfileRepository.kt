@@ -8,6 +8,12 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * ✨ MIKA'S PURR PROFILE, CARTRIDGE BUS & VOICE REPOSITORY ✨
@@ -74,6 +80,13 @@ class PurrProfileRepository(filesDir: File) {
             }
             s.copy(profiles = updatedProfiles)
         }
+    }
+
+    // ✨ HARDWARE OFFLOAD (v1.8.3): global device-level accelerator state (Settings ▸
+    // HARDWARE_OFFLOAD). Deliberately NOT per-vibe-preset — hardware doesn't change when you
+    // switch personas; the Qwen3 engine re-mounts on the next synthesis after a flip.
+    fun setQwen3GpuOffload(enabled: Boolean) {
+        updateState { s -> s.copy(qwen3GpuOffload = enabled) }
     }
 
     fun saveAsNewProfile(name: String) {
@@ -427,10 +440,75 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
+    // ✨ v1.8.3 THREE-WAY BENDER + GLOBAL OFFLOAD MIGRATION ✨
+    // Old state files carry the combined `enableSlangAndHonorifics` bender flag, the
+    // `slangDuringNeuralPure` flagship carve-out, and a per-profile `qwen3GpuOffload`. The new
+    // contracts split the bender into `enableSlang` / `enableHonorifics` / `enableStutters`
+    // (each seeded from the old combined flag so no preset silently changes personality) and
+    // hoist the GPU offload into GLOBAL `PurrForgeState.qwen3GpuOffload` (hardware outlives
+    // vibe presets). This raw-JSON pass runs BEFORE decoding: with `ignoreUnknownKeys = true`
+    // the old flags would otherwise be dropped and every new flag would default to ON —
+    // flipping clean-prose presets (Audiobook / Light Novel, Clean & Fast) into slang mode.
+    // `slangDuringNeuralPure` has no successor: the v1.8.3 law is SLANG-ONLY survival on
+    // flagship voices, so the old per-context carve-out toggle is retired. Users who had it
+    // OFF (explicit full-v1.8.0 Neural Pure) START WITH SLANG OFF everywhere — their expressed
+    // preference was clean speech on heavy engines, and one tap re-enables it everywhere
+    // (Master's call). Everyone else seeds the Slang toggle from the old combined flag.
+    private val legacyProfileKeys = setOf(
+        "enableSlangAndHonorifics",
+        "slangDuringNeuralPure",
+        "qwen3GpuOffload"
+    )
+
+    private fun migrateLegacyEnhancerFlags(raw: String): String {
+        return runCatching {
+            val root = Json.parseToJsonElement(raw) as? JsonObject ?: return@runCatching raw
+            val profilesElement = root["profiles"] as? JsonArray ?: return@runCatching raw
+            var hoistedGpuOffload = false
+            val migratedProfiles = profilesElement.map { element ->
+                val obj = element as? JsonObject ?: return@map element
+                if ((obj["qwen3GpuOffload"] as? JsonPrimitive)?.booleanOrNull == true) {
+                    hoistedGpuOffload = true
+                }
+                val legacyCombined = (obj["enableSlangAndHonorifics"] as? JsonPrimitive)?.booleanOrNull
+                val legacySlangOnFlagship = (obj["slangDuringNeuralPure"] as? JsonPrimitive)?.booleanOrNull
+                // Seed order: a user who explicitly disabled the old flagship carve-out wanted
+                // FULL v1.8.0 Neural Pure → they start with Slang OFF everywhere (Master's call);
+                // otherwise the legacy combined flag wins; else an already-migrated value is
+                // kept; else the data-class default (true) applies via explicit put.
+                val legacySlang = if (legacyCombined != null && legacySlangOnFlagship == false) {
+                    false
+                } else {
+                    legacyCombined
+                        ?: (obj["enableSlang"] as? JsonPrimitive)?.booleanOrNull
+                        ?: true
+                }
+                buildJsonObject {
+                    obj.forEach { (key, value) ->
+                        if (key !in legacyProfileKeys) put(key, value)
+                    }
+                    put("enableSlang", JsonPrimitive(legacySlang))
+                    put("enableHonorifics", JsonPrimitive(legacyCombined
+                        ?: (obj["enableHonorifics"] as? JsonPrimitive)?.booleanOrNull ?: true))
+                    put("enableStutters", JsonPrimitive(legacyCombined
+                        ?: (obj["enableStutters"] as? JsonPrimitive)?.booleanOrNull ?: true))
+                }
+            }
+            val migrated = buildJsonObject {
+                root.forEach { (key, value) ->
+                    if (key != "profiles" && key != "qwen3GpuOffload") put(key, value)
+                }
+                put("profiles", JsonArray(migratedProfiles))
+                if (hoistedGpuOffload) put("qwen3GpuOffload", JsonPrimitive(true))
+            }
+            migrated.toString()
+        }.getOrDefault(raw)
+    }
+
     private fun loadInitialState(): PurrForgeState {
         if (!stateFile.exists()) return PurrForgeState()
         return runCatching {
-            val decoded = json.decodeFromString<PurrForgeState>(stateFile.readText())
+            val decoded = json.decodeFromString<PurrForgeState>(migrateLegacyEnhancerFlags(stateFile.readText()))
             if (decoded.profiles.isEmpty()) return@runCatching PurrForgeState()
             val normalizedModelStates = decoded.modelStates.toMutableMap().apply {
                 for (spec in PurrDefaultPresets.modelCatalog().filter { it.isBuiltInOsCartridge }) {

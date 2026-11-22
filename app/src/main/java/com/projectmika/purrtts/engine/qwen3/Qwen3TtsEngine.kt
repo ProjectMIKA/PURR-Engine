@@ -35,6 +35,10 @@ import kotlinx.coroutines.withContext
 class Qwen3TtsEngine(
     private val context: Context,
     private val clonedVoicesProvider: () -> List<ClonedVoiceProfile>,
+    // ✨ HARDWARE OFFLOAD (v1.8.3): the Adreno OpenCL GPU offload is GLOBAL forge state now
+    // (Settings ▸ HARDWARE_OFFLOAD) — provided live so a mid-session toggle re-mounts the
+    // engine on the next synthesis, same pattern as `clonedVoicesProvider`.
+    private val gpuOffloadProvider: () -> Boolean = { false },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -140,7 +144,7 @@ class Qwen3TtsEngine(
         mutex.withLock {
             val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
             val targetSpec = resolveSpecForVoice(cleanVoiceId)
-            ensureEngineLoadedLocked(targetSpec, profile.qwen3GpuOffload)
+            ensureEngineLoadedLocked(targetSpec, gpuOffloadProvider())
         }
         resetIdleTimer()
     }
@@ -190,7 +194,7 @@ class Qwen3TtsEngine(
                 )
             }
 
-            val handle = ensureEngineLoadedLocked(targetSpec, profile.qwen3GpuOffload)
+            val handle = ensureEngineLoadedLocked(targetSpec, gpuOffloadProvider())
             if (handle == 0L) {
                 val err = Qwen3NativeBridge.nativeGetLastError(0L).ifBlank { "nativeCreate failed" }
                 return@withContext SynthesisOutcome(

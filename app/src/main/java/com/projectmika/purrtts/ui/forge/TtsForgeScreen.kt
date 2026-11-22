@@ -856,6 +856,8 @@ fun TtsForgeScreen(
             MikaSettingsSheet(
                 versionName = com.projectmika.purrtts.BuildConfig.VERSION_NAME,
                 versionCode = com.projectmika.purrtts.BuildConfig.VERSION_CODE,
+                qwen3GpuOffload = forgeState.qwen3GpuOffload,
+                onQwen3GpuOffloadToggle = { viewModel.setQwen3GpuOffload(it) },
                 onReplayTutorial = {
                     academyPatchnotesOnly = false
                     showAcademy = true

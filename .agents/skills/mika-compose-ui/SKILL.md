@@ -52,6 +52,12 @@ global `mika-visual-language` skill; this is the Compose mapping + the scars of 
   the HUD bar) → `MikaBottomHudBar`.
 - Tabs: `VOICE` (oscilloscope, test bench, engine picker, voice selector, pacing/pitch, PURR
   rulebook), `MODULES` (Cyberdeck OS tool cartridges), `CARTRIDGE BAY` (TTS/TOOLS rack).
+- Settings sheet (header cog): action rows + `> HARDWARE_OFFLOAD // [EXPERIMENTAL]` (v1.8.3) —
+  GLOBAL device-level accelerator toggles (currently Qwen3 Adreno OpenCL) via `SettingsToggleRow`
+  (action-row skin + Switch). Per-cartridge NPU/GPU chips stay in the Cartridge Bay; future
+  GPU/NPU offloads slot here.
+- PURR Rulebook: vibe presets are ONE `CyberDropdown` (label `> ACTIVE_PRESET`, `name [BADGE_TAG]`
+  labels, active preset summary rendered beneath) — never a selectable card wall.
 
 ## Porting checklist (React → Compose)
 1. Map CSS tokens → `MikaColors` entries; keep hex values identical.

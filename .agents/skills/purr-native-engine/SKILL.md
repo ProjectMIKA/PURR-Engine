@@ -20,10 +20,17 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 5. Sanitize per chunk: Hallucination Shredder, Acronym Assassin (whitelist-aware), Symbol &
    Punctuation Shield (`CommaHandlingMode`: MIKA_PAUSE_AND_STRIP / STRIP_NO_PAUSE / KEEP_RAW),
    mixed-bang collapse, multi-dot collapse, terminal punctuation guarantee.
-- ✨ **SLANG CARVE-OUT**: `PurrNeuralBypass.shouldBypassSlang` + profile `slangDuringNeuralPure`
-  — flagship voices can opt back INTO slang & honorifics expansion (pure text normalization,
-  pronunciation aid) while stutters / comma-chopping / micro-chunking stay bypassed
-  (Rulebook toggle `Slang & Honorifics on Flagship Voices`).
+- ✨ **THREE-WAY BENDER SPLIT (v1.8.3)**: profile flags `enableSlang` / `enableHonorifics` /
+  `enableStutters` gate the slang dictionary, honorific/vocalism phonetics, and the organic
+  stutter translator independently (each preset carries its own defaults; migrated from the old
+  combined `enableSlangAndHonorifics` in `PurrProfileRepository.migrateLegacyEnhancerFlags`).
+  **SLANG-ONLY CARVE-OUT LAW**: on Neural Pure flagship voices ONLY slang survives (it is a
+  pronunciation aid), governed solely by `enableSlang` — honorifics & stutters are forced OFF
+  there. The v1.8.2 `slangDuringNeuralPure` toggle and `shouldBypassSlang` are retired.
+  Migrated users who had explicitly DISABLED the old carve-out (full v1.8.0 Neural Pure) start
+  with `enableSlang = false` everywhere — their expressed clean-speech preference wins
+  (Master's call); everyone else seeds all three toggles from the old combined flag.
+  Covered by `PurrProfileRepositoryMigrationTest`.
 - Boundary regexes are full Unicode `\p{L}` (v1.3.2: `café`/`naïve` never stripped at edges).
 - Compound hyphen words use positive lookahead (v1.3.2: `co-worker`, `state-of-the-art` intact).
 
@@ -193,9 +200,14 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   **0 = CPU-only (default), -1 = offload all layers**. `ggml_backend_load_all_from_path` in
   LunaVox's `ensure_loaded` auto-registers the packaged OpenCL backend — the ONLY gate is the
   n_gpu_layers value, so toggling works mid-session with no lib unloading.
-- Kotlin: profile `qwen3GpuOffload` (default OFF) → `Qwen3NativeBridge.nativeCreate(..., nGpuLayers)`;
-  badge flips to `GPU_FP16`, engine summary appends `• Adreno OpenCL`, and the mount log names the
-  engaged backend. Toggle-off destroys and re-mounts the engine on CPU (mid-session, no restart).
+- Kotlin (v1.8.3): GLOBAL `PurrForgeState.qwen3GpuOffload` (default OFF — Settings ▸
+  `> HARDWARE_OFFLOAD // [EXPERIMENTAL]`, NOT per-vibe-profile; hardware outlives personas) →
+  `TtsBackendRouter` wires it as `Qwen3TtsEngine(gpuOffloadProvider = ...)` →
+  `Qwen3NativeBridge.nativeCreate(..., nGpuLayers)`. Badge flips to `GPU_FP16`, engine summary
+  appends `• Adreno OpenCL`, and the mount log names the engaged backend. Toggle-off destroys and
+  re-mounts the engine on CPU (mid-session, no restart). Per-cartridge accelerator chips (Kokoro
+  Hexagon-NPU / Adreno-GPU sub-cartridges) stay per-cartridge in the Cartridge Bay — this global
+  section is for in-engine offloads only; future GPU/NPU toggles slot next to it.
 - q5_k tensors may lack OpenCL kernels → llama.cpp falls back per-tensor to CPU automatically
   (partial offload is fine); a full-GPU q4_0 talker variant is the future upgrade if needed.
 
@@ -208,7 +220,7 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - v1.3.3 header slot law: dynamic badge/countdown text in pinned headers needs fixed-width
   slots (see mika-compose-ui skill).
 - **v1.7.1 Qwen3 & NeuTTS-2E scars**: (1) `custom_small` (`0.6B CustomVoice`) sets `"instruct_support": false` in `model_profile.json`, so passing non-empty sentiment `instruct` makes LunaVox reject `synthesize_custom`; ALWAYS read `instruct_support` before sending `instruct`. (2) NeuTTS-2E has 151k vocab + 65k `<|speech_N|>` added_tokens (`23MB tokenizer.json`) and a `217,226`-logit prefill matrix (`387MB` on long prompts); load tokenizers via streaming `StreamingTokenizerJsonReader`, read ONLY the final sequence step vector in `OnnxRuntimeEngine`, and keep `android:largeHeap="true"`. (3) Never use unaligned overlap-add time-scaling (causes metallic phase-comb reverb); use pitch-synchronous `PurrDspProcessor.timeScaleWsola` and keep `0.94x..1.06x` bypassed bit-exact.
-- **v1.8.0 scars**: (1) NEVER set `GraphOptimizationLevel::ORT_ENABLE_ALL` on Android ARM64 CPU EP for Qwen3 FP16 ONNX graphs — `ORT_ENABLE_ALL` triggers `NhwcTransformer`, rewriting FP16 `Conv` nodes into `NhwcFused` and crashing `speaker_encoder.fp16.onnx` (`Non-zero status code returned while running NhwcFused`); ALWAYS keep `ORT_ENABLE_BASIC` in `provider_policy_android.cpp`. (2) Never generate release signing keystores inside CI runs — always decode the persistent keystore from `PURR_RELEASE_KEYSTORE_B64` secret so upgrades stay compatible in-place. (3) Heavyweight neural TTS voices (`PurrNeuralBypass`) sound far cleaner when slang expansion, stutters, comma-stripping, and micro-chopping are auto-bypassed (post-v1.8.1: slang & honorifics are opt-back-in via the `Slang & Honorifics on Flagship Voices` toggle — `slangDuringNeuralPure`; the intrusive enhancers stay bypassed). (4) `TOOL-06` (`QwenVoiceDesignBuilder`) & `TOOL-07` (`EbookParser` + `EbookPdfExtractor` + `AudiobookConstructorManager` + `M4bAudiobookMuxer` + `Mp4ChapterAtomWriter` writing Nero `chpl` + iTunes `stik=2`) provide structured VoiceDesign prompt editing and resumable `.m4b` audiobook creation.
+- **v1.8.0 scars**: (1) NEVER set `GraphOptimizationLevel::ORT_ENABLE_ALL` on Android ARM64 CPU EP for Qwen3 FP16 ONNX graphs — `ORT_ENABLE_ALL` triggers `NhwcTransformer`, rewriting FP16 `Conv` nodes into `NhwcFused` and crashing `speaker_encoder.fp16.onnx` (`Non-zero status code returned while running NhwcFused`); ALWAYS keep `ORT_ENABLE_BASIC` in `provider_policy_android.cpp`. (2) Never generate release signing keystores inside CI runs — always decode the persistent keystore from `PURR_RELEASE_KEYSTORE_B64` secret so upgrades stay compatible in-place. (3) Heavyweight neural TTS voices (`PurrNeuralBypass`) sound far cleaner when slang expansion, stutters, comma-stripping, and micro-chopping are auto-bypassed (post-v1.8.3: slang expansion is the ONLY survivor of Neural Pure on flagship voices, governed by the profile `enableSlang` toggle — the v1.8.2 `slangDuringNeuralPure` toggle is retired; the intrusive enhancers stay bypassed). (4) `TOOL-06` (`QwenVoiceDesignBuilder`) & `TOOL-07` (`EbookParser` + `EbookPdfExtractor` + `AudiobookConstructorManager` + `M4bAudiobookMuxer` + `Mp4ChapterAtomWriter` writing Nero `chpl` + iTunes `stik=2`) provide structured VoiceDesign prompt editing and resumable `.m4b` audiobook creation.
 - **v1.8.1 trust-renewal scar**: upstream model hosts are MUTABLE — k2-fsa re-uploads assets
   under the SAME `tts-models` tag (Pocket INT8/FP32 on 2026-11-21, Kokoro packs on 2026-10-26)
   and HuggingFace `resolve/main` moves with the branch tip, so baked catalog pins rot and the

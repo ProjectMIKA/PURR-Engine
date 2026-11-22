@@ -650,62 +650,26 @@ private fun PurrEngineModuleWindowBody(
             modifier = Modifier.padding(top = 2.dp, bottom = 10.dp)
         )
 
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            forgeState.profiles.forEach { preset ->
-                val isActive = preset.id == activeProfile.id
-                val accent = if (preset.id == "gachaswipe_default") MikaColors.NeonCyan else MikaColors.NeonPink
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(6.dp))
-                        .background(if (isActive) accent.copy(alpha = 0.14f) else MikaColors.DeepWellBg)
-                        .border(
-                            width = if (isActive) 1.5.dp else 1.dp,
-                            color = if (isActive) accent else Color.White.copy(alpha = 0.14f),
-                            shape = RoundedCornerShape(6.dp)
-                        )
-                        .clickable { viewModel.selectProfile(preset.id) }
-                        .padding(10.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            if (isActive) {
-                                MikaCyberIcon(type = CyberIconType.CHECK, tint = accent, size = 11.dp)
-                            }
-                            Text(
-                                text = preset.name,
-                                color = if (isActive) Color.White else MikaColors.WarmCream,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
-                            )
-                        }
-                        Text(
-                            text = preset.badgeTag,
-                            color = accent,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 9.sp,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(3.dp))
-                                .background(accent.copy(alpha = 0.14f))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(3.dp))
-                    Text(
-                        text = preset.summary,
-                        color = MikaColors.CyanWhite.copy(alpha = 0.72f),
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 10.sp
-                    )
-                }
-            }
-        }
+        // ✨ v1.8.3 PRESET DROPDOWN: the tappable card wall collapsed into one slick CyberDropdown —
+        // the same terminal tray the rest of the Forge uses (one selection control, zero scroll cost).
+        // The active preset's summary still renders underneath, so swapping vibes never hides
+        // what the preset actually does.
+        CyberDropdown(
+            label = "> ACTIVE_PRESET",
+            options = forgeState.profiles,
+            selectedOption = activeProfile,
+            optionLabel = { preset -> "${preset.name} [${preset.badgeTag}]" },
+            onSelect = { preset -> viewModel.selectProfile(preset.id) },
+            accent = MikaColors.NeonPink
+        )
+        Text(
+            text = activeProfile.summary,
+            color = MikaColors.CyanWhite.copy(alpha = 0.72f),
+            fontFamily = FontFamily.Monospace,
+            fontSize = 10.sp,
+            lineHeight = 13.sp,
+            modifier = Modifier.padding(top = 8.dp)
+        )
     }
 
     // 2. Core PURR Text & Acting Toggles
@@ -721,21 +685,11 @@ private fun PurrEngineModuleWindowBody(
         Spacer(modifier = Modifier.height(6.dp))
         SimplePurrToggle(
             title = "Neural Pure Mode (Flagship Auto-Bypass)",
-            subtitle = "Auto-disables slang, stutters, comma-chopping & EQ coloring on Qwen3, NeuTTS-2E, Chatterbox, Soprano & Studio FP32 voices.",
+            subtitle = "Auto-bypasses honorifics, stutters, comma-chopping & EQ coloring on Qwen3, NeuTTS-2E, Chatterbox, Soprano & Studio FP32 voices. Slang follows its own toggle.",
             checked = activeProfile.autoBypassEnhancersForNeuralModels,
             accent = MikaColors.NeonCyan,
             icon = CyberIconType.BOLT_ACCEL,
             onToggle = { v -> viewModel.updateActiveProfile { it.copy(autoBypassEnhancersForNeuralModels = v) } }
-        )
-        // ✨ SLANG CARVE-OUT: lets flagship neural voices stay in the slang pipeline (text
-        // normalization aid) while the intrusive Neural Pure bypasses remain active.
-        SimplePurrToggle(
-            title = "Slang & Honorifics on Flagship Voices",
-            subtitle = "Keeps slang expansion ('omg' → 'oh my god', 'senpai' → 'sen-pie') active on Qwen3/NeuTTS/Chatterbox-class voices even while Neural Pure still bypasses stutters, comma-chopping & EQ.",
-            checked = activeProfile.slangDuringNeuralPure,
-            accent = MikaColors.NeonCyan,
-            icon = CyberIconType.CHAT_SLANG,
-            onToggle = { v -> viewModel.updateActiveProfile { it.copy(slangDuringNeuralPure = v) } }
         )
         if (neuralPureActive) {
             Row(
@@ -751,7 +705,7 @@ private fun PurrEngineModuleWindowBody(
             ) {
                 MikaCyberIcon(type = CyberIconType.SHIELD_GUARD, tint = MikaColors.NeonCyan, size = 12.dp)
                 Text(
-                    text = "NEURAL PURE ACTIVE: Enhancers bypassed for clean speech on ${activeProfile.primaryVoiceId.substringAfter(':')}.",
+                    text = "NEURAL PURE ACTIVE: Honorifics, stutters, comma-chopping & EQ bypassed on ${activeProfile.primaryVoiceId.substringAfter(':')} — slang still follows its toggle.",
                     color = MikaColors.NeonCyan,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 9.sp,
@@ -759,13 +713,33 @@ private fun PurrEngineModuleWindowBody(
                 )
             }
         }
+        // ✨ v1.8.3 THREE-WAY BENDER SPLIT: Slang / Honorifics / Stutters are now independent
+        // toggles (each with its own per-preset default) instead of one combined flag plus a
+        // flagship carve-out toggle. On Neural Pure flagship voices ONLY slang survives —
+        // honorifics & stutters are auto-bypassed with the other intrusive enhancers.
         SimplePurrToggle(
-            title = "Slang, Honorifics & Stutters",
-            subtitle = "Expands 'omg', 'fr', '-senpai', 'nya~' & 'w-what' cleanly.",
-            checked = activeProfile.enableSlangAndHonorifics,
-            accent = MikaColors.TerminalGreen,
+            title = "Texting Slang Expansion",
+            subtitle = "Expands 'omg', 'fr', 'wdym' & co into spoken words. Pure pronunciation aid — stays active on flagship voices too.",
+            checked = activeProfile.enableSlang,
+            accent = MikaColors.NeonCyan,
             icon = CyberIconType.CHAT_SLANG,
-            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSlangAndHonorifics = v) } }
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableSlang = v) } }
+        )
+        SimplePurrToggle(
+            title = "Anime Honorifics & Vocalisms",
+            subtitle = "'-senpai' → 'sen-pie', '-chan' → 'chahn', 'nya~' → 'nyaah'. Auto-bypassed on flagship voices for clean speech.",
+            checked = activeProfile.enableHonorifics,
+            accent = MikaColors.NeonPurple,
+            icon = CyberIconType.STAR_BADGE,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableHonorifics = v) } }
+        )
+        SimplePurrToggle(
+            title = "Organic Stutter Translator",
+            subtitle = "'w-what' → 'wuh-what', 'th-that' → 'thuh-that' — strictly repeated-letter written stutters. Auto-bypassed on flagship voices.",
+            checked = activeProfile.enableStutters,
+            accent = MikaColors.NeonPink,
+            icon = CyberIconType.WAVE_TAPER,
+            onToggle = { v -> viewModel.updateActiveProfile { it.copy(enableStutters = v) } }
         )
         SimplePurrToggle(
             title = "MIKASTOP Natural Breath Pauses",
@@ -796,17 +770,6 @@ private fun PurrEngineModuleWindowBody(
                 viewModel.updateActiveProfile { p -> p.copy(sentimentConfig = p.sentimentConfig.copy(toneOverride = tone)) }
             },
             accent = MikaColors.NeonPink
-        )
-        // ✨ ADRENO OPENCL GPU OFFLOAD: purely optional accelerator — OFF keeps the Qwen3
-        // talker byte-identical on CPU; ON lets llama.cpp offload to the Adreno GPU with
-        // per-tensor CPU fallback on unsupported devices or quant types.
-        SimplePurrToggle(
-            title = "Qwen3 GPU Offload (Adreno OpenCL)",
-            subtitle = "Runs the Qwen3 talker on your Adreno GPU instead of CPU — big synthesis speedup on Snapdragon flagships. Per-tensor CPU fallback on unsupported devices or quant types.",
-            checked = activeProfile.qwen3GpuOffload,
-            accent = MikaColors.MikaAmber,
-            icon = CyberIconType.BOLT_ACCEL,
-            onToggle = { v -> viewModel.updateActiveProfile { it.copy(qwen3GpuOffload = v) } }
         )
     }
 

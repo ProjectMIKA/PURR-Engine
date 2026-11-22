@@ -93,7 +93,16 @@ python3 scripts/verify_project.py
 
 ## 📜 Changelog
 
-### 🌟 Latest Updates (v1.8.2 // The Adreno Offload)
+### 🌟 Latest Updates (v1.8.3 // The Decoupled Dialects)
+
+* **🎛️ One slick preset dropdown:** the PURR Rulebook's vibe-preset card wall collapsed into a single terminal `CyberDropdown` (`> ACTIVE_PRESET`) — every preset (customs included) in one tray, active preset description rendered underneath.
+* **🗣️ Three-way text bender split:** **Slang**, **Honorifics**, and **Stutters** are now three independent toggles with their own per-preset defaults — slang expansions (`omg` → "oh my god"), anime honorifics (`-senpai` → "sen-pie", `nya~` → "nyaah"), and organic stutters (`w-what` → "wuh-what") dial separately.
+* **🛡️ Slang-only flagship law:** the "Slang & Honorifics on Flagship Voices" toggle is retired. On Neural Pure flagship voices (Qwen3, NeuTTS-2E, Chatterbox, Soprano, Studio FP32) **only Slang survives** the auto-bypass; honorifics & stutters are always bypassed there. One toggle, every engine.
+* **⚙️ `> HARDWARE_OFFLOAD // [EXPERIMENTAL]` in Settings:** the Qwen3 GPU Offload (Adreno OpenCL) toggle moved to the System Settings sheet under an amber `[EXPERIMENTAL]` badge — now a GLOBAL device setting that survives persona switches, and the future home for engine-level GPU/NPU offloads. Per-cartridge chips (Kokoro NPU/GPU sub-cartridges) stay in the Cartridge Bay.
+* **🧬 Clean state-file migration:** the old combined flag seeds the three new toggles; users who explicitly disabled the v1.8.2 carve-out (full v1.8.0 Neural Pure) start with Slang OFF everywhere, honoring their preference.
+* **🧪 Tests expanded:** new `PurrProfileRepositoryMigrationTest` (5 JVM tests) + rewritten Neural-Pure / independent-toggle processor tests.
+
+### 📦 Prior Releases (v1.8.2 // The Adreno Offload)
 
 * **🎮 Optional Adreno OpenCL GPU Offload (Qwen3):** New **"Qwen3 GPU Offload (Adreno OpenCL)"** toggle in the P.U.R.R. Rulebook (default OFF). ON = the Qwen3 talker & predictor run on your Adreno GPU via a newly-built `libggml-opencl.so` (embedded kernels + Qualcomm's Adreno-optimized matmul kernels) — big synthesis speedup on Snapdragon flagships. Fail-soft everywhere: per-tensor/full CPU fallback on unsupported devices, mid-session toggle re-mounts the engine, `[GPU FP16]` badge + `• Adreno OpenCL` telemetry.
 * **🛠️ Native engineering:** vendored Khronos OpenCL-Headers + link-only stub `libOpenCL.so` (configure-time, never packaged); OpenCL symbols resolve from the device at runtime (`-Wl,-z,undefs`); `patches/lunavox_opencl_gpu_offload.patch` makes LunaVox's hardcoded `n_gpu_layers` a runtime gate (applied fail-closed in CI). Hexagon NPU stays impractical for Qwen3 (experimental `ggml-hexagon`, no q5_k, QNN SDK required) — Kokoro keeps the NPU lane.

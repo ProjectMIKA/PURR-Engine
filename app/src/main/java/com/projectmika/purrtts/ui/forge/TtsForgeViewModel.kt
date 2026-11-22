@@ -354,6 +354,11 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         repository.updateActiveProfile { p -> p.copy(mikaStopConfig = transform(p.mikaStopConfig)) }
     }
 
+    // ✨ HARDWARE OFFLOAD (v1.8.3): global device-level toggle — Settings ▸ HARDWARE_OFFLOAD.
+    fun setQwen3GpuOffload(enabled: Boolean) {
+        repository.setQwen3GpuOffload(enabled)
+    }
+
     fun selectEngineCartridge(cartridgeId: String) {
         repository.selectEngineCartridge(cartridgeId)
         showToast("Engine -> ${cartridgeId.uppercase()}")

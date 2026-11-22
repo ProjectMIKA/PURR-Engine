@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -32,11 +34,19 @@ import com.projectmika.purrtts.core.purr.PURR_REPO_URL
  * ✨ SYSTEM SETTINGS SHEET (v1.5.0) — opens from the header cog beside SET_OS_TTS ✨
  * Links out to the source repository and the Ko-fi support page (both shared with
  * GachaSwipe), replays the M.I.K.A. Academy, and stamps the exact running build.
+ *
+ * ✨ HARDWARE OFFLOAD (v1.8.3): device-level accelerator toggles live here — GLOBAL forge
+ * state that survives vibe-preset switches, under an [EXPERIMENTAL] badge, with room for
+ * future GPU/NPU offloads. Per-cartridge switches that ride on separately downloaded
+ * sub-cartridge packs (Kokoro Hexagon-NPU / Adreno-GPU chips) stay in the Cartridge Bay —
+ * this section is for IN-ENGINE offloads only (currently the Qwen3 Adreno OpenCL one).
  */
 @Composable
 fun MikaSettingsSheet(
     versionName: String,
     versionCode: Int,
+    qwen3GpuOffload: Boolean,
+    onQwen3GpuOffloadToggle: (Boolean) -> Unit,
     onReplayTutorial: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -119,6 +129,60 @@ fun MikaSettingsSheet(
                 }
             }
 
+            // ✨ HARDWARE OFFLOAD // EXPERIMENTAL (v1.8.3) — the future home for engine-level
+            // GPU/NPU accelerator toggles. Per-cartridge accelerator chips (the Kokoro NPU/GPU
+            // G2P sub-cartridges) are NOT here: they need separately downloaded model packs
+            // and stay configured in the Cartridge Bay rack.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = MikaColors.MikaAmber, size = 15.dp)
+                    Text(
+                        text = "> HARDWARE_OFFLOAD",
+                        color = MikaColors.MikaAmber,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+                // [EXPERIMENTAL] badge — static chip, never in a pinned slot law region here
+                // (the settings sheet scrolls; no fixed-width slot needed).
+                Text(
+                    text = "[EXPERIMENTAL]",
+                    color = MikaColors.MikaAmber,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 9.sp,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(MikaColors.MikaAmber.copy(alpha = 0.14f))
+                        .border(1.dp, MikaColors.MikaAmber.copy(alpha = 0.6f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+            Text(
+                text = "// Engine accelerators. Per-cartridge NPU/GPU chips stay in the Cartridge Bay.",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp
+            )
+            SettingsToggleRow(
+                title = "Qwen3 GPU Offload (Adreno OpenCL)",
+                subtitle = "Runs the Qwen3 talker on your Adreno GPU instead of CPU — big synthesis speedup on Snapdragon flagships. Per-tensor CPU fallback on unsupported devices or quant types.",
+                checked = qwen3GpuOffload,
+                accent = MikaColors.MikaAmber,
+                onToggle = onQwen3GpuOffloadToggle
+            )
+
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "PURR-TTS v$versionName // BUILD $versionCode",
@@ -135,6 +199,55 @@ fun MikaSettingsSheet(
                 lineHeight = 12.sp
             )
         }
+    }
+}
+
+@Composable
+private fun SettingsToggleRow(
+    title: String,
+    subtitle: String,
+    checked: Boolean,
+    accent: Color,
+    onToggle: (Boolean) -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(accent.copy(alpha = 0.08f))
+            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = accent, size = 16.dp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                color = if (checked) Color.White else MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                letterSpacing = 0.8.sp
+            )
+            Text(
+                text = subtitle,
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onToggle,
+            colors = SwitchDefaults.colors(
+                checkedThumbColor = MikaColors.VoidBg,
+                checkedTrackColor = accent,
+                uncheckedThumbColor = MikaColors.DimText,
+                uncheckedTrackColor = MikaColors.PanelBg,
+                uncheckedBorderColor = MikaColors.DimText.copy(alpha = 0.4f)
+            )
+        )
     }
 }
 

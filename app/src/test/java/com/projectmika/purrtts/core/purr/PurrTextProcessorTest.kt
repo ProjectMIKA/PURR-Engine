@@ -77,7 +77,9 @@ class PurrTextProcessorTest {
     @Test
     fun `disabling slang and mikastop toggles respects simple mode`() {
         val cleanProfile = defaultProfile.copy(
-            enableSlangAndHonorifics = false,
+            enableSlang = false,
+            enableHonorifics = false,
+            enableStutters = false,
             enableMikaStopPauses = false
         )
         val chunks = PurrTextProcessor.process("omg wait... right now", cleanProfile)
@@ -316,12 +318,12 @@ class PurrTextProcessorTest {
         val qwenSpeech = qwenChunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
         val qwenSilences = qwenChunks.filterIsInstance<PurrChunk.Silence>()
 
-        // ✨ SLANG CARVE-OUT (default ON): slang expansion, organic stutters & honorifics ride
-        // along on flagship voices — texting shorthand must be spoken meaningfully...
+        // ✨ v1.8.3 LAW: ONLY slang survives Neural Pure on flagship voices — texting shorthand
+        // must still be spoken meaningfully, but honorifics & organic stutters stay bypassed...
         assertTrue(qwenSpeech.contains("oh my god", ignoreCase = true))
         assertTrue(qwenSpeech.contains("for real", ignoreCase = true))
-        assertTrue(qwenSpeech.contains("sen-pie", ignoreCase = true))
-        assertTrue(qwenSpeech.contains("oh-oh", ignoreCase = true))
+        assertFalse(qwenSpeech.contains("sen-pie", ignoreCase = true))
+        assertFalse(qwenSpeech.contains("oh-oh", ignoreCase = true))
         assertFalse(qwenSpeech.contains("omg"))
         // ...while the intrusive enhancers stay bypassed: commas kept raw, quotes intact,
         // MIKASTOP pause injection off (0 silences), no sentiment-driven micro-slicing.
@@ -329,10 +331,11 @@ class PurrTextProcessorTest {
         assertTrue(qwenSpeech.contains("\"Are you serious right now?!\""))
         assertEquals(0, qwenSilences.size)
 
-        // Explicitly disabling the carve-out restores the full v1.8.0 bypass (slang included)
+        // The Slang toggle is the single source of truth on every engine class: slang OFF =
+        // the full v1.8.0 Neural Pure bypass (slang included)
         val fullBypassChunks = PurrTextProcessor.process(
             sample,
-            qwenProfile.copy(slangDuringNeuralPure = false)
+            qwenProfile.copy(enableSlang = false)
         )
         val fullBypassSpeech = fullBypassChunks.filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
         assertFalse(fullBypassSpeech.contains("oh my god", ignoreCase = true))
@@ -366,6 +369,49 @@ class PurrTextProcessorTest {
             primaryVoiceId = "neutts_emily"
         )
         assertTrue(PurrNeuralBypass.shouldBypassEnhancers(neuttsProfile))
+    }
+
+    @Test
+    fun `three bender toggles act independently on standard voices`() {
+        val input = "O-oh! omg Mika-senpai nya~"
+
+        fun speechOf(profile: PurrProfile): String =
+            PurrTextProcessor.process(input, profile)
+                .filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+
+        // Slang only: shorthand expands, honorifics & organic stutters do not
+        val slangOnly = speechOf(defaultProfile.copy(enableSlang = true, enableHonorifics = false, enableStutters = false))
+        assertTrue(slangOnly.contains("oh my god", ignoreCase = true))
+        assertFalse(slangOnly.contains("sen-pie", ignoreCase = true))
+        assertFalse(slangOnly.contains("oh-oh", ignoreCase = true))
+
+        // Honorifics only: phonetic honorifics land, slang & organic stutters do not
+        val honorificsOnly = speechOf(defaultProfile.copy(enableSlang = false, enableHonorifics = true, enableStutters = false))
+        assertTrue(honorificsOnly.contains("sen-pie", ignoreCase = true))
+        assertFalse(honorificsOnly.contains("oh my god", ignoreCase = true))
+        assertFalse(honorificsOnly.contains("oh-oh", ignoreCase = true))
+
+        // Stutters only: organic stutter translation lands, slang & honorifics do not
+        val stuttersOnly = speechOf(defaultProfile.copy(enableSlang = false, enableHonorifics = false, enableStutters = true))
+        assertTrue(stuttersOnly.contains("oh-oh", ignoreCase = true))
+        assertFalse(stuttersOnly.contains("oh my god", ignoreCase = true))
+        assertFalse(stuttersOnly.contains("sen-pie", ignoreCase = true))
+    }
+
+    @Test
+    fun `flagship voices keep only slang even when honorifics and stutters toggles are on`() {
+        val qwenProfile = defaultProfile.copy(
+            selectedCartridgeId = "rom_qwen3_custom_06b",
+            preferredBackend = BackendType.QWEN3_NATIVE,
+            primaryVoiceId = "qwen3_vivian",
+            enableSlang = true,
+            enableHonorifics = true,
+            enableStutters = true
+        )
+        val speech = PurrTextProcessor.process("omg Mika-senpai", qwenProfile)
+            .filterIsInstance<PurrChunk.Speech>().joinToString(" ") { it.text }
+        assertTrue(speech.contains("oh my god", ignoreCase = true))
+        assertFalse(speech.contains("sen-pie", ignoreCase = true))
     }
 
     @Test

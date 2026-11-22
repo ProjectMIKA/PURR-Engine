@@ -261,7 +261,13 @@ data class PurrProfile(
     val narrationRateMultiplier: Float = 0.92f,
     val baseSpeed: Float = 1.0f,
     val basePitch: Float = 1.0f,
-    val enableSlangAndHonorifics: Boolean = true,
+    // ✨ THREE-WAY TEXT BENDER (v1.8.3): slang / honorifics / stutters are independently
+    // toggleable so each can carry its own default per vibe preset. On flagship neural voices
+    // ONLY slang survives Neural Pure (pronunciation aid); honorifics & stutters are
+    // auto-bypassed there with the other intrusive enhancers (see PurrNeuralBypass).
+    val enableSlang: Boolean = true,
+    val enableHonorifics: Boolean = true,
+    val enableStutters: Boolean = true,
     val enableMikaStopPauses: Boolean = true,
     val enableDsp: Boolean = true,
     val enableSymbolShield: Boolean = true,
@@ -276,20 +282,7 @@ data class PurrProfile(
     val symbolShieldConfig: SymbolShieldConfig = SymbolShieldConfig(),
     val proxyConfig: ProxyEndpointConfig = ProxyEndpointConfig(),
     val voiceDesignPrompt: String = "Warm, expressive young woman with crisp close-mic clarity and gentle natural pacing",
-    val autoBypassEnhancersForNeuralModels: Boolean = true,
-    // ✨ SLANG CARVE-OUT: slang & honorifics expansion is TEXT NORMALIZATION — it can HELP
-    // heavyweight neural voices pronounce texting shorthand (`omg` → `oh my god`) correctly,
-    // unlike the truly intrusive enhancers (Drama-Matrix stutters, comma-chopping, micro-chunking,
-    // EQ coloring) which stay bypassed. DEFAULT ON (Master's call): large TTS models read
-    // texting shorthand verbatim otherwise, so slang makes the speech make sense; flip off to
-    // restore the full v1.8.0 Neural Pure bypass (see PurrNeuralBypass.shouldBypassSlang).
-    val slangDuringNeuralPure: Boolean = true,
-    // ✨ ADRENO OPENCL GPU OFFLOAD: runs the Qwen3 talker/predictor llama models on the Adreno
-    // GPU (OpenCL backend compiled into the JNI stack) instead of CPU. DEFAULT OFF — the toggle
-    // is purely optional per Master's law. OFF = n_gpu_layers 0 → byte-identical CPU behavior;
-    // ON = n_gpu_layers -1 → llama.cpp offloads every layer it can (unsupported tensor types
-    // and devices without OpenCL fall back to CPU automatically, never fail-open).
-    val qwen3GpuOffload: Boolean = false
+    val autoBypassEnhancersForNeuralModels: Boolean = true
 )
 
 @Serializable
@@ -504,7 +497,19 @@ data class PurrForgeState(
     val knownToolCatalogVersion: Int = 2,
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
-    val seenTutorialVersion: Int = 0
+    val seenTutorialVersion: Int = 0,
+    // ✨ HARDWARE OFFLOAD (v1.8.3): device-level accelerator toggles — deliberately GLOBAL
+    // state, not per-vibe-preset: hardware doesn't change when you switch personas. Future
+    // GPU/NPU offload toggles slot here too (surfaced in Settings ▸ HARDWARE_OFFLOAD with the
+    // EXPERIMENTAL badge). Model SUB-CARTRIDGES that need their own downloaded accelerator
+    // packs (e.g. the Kokoro Hexagon-NPU / Adreno-GPU G2P chips) are per-cartridge switches
+    // in the Cartridge Bay, NOT here.
+    // ✨ ADRENO OPENCL GPU OFFLOAD: runs the Qwen3 talker/predictor llama models on the Adreno
+    // GPU (OpenCL backend compiled into the JNI stack) instead of CPU. DEFAULT OFF — the toggle
+    // is purely optional per Master's law. OFF = n_gpu_layers 0 → byte-identical CPU behavior;
+    // ON = n_gpu_layers -1 → llama.cpp offloads every layer it can (unsupported tensor types
+    // and devices without OpenCL fall back to CPU automatically, never fail-open).
+    val qwen3GpuOffload: Boolean = false
 )
 
 /**
@@ -574,17 +579,17 @@ object PurrNeuralBypass {
         clonedVoices: List<ClonedVoiceProfile> = emptyList()
     ): Boolean = profile.autoBypassEnhancersForNeuralModels && isAdvancedNeuralVoice(profile, clonedVoices)
 
-    /**
-     * ✨ SLANG CARVE-OUT ✨
-     * Neural Pure bypasses slang & honorifics along with everything else — but slang expansion
-     * is pure text normalization (pronunciation aid), not an intrusive prosody enhancer. This
-     * second gate lets users put large TTS models back INTO the slang pipeline (profile
-     * `slangDuringNeuralPure`) while stutters, comma-chopping, micro-chunking & EQ stay bypassed.
-     */
-    fun shouldBypassSlang(
-        profile: PurrProfile,
-        clonedVoices: List<ClonedVoiceProfile> = emptyList()
-    ): Boolean = shouldBypassEnhancers(profile, clonedVoices) && !profile.slangDuringNeuralPure
+    // ✨ SLANG CARVE-OUT — v1.8.3 LAW ✨
+    // Neural Pure auto-bypasses honorifics, stutters, comma-chopping, micro-chunking & EQ on
+    // flagship voices — but SLANG always survives (it is pure text normalization — `omg` →
+    // "oh my god" is a pronunciation AID, not a prosody enhancer). It is governed solely by
+    // the profile's `enableSlang` toggle, identically on standard and flagship engines, so
+    // there is deliberately NO separate flagship toggle anymore: v1.8.2's
+    // `slangDuringNeuralPure` was folded away when the combined bender flag split into
+    // enableSlang / enableHonorifics / enableStutters. With the three-way split, the ONLY
+    // enhancer active on larger TTS engines is Slang — exactly Master's law.
+    // Enforcement lives in PurrTextProcessor.process()'s neuralPureActive effective-profile
+    // branch: enableSlang passes through; enableHonorifics / enableStutters are forced OFF.
 }
 
 object PurrDefaultPresets {
@@ -1172,7 +1177,9 @@ object PurrDefaultPresets {
             narrationRateMultiplier = 0.94f,
             baseSpeed = 1.0f,
             basePitch = 1.0f,
-            enableSlangAndHonorifics = true,
+            enableSlang = true,
+            enableHonorifics = true,
+            enableStutters = true,
             enableMikaStopPauses = true,
             enableDsp = true,
             enableSymbolShield = true,
@@ -1208,7 +1215,9 @@ object PurrDefaultPresets {
             narrationRateMultiplier = 0.96f,
             baseSpeed = 1.04f,
             basePitch = 1.0f,
-            enableSlangAndHonorifics = false,
+            enableSlang = false,
+            enableHonorifics = false,
+            enableStutters = false,
             enableMikaStopPauses = true,
             enableDsp = true,
             enableSymbolShield = true,
@@ -1242,7 +1251,9 @@ object PurrDefaultPresets {
             actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS,
             baseSpeed = 1.05f,
             basePitch = 1.02f,
-            enableSlangAndHonorifics = true,
+            enableSlang = true,
+            enableHonorifics = true,
+            enableStutters = true,
             enableMikaStopPauses = true,
             enableDsp = true,
             enableSymbolShield = true,
@@ -1278,7 +1289,9 @@ object PurrDefaultPresets {
             narrationRateMultiplier = 0.90f,
             baseSpeed = 0.93f,
             basePitch = 0.98f,
-            enableSlangAndHonorifics = true,
+            enableSlang = true,
+            enableHonorifics = true,
+            enableStutters = true,
             enableMikaStopPauses = true,
             enableDsp = true,
             enableSymbolShield = true,
@@ -1312,7 +1325,9 @@ object PurrDefaultPresets {
             actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             baseSpeed = 0.98f,
             basePitch = 1.02f,
-            enableSlangAndHonorifics = true,
+            enableSlang = true,
+            enableHonorifics = true,
+            enableStutters = true,
             enableMikaStopPauses = true,
             enableDsp = true,
             enableSymbolShield = true,
@@ -1346,7 +1361,9 @@ object PurrDefaultPresets {
             actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS,
             baseSpeed = 1.10f,
             basePitch = 1.0f,
-            enableSlangAndHonorifics = false,
+            enableSlang = false,
+            enableHonorifics = false,
+            enableStutters = false,
             enableMikaStopPauses = false,
             enableDsp = false,
             enableSymbolShield = true,

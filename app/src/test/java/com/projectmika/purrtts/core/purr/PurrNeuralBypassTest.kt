@@ -5,22 +5,21 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * ✨ PURE-JVM TESTS FOR THE NEURAL PURE SLANG CARVE-OUT ✨
- * Guards the two-gate split: `shouldBypassEnhancers` stays the master Neural Pure bypass for
- * heavyweight voices, while `shouldBypassSlang` lets users opt flagship voices back INTO the
- * slang & honorifics pipeline (text normalization aid) without re-enabling the intrusive
- * enhancers (stutters, comma-chopping, micro-chunking).
+ * ✨ PURE-JVM TESTS FOR THE NEURAL PURE BYPASS (v1.8.3) ✨
+ * `shouldBypassEnhancers` is the master Neural Pure bypass for heavyweight voices. The old
+ * two-gate split (`shouldBypassSlang` + profile `slangDuringNeuralPure`) is retired: with the
+ * three-way bender split, SLANG is the only enhancer that survives Neural Pure on flagship
+ * voices (governed solely by the profile's `enableSlang` toggle — enforced inside
+ * PurrTextProcessor.process()), while honorifics & stutters stay bypassed with the rest.
  */
 class PurrNeuralBypassTest {
 
     private fun profile(
         voiceId: String,
-        autoBypass: Boolean = true,
-        slangDuringPure: Boolean = false
+        autoBypass: Boolean = true
     ): PurrProfile = PurrProfile(id = "test", name = "Test").copy(
         primaryVoiceId = voiceId,
-        autoBypassEnhancersForNeuralModels = autoBypass,
-        slangDuringNeuralPure = slangDuringPure
+        autoBypassEnhancersForNeuralModels = autoBypass
     )
 
     @Test
@@ -41,37 +40,5 @@ class PurrNeuralBypassTest {
     @Test
     fun `master toggle off disables the whole bypass`() {
         assertFalse(PurrNeuralBypass.shouldBypassEnhancers(profile("qwen3_vivian", autoBypass = false)))
-    }
-
-    @Test
-    fun `flagship voices keep slang by default after the carve-out`() {
-        // slangDuringNeuralPure defaults to TRUE — large models read texting shorthand verbatim
-        // otherwise, so slang expansion is on unless the user explicitly disables it.
-        val defaultProfile = PurrProfile(id = "test", name = "Test").copy(primaryVoiceId = "qwen3_vivian")
-        assertFalse(PurrNeuralBypass.shouldBypassSlang(defaultProfile))
-    }
-
-    @Test
-    fun `slang stays bypassed during neural pure when the carve-out is explicitly off`() {
-        assertTrue(PurrNeuralBypass.shouldBypassSlang(profile("qwen3_vivian")))
-    }
-
-    @Test
-    fun `slang carve-out returns flagship voices to the slang pipeline`() {
-        assertFalse(PurrNeuralBypass.shouldBypassSlang(profile("qwen3_vivian", slangDuringPure = true)))
-    }
-
-    @Test
-    fun `slang carve-out does not re-enable slang for non flagship voices`() {
-        assertFalse(PurrNeuralBypass.shouldBypassSlang(profile("af_heart", slangDuringPure = true)))
-    }
-
-    @Test
-    fun `slang carve-out still respects the master toggle`() {
-        assertFalse(
-            PurrNeuralBypass.shouldBypassSlang(
-                profile("qwen3_vivian", autoBypass = false, slangDuringPure = true)
-            )
-        )
     }
 }

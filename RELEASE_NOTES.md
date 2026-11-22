@@ -1,3 +1,25 @@
+# 🌌 PURR-TTS v1.8.3 // The Decoupled Dialects
+
+### ✨ What's New since v1.8.2
+
+The Rulebook finally reads like a sentence: one dropdown, three honest toggles, and a proper home for hardware experiments. 🎛️🐾
+
+* **🎛️ ONE SLICK PRESET DROPDOWN**: the PURR Rulebook's "pick your vibe preset" card wall collapsed into a single terminal **CyberDropdown** (`> ACTIVE_PRESET`) — every vibe preset (customs included) in one expandable tray, with the active preset's full description still rendered underneath. Swapping personas is one tap, zero scroll.
+* **🗣️ THREE-WAY TEXT BENDER SPLIT**: the confusing combined toggles are gone. **Slang**, **Honorifics**, and **Stutters** are now three independent toggles, each with its own per-preset default — slang expansions (`omg` → "oh my god"), anime honorifics & vocalisms (`-senpai` → "sen-pie", `nya~` → "nyaah"), and organic stutters (`w-what` → "wuh-what") can each be dialed on their own.
+* **🛡️ SLANG-ONLY FLAGSHIP LAW**: the "Slang & Honorifics on Flagship Voices" carve-out toggle is retired. New law: on Neural Pure flagship voices (Qwen3, NeuTTS-2E, Chatterbox, Soprano, Studio FP32) **only Slang survives** the auto-bypass — it's a pronunciation aid, not a prosody enhancer — while honorifics & stutters are always bypassed there. The Slang toggle is the single source of truth on every engine class.
+* **⚙️ `> HARDWARE_OFFLOAD // [EXPERIMENTAL]` IN SETTINGS**: the **Qwen3 GPU Offload (Adreno OpenCL)** toggle moved out of the Rulebook into the System Settings sheet under an amber `[EXPERIMENTAL]` badge — and it is now a GLOBAL device setting instead of a per-vibe-preset one, so your accelerator choice survives persona switches. This section is the future home for engine-level GPU/NPU offloads. Per-cartridge accelerator chips (the Kokoro Hexagon-NPU / Adreno-GPU sub-cartridges that need their own downloads) stay in the Cartridge Bay where they belong.
+* **🧬 STATE-FILE MIGRATION**: existing installs migrate cleanly — the old combined flag seeds the three new toggles (clean-prose presets stay clean), and anyone who explicitly disabled the v1.8.2 flagship carve-out (full v1.8.0 Neural Pure) starts with Slang OFF everywhere, honoring their expressed preference. One tap re-enables it.
+* **🧪 Test coverage expanded**: new `PurrProfileRepositoryMigrationTest` (five JVM tests: on/off seeding, the full-Neural-Pure slang-off rule, GPU-offload hoisting, and already-migrated passthrough) plus rewritten Neural-Pure and independent-toggle processor tests.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `19`).
+2. **`PURR-TTS_V1.8.3.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.2 // The Adreno Offload
 
 ### ✨ What's New since v1.8.1

@@ -230,15 +230,20 @@ object PurrTextProcessor {
 
         val neuralPureActive = PurrNeuralBypass.shouldBypassEnhancers(profile, clonedVoices)
         val effectivePurrRewriting = purrModuleActive && !neuralPureActive
-        // ✨ SLANG CARVE-OUT: slang & honorifics can ride along on flagship neural voices while
-        // the rest of Neural Pure (stutters, comma-chopping, micro-chunking) stays bypassed.
-        val slangBypassed = PurrNeuralBypass.shouldBypassSlang(profile, clonedVoices)
+        // ✨ SLANG CARVE-OUT (v1.8.3 LAW): slang is pure text normalization — a pronunciation
+        // aid, not a prosody enhancer — so it is the ONLY bender that rides flagship neural
+        // voices, governed solely by the profile's `enableSlang` toggle. Honorifics & stutters
+        // are forced OFF with the rest of Neural Pure below.
 
         // Effective profile honors Tool Cartridge slotting AND automatically disables intrusive
         // enhancers when running heavyweight neural LLM TTS engines (`PurrNeuralBypass`).
         val effectiveProfile = if (neuralPureActive) {
             profile.copy(
-                enableSlangAndHonorifics = !slangBypassed && profile.enableSlangAndHonorifics,
+                // ✨ v1.8.3: ONLY slang survives Neural Pure (its toggle is the single source of
+                // truth on every engine class); honorifics & stutters are intrusive and bypassed.
+                enableSlang = profile.enableSlang,
+                enableHonorifics = false,
+                enableStutters = false,
                 enableMikaStopPauses = false,
                 enableSymbolShield = symbolShieldModuleActive && profile.enableSymbolShield,
                 symbolShieldConfig = profile.symbolShieldConfig.copy(
@@ -262,7 +267,9 @@ object PurrTextProcessor {
             )
         } else {
             profile.copy(
-                enableSlangAndHonorifics = purrModuleActive && profile.enableSlangAndHonorifics,
+                enableSlang = purrModuleActive && profile.enableSlang,
+                enableHonorifics = purrModuleActive && profile.enableHonorifics,
+                enableStutters = purrModuleActive && profile.enableStutters,
                 enableMikaStopPauses = purrModuleActive && profile.enableMikaStopPauses,
                 enableSymbolShield = symbolShieldModuleActive && profile.enableSymbolShield,
                 sentimentConfig = if (purrModuleActive) {
@@ -584,7 +591,7 @@ object PurrTextProcessor {
             }
         }
 
-        if (profile.enableSlangAndHonorifics) {
+        if (profile.enableStutters) {
             // Organic Stutter Translator: strictly repeated-letter stutters (`w-what` -> `wuh-what`, `th-that` -> `thuh-that`)
             clean = ORGANIC_STUTTER_REGEX.replace(clean) { m ->
                 val prefix = m.groupValues[1].lowercase()
@@ -595,10 +602,14 @@ object PurrTextProcessor {
                 }
                 if (sound != null) "$sound-" else m.value
             }
+        }
 
+        if (profile.enableHonorifics) {
             // Anime honorifics & vocalisms (applied before em-dash/tilde split so `nya~` becomes `nyaah`)
             clean = applyAnimeHonorificsAndVocalisms(clean)
+        }
 
+        if (profile.enableSlang) {
             // ~100 GachaSwipe texting slang expansions
             for ((slang, expanded) in SLANG_DICTIONARY) {
                 val wordRegex = Regex("\\b${Regex.escape(slang)}\\b", RegexOption.IGNORE_CASE)
