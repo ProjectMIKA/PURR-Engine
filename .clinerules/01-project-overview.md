@@ -62,8 +62,9 @@ app/src/main/java/com/projectmika/purrtts/
 8. **Model downloads fail closed** — SHA-256 must verify before a cartridge is `INSTALLED`.
 
 ## Where things live
-- Docs: `README.md` (architecture + changelog, newest entry on top), `RELEASE_NOTES.md`
-  (prepend per release), `scripts/verify_project.py` (CI structure guard), `SDK`-equivalent
+- Docs: `README.md` (app-info only — NO changelog; the GitHub Releases page is the canonical
+  public changelog), `RELEASE_NOTES.md` (prepend per release — the release-notes archive),
+  `scripts/verify_project.py` (CI structure guard), `SDK`-equivalent
   contracts live in code (no vendored SDK here — it's a native host app).
 - `builds/` = latest release's 2 APKs; `archive/` = previous APKs. Both gitignored.
 - Workspace skills: `.agents/skills/` (purr-native-engine, purr-release, mika-compose-ui).
@@ -71,5 +72,9 @@ app/src/main/java/com/projectmika/purrtts/
   README license sections / in-app license strings for this repo. The project relicensed from
   MIT to **AGPL-3.0-or-later** + the broad ProjectMIKA ICLA right after v1.8.3 (sole-copyright
   window; releases up to v1.8.3 remain MIT for their copies).
+- CLA signing source (CLA Assistant gist, secret/unlisted):
+  `https://gist.github.com/ProjectMIKA/6d85d2cfa9df9ce5c6d700f1b08e6094`
+  (ProjectMIKA-Individual-CLA-v1.0.md — byte-identical to the repo's `CLA.md`; if the CLA text
+  ever changes, new gist + CLA Assistant update = re-sign prompts for all contributors).
 - The JS twin of this engine lives in GachaSwipe (`src/` + global `purr-tts-engine` skill);
   keep behavioral parity when porting features in either direction.

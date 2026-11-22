@@ -12,7 +12,8 @@ GachaSwipe's `release` skill pattern, adapted to the native Android repo. CI bui
 2. `RELEASE_NOTES.md` → prepend `# 🌌 PURR-TTS vX.Y.Z // <Codename>` section with
    `### ✨ What's New since v<prev>` bullets + `### 📦 Android APK Packages (Attached Below)`
    naming both APKs, then `---` separator. Newest on top.
-3. `README.md` → add matching changelog entry (newest on top).
+3. `README.md` → **NO changelog** — the GitHub Releases page is the canonical public
+   changelog (README is app-info only; it carries only a pointer to the Releases page).
 
 ## Release checklist
 1. `python3 scripts/verify_project.py` locally (must print VERIFICATION PASSED).
