@@ -67,5 +67,9 @@ app/src/main/java/com/projectmika/purrtts/
   contracts live in code (no vendored SDK here — it's a native host app).
 - `builds/` = latest release's 2 APKs; `archive/` = previous APKs. Both gitignored.
 - Workspace skills: `.agents/skills/` (purr-native-engine, purr-release, mika-compose-ui).
+- Global skill: `mika-licensing` (`~/.cline/skills/`) — governs LICENSE / CLA.md / NOTICE /
+  README license sections / in-app license strings for this repo. The project relicensed from
+  MIT to **AGPL-3.0-or-later** + the broad ProjectMIKA ICLA right after v1.8.3 (sole-copyright
+  window; releases up to v1.8.3 remain MIT for their copies).
 - The JS twin of this engine lives in GachaSwipe (`src/` + global `purr-tts-engine` skill);
   keep behavioral parity when porting features in either direction.

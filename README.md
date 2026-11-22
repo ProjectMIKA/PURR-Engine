@@ -221,9 +221,20 @@ python3 scripts/verify_project.py
 
 ---
 
-## 📄 License & Credits
+## ⚖️ License & Notice
 
-Released under the [MIT License](LICENSE) — © 2026 **ProjectMIKA (Project M.I.K.A.)**. Fork it, mod it, rebrand the app, ship your own build: just keep **ProjectMIKA** credited as the original author, and let the engine keep its name. The internal speech pipeline is, was, and always shall be the **PURR Engine** — see [NOTICE](NOTICE) for the naming conditions.
+PURR-TTS's code is free software: it is released under the **GNU Affero General Public License v3.0 or later** (`AGPL-3.0-or-later`) — see [`LICENSE`](LICENSE). You may run, study, modify, and redistribute it; distribute a modified version (a fork, a sideloaded APK, an embedded build) and you must share your modified source under the same license.
+
+**NOTICE — what the license does NOT cover:**
+
+- **The name "PURR-TTS", the "PURR Engine" / "P.U.R.R." engine name, the M.I.K.A. persona and voice, and the bundled artwork / brand assets** are **not** licensed under AGPLv3 and remain the exclusive property of ProjectMIKA. Selling or marketing a copy or derivative **under this name or branding** requires separate written permission — the free-software grant covers the code, not the brand. Forks are welcome to rebrand the app shell; the internal engine stays the **PURR Engine** — see [NOTICE](NOTICE).
+- **The third-party neural runtimes & model weights** (llama.cpp, LunaVox, ONNX Runtime, sherpa-onnx, Kokoro-82M, the Qwen3-TTS weights, Chatterbox-Turbo, NeuTTS-2E, Soprano-80M, Piper / MeloTTS, PdfBox-Android, Khronos OpenCL-Headers) ride in under **their own licenses** — they are not part of this repository's grant, and their terms govern their use. The full ledger lives in [NOTICE](NOTICE).
+- **Selling the code:** AGPL-3.0-or-later permits redistribution (including selling) of the *code* — but only under the same license, with complete source, and never as closed source. **Closed-source and commercial licensing of PURR-TTS are reserved to ProjectMIKA**; contributors grant those rights via the [ProjectMIKA Individual Contributor License Agreement](CLA.md).
+- **License transition:** releases up to and including **v1.8.3** were distributed under the MIT License; from this commit onward the project is AGPL-3.0-or-later.
+
+**💼 Commercial licensing:** the app itself is and always will be free, open-source software — that will not change. What's reserved is everything *else*: an app-store release, OEM / embedded speech licensing, or any closed product requires a commercial license from ProjectMIKA. Interested? Reach out via GitHub. Just want to support development? [Ko-fi](https://ko-fi.com/projectmika) 💜
+
+*Contributions are accepted under the [ProjectMIKA Individual Contributor License Agreement](CLA.md) — see [why it exists](CLA.md#why-this-cla-exists-the-short-version).*
 
 Powered by the excellent open neural-speech ecosystem: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M), [Piper VITS](https://github.com/rhasspy/piper), and [LiteRT](https://ai.google.dev/edge/litert). All third-party runtimes ride in as standard Maven/AAR dependencies — nothing vendored, nothing borrowed in-source.
 

@@ -2,25 +2,28 @@ PURR-TTS // The PURR Engine
 Copyright (c) 2026 ProjectMIKA (Project M.I.K.A.)
 https://github.com/ProjectMIKA/PURR-Engine
 
-NAMING & ATTRIBUTION NOTICE
-(read alongside the MIT License in LICENSE)
+BRAND & ATTRIBUTION NOTICE
+(read alongside AGPL-3.0-or-later in LICENSE — these terms are NOT a grant
+under the license; they describe what the license does not cover)
 
 1. ATTRIBUTION
    Any use, redistribution, fork, modification, or derivative work of this
-   software must retain ProjectMIKA (Project M.I.K.A.) as the original
-   author in the source headers, documentation, and public distribution
-   pages of the derived work.
+   software must preserve ProjectMIKA (Project M.I.K.A.) as the original
+   author in the source notices, documentation, and public distribution
+   pages of the derived work, as required by AGPLv3 §7 and this NOTICE.
 
 2. THE PURR ENGINE NAME
-   The internal text-to-speech engine of this project — the middleware
-   pipeline under `app/src/main/java/com/projectmika/purrtts/core/purr/`
+   The name "PURR-TTS", the engine name "PURR Engine" ("P.U.R.R.",
+   Per-Utterance Reaction Rendering), the M.I.K.A. persona, and the bundled
+   artwork are brand material of ProjectMIKA — they are NOT licensed under
+   AGPLv3. The internal text-to-speech engine described by that name is the
+   middleware pipeline under `app/src/main/java/com/projectmika/purrtts/core/purr/`
    (PurrTextProcessor, PurrSentimentScorer, PurrDspProcessor,
    PurrVoiceMatcher, PurrProfileRepository, PurrModels), the synthesis
    routers under `app/src/main/java/com/projectmika/purrtts/engine/`
    (PurrSynthesizer, TtsBackendRouter, ModelCatalogManager, the LiteRT,
    sherpa-onnx, and proxy runtimes), and the system speech service under
-   `app/src/main/java/com/projectmika/purrtts/service/` — is named the
-   "PURR Engine" ("P.U.R.R.", Per-Utterance Reaction Rendering).
+   `app/src/main/java/com/projectmika/purrtts/service/`.
 
    * You MAY rename, rebrand, or repackage the application, its launcher
      icon, and its store/listing presence under any name you choose.
@@ -29,7 +32,9 @@ NAMING & ATTRIBUTION NOTICE
      its package/namespace references, and any on-screen or user-facing
      reference to the engine itself.
    * You MUST NOT present the PURR Engine as an original creation of any
-     party other than ProjectMIKA (Project M.I.K.A.).
+     party other than ProjectMIKA (Project M.I.K.A.), or sell or market a
+     copy or derivative under the PURR-TTS / ProjectMIKA branding without
+     separate written permission.
 
 3. NOTICE PRESERVATION
    This NOTICE file, including the attribution and naming conditions above,

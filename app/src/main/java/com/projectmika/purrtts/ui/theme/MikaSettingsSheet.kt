@@ -192,7 +192,7 @@ fun MikaSettingsSheet(
                 fontSize = 9.sp
             )
             Text(
-                text = "© 2026 ProjectMIKA (Project M.I.K.A.) — MIT License. The PURR Engine name lives on in every fork.",
+                text = "© 2026 ProjectMIKA (Project M.I.K.A.) — AGPL-3.0-or-later. The PURR Engine name lives on in every fork.",
                 color = MikaColors.DimText.copy(alpha = 0.7f),
                 fontFamily = FontFamily.Monospace,
                 fontSize = 8.5.sp,
