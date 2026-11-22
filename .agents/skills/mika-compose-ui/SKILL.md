@@ -7,6 +7,9 @@ description: Compose port of GachaSwipe's terminal/neon skin — color tokens, c
 
 The GachaSwipe obsidian terminal, rebuilt natively in Jetpack Compose. The React bible is the
 global `mika-visual-language` skill; this is the Compose mapping + the scars of porting it.
+The **public contributor-facing guide** is `.github/STYLE_GUIDE.md` in the PURR-Engine repo
+(the GachaSwipe port of this doc's laws for outside contributors) — keep the two in sync when
+a law changes here.
 
 ## Color tokens (`ui/theme/MikaTheme.kt` + `MikaColors`)
 - `VoidBg` (#050308 void), `PanelBg` (raised panel), `RaisedCardBg` (card gradient top),

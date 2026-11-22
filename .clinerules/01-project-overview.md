@@ -63,7 +63,8 @@ app/src/main/java/com/projectmika/purrtts/
 
 ## Where things live
 - Docs: `README.md` (app-info only — NO changelog; the GitHub Releases page is the canonical
-  public changelog), `RELEASE_NOTES.md` (prepend per release — the release-notes archive),
+  public changelog), `.github/STYLE_GUIDE.md` (contributor style bible — the visual language
+  for all UI PRs), `RELEASE_NOTES.md` (prepend per release — the release-notes archive),
   `scripts/verify_project.py` (CI structure guard), `SDK`-equivalent
   contracts live in code (no vendored SDK here — it's a native host app).
 - `builds/` = latest release's 2 APKs; `archive/` = previous APKs. Both gitignored.

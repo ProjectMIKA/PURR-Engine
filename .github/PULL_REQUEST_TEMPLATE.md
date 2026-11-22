@@ -13,6 +13,7 @@
 ## Checklist
 
 - [ ] I signed the ProjectMIKA CLA (CLA Assistant prompts on your first PR)
+- [ ] UI changes follow the [Visual Language Style Guide](https://github.com/ProjectMIKA/PURR-Engine/blob/main/.github/STYLE_GUIDE.md) — `MikaColors` tokens only, `MikaCyberIcon` only, no generic dashboard styling
 - [ ] No new dependencies (or an accepted issue justifies them)
 - [ ] No keystores / build artifacts (`builds/`, `archive/`, `*.keystore`) committed
 - [ ] `core/purr` stays Android-free (pure Kotlin, JVM-testable)

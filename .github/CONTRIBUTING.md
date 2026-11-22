@@ -59,6 +59,16 @@ happen via sideloaded APK.
 6. **Small, focused PRs** — one feature or fix per pull request, with a short
    description of what changed and why.
 
+## 🌌 The visual language (read this before any UI change)
+
+PURR-TTS's obsidian-terminal / neon-holography look is a deliberate design
+system, not a theme you can swap out. Generic "AI-generated Android settings
+app" styling is the #1 reason UI PRs get rejected here. Read the
+**[Visual Language Style Guide](https://github.com/ProjectMIKA/PURR-Engine/blob/main/.github/STYLE_GUIDE.md)**
+before touching `ui/theme/` or `ui/forge/` — it defines the palette lanes, the
+surface ladder, the monospace law, the fixed-size slot law, the glow recipes,
+the motion doctrine, and the pre-PR checklist.
+
 ## 🎨 Code style
 
 Standard Kotlin, 4-space indent. New systems get a
