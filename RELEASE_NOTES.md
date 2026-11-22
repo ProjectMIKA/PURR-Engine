@@ -1,3 +1,24 @@
+# 🌌 PURR-TTS v1.8.4 // The Open Covenant
+
+### ✨ What's New since v1.8.3
+
+The engine gets its true colors — in-app *and* in law — and learns to check its own releases. ⚖️🐾
+
+* **⚖️ AGPL-3.0-OR-LATER (THE MIT ERA ENDS)**: PURR-TTS's code is now free software under the **GNU Affero General Public License v3.0 or later**. Nothing changes for you: the app stays 100% free, fully on-device, no accounts, no telemetry. What changes is the covenant — every derivative must ship its full source under the same license (no take-it-close-and-sell forks), while the **PURR Engine / PURR-TTS / M.I.K.A. brand stays exclusive to ProjectMIKA**. Releases up to v1.8.3 remain MIT for their copies; the in-app Settings sheet now states the real license. Full scope lives in the repo's ⚖️ License & Notice section.
+* **🤝 PROJECTMIKA INDIVIDUAL CLA**: the contribution machinery is live — a broad ProjectMIKA ICLA (contributors keep full credit; ProjectMIKA gains the unified right to relicense and distribute, keeping every commercial door open), signed one-click via CLA Assistant on the first PR — plus `.github/CONTRIBUTING.md`, a PR template, and `CODEOWNERS`.
+* **🔄 MANUAL UPDATE CHECK**: a new **`> CHECK_FOR_UPDATES`** row in the Settings sheet — one tap hits GitHub's `releases/latest`, a strict numeric compare runs against the running version (pre-release suffixes never promote), and a newer release opens straight in your browser for downloading. **Zero background polling** — no WorkManager, no alarms, no silent traffic; you tap, it checks. Fail-soft: no network is a toast, not a crash.
+* **🎨 VISUAL LANGUAGE STYLE GUIDE**: `.github/STYLE_GUIDE.md` codifies the obsidian-terminal skin for contributors — the `MikaColors` palette lanes, the surface ladder, the monospace law, the fixed-size slot law, the Canvas-icon law, the motion doctrine, and a pre-PR checklist. Generic dashboard styling now has a documented rejection reason.
+* **🔗 COMMUNITY-PAGE LINK FIXES**: the `CONTRIBUTING.md` CLA/LICENSE links are now absolute (GitHub's Contributing tab resolves relative links from the repo root — the old `../CLA.md` 404'd there), and the README changelog moved to the Releases page, which is now the single canonical changelog home.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.4_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `20`).
+2. **`PURR-TTS_V1.8.4.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.3 // The Decoupled Dialects
 
 ### ✨ What's New since v1.8.2

@@ -2,6 +2,7 @@ package com.projectmika.purrtts.core.purr
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import java.net.HttpURLConnection
@@ -33,9 +34,11 @@ object PurrUpdateChecker {
 
     @Serializable
     data class LatestRelease(
-        val tagName: String = "",
+        // GitHub's API speaks snake_case (`tag_name`, `html_url`) — kotlinx-serialization
+        // does NOT auto-map camelCase, so the @SerialName bindings are load-bearing.
+        @SerialName("tag_name") val tagName: String = "",
         val name: String = "",
-        val htmlUrl: String = ""
+        @SerialName("html_url") val htmlUrl: String = ""
     )
 
     /**
