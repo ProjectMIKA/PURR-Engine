@@ -109,6 +109,7 @@ fun TtsForgeScreen(
     val isRecordingClone by viewModel.isRecordingClone.collectAsState()
     val recordingProgress by viewModel.recordingProgress.collectAsState()
     val lastRecordedWav by viewModel.lastRecordedWavPath.collectAsState()
+    val updateCheckInFlight by viewModel.updateCheckInFlight.collectAsState()
 
     val activeProfile = forgeState.profiles.firstOrNull { it.id == forgeState.activeProfileId }
         ?: forgeState.profiles.first()
@@ -856,6 +857,8 @@ fun TtsForgeScreen(
             MikaSettingsSheet(
                 versionName = com.projectmika.purrtts.BuildConfig.VERSION_NAME,
                 versionCode = com.projectmika.purrtts.BuildConfig.VERSION_CODE,
+                updateCheckInFlight = updateCheckInFlight,
+                onCheckForUpdates = { viewModel.checkForAppUpdates() },
                 qwen3GpuOffload = forgeState.qwen3GpuOffload,
                 onQwen3GpuOffloadToggle = { viewModel.setQwen3GpuOffload(it) },
                 onReplayTutorial = {

@@ -211,6 +211,17 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
 - q5_k tensors may lack OpenCL kernels → llama.cpp falls back per-tensor to CPU automatically
   (partial offload is fine); a full-GPU q4_0 talker variant is the future upgrade if needed.
 
+## App update check (`core/purr/PurrUpdateChecker`)
+
+- **MANUAL ONLY** (Settings ▸ `CHECK_FOR_UPDATES`) — one GET to
+  `api.github.com/repos/ProjectMIKA/PURR-Engine/releases/latest` (UA header set, 10s
+  timeouts, fail-soft null on ANY error), strict numeric version compare
+  (`isNewerVersion`: `v` prefix tolerated, missing parts = 0, pre-release suffixes
+  stripped and never promote), and (newer?) the release `html_url` opens in the user's
+  browser. **ZERO background polling** — no WorkManager, no alarms, no silent traffic
+  (Master's standing law). Compare/parse halves are pure JVM — covered by
+  `PurrUpdateCheckerTest`.
+
 ## Scar log (do not re-learn)
 - AGP 8.7.2 Lint UAST crash → toolchain aligned at Kotlin 2.4.0; keep AGP/Kotlin aligned.
 - sherpa-onnx v2.0.0 dropped espeak-ng G2P → KittenTTS + OOV words broke → pinned v1.13.8.

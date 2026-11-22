@@ -40,11 +40,17 @@ import com.projectmika.purrtts.core.purr.PURR_REPO_URL
  * future GPU/NPU offloads. Per-cartridge switches that ride on separately downloaded
  * sub-cartridge packs (Kokoro Hexagon-NPU / Adreno-GPU chips) stay in the Cartridge Bay —
  * this section is for IN-ENGINE offloads only (currently the Qwen3 Adreno OpenCL one).
+ *
+ * ✨ APP UPDATE CHECK (v1.8.4): MANUAL ONLY — one tap hits GitHub's `releases/latest`,
+ * compares against the running versionName, and (newer?) opens the release page in the
+ * user's browser for downloading. No background polling, ever (Master's standing law).
  */
 @Composable
 fun MikaSettingsSheet(
     versionName: String,
     versionCode: Int,
+    updateCheckInFlight: Boolean,
+    onCheckForUpdates: () -> Unit,
     qwen3GpuOffload: Boolean,
     onQwen3GpuOffloadToggle: (Boolean) -> Unit,
     onReplayTutorial: () -> Unit,
@@ -127,6 +133,22 @@ fun MikaSettingsSheet(
                 runCatching {
                     context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(PURR_KOFI_URL)))
                 }
+            }
+
+            // ✨ APP UPDATE CHECK (v1.8.4) — manual one-tap check against GitHub's
+            // `releases/latest`; a newer version opens the release page in the browser.
+            // Deliberately NO background polling (zero silent traffic, zero wake-locks).
+            SettingsActionRow(
+                icon = CyberIconType.REFRESH,
+                label = "CHECK_FOR_UPDATES",
+                sub = if (updateCheckInFlight) {
+                    "Checking the GitHub Releases feed…"
+                } else {
+                    "Manual check only — no background polling, ever."
+                },
+                accent = MikaColors.TerminalGreen
+            ) {
+                onCheckForUpdates()
             }
 
             // ✨ HARDWARE OFFLOAD // EXPERIMENTAL (v1.8.3) — the future home for engine-level

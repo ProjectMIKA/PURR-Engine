@@ -3,6 +3,7 @@ package com.projectmika.purrtts.ui.forge
 import android.annotation.SuppressLint
 import android.app.Application
 import android.content.ContentValues
+import android.content.Intent
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -14,6 +15,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.projectmika.purrtts.BuildConfig
 import com.projectmika.purrtts.PurrApplication
 import com.projectmika.purrtts.core.audiobook.AudiobookChapter
 import com.projectmika.purrtts.core.audiobook.AudiobookProject
@@ -32,6 +34,7 @@ import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
+import com.projectmika.purrtts.core.purr.PurrUpdateChecker
 import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SavedVoiceDesign
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
@@ -183,6 +186,47 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         activeToastJob = viewModelScope.launch {
             delay(3000L)
             _toastMessage.value = null
+        }
+    }
+
+    // ✨ MIKA'S APP UPDATE CHECK (v1.8.4): MANUAL ONLY — one tap in Settings ▸
+    // CHECK_FOR_UPDATES, zero background polling (no WorkManager, no alarms, no
+    // silent traffic — Master's standing law). One GET to GitHub's releases/latest,
+    // strict numeric compare against the running versionName, and (newer?) the
+    // release page opens in the user's browser for downloading. Fail-soft: any
+    // error toasts instead of throwing; the in-flight guard stops double taps.
+    private val _updateCheckInFlight = MutableStateFlow(false)
+    val updateCheckInFlight: StateFlow<Boolean> = _updateCheckInFlight.asStateFlow()
+
+    fun checkForAppUpdates() {
+        if (_updateCheckInFlight.value) return
+        viewModelScope.launch {
+            _updateCheckInFlight.value = true
+            try {
+                val latest = PurrUpdateChecker.fetchLatestRelease()
+                when {
+                    latest == null ->
+                        showToast("Update check failed — is the network awake?")
+                    !PurrUpdateChecker.isNewerVersion(latest.tagName, BuildConfig.VERSION_NAME) ->
+                        showToast("PURR-TTS v${BuildConfig.VERSION_NAME} — you're current.")
+                    else -> {
+                        showToast("Update available: ${latest.tagName} — opening the release page…")
+                        val url = latest.htmlUrl.ifBlank {
+                            "https://github.com/ProjectMIKA/PURR-Engine/releases/latest"
+                        }
+                        runCatching {
+                            getApplication<Application>().startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        }.onFailure {
+                            showToast("Couldn't open a browser — grab it at $url")
+                        }
+                    }
+                }
+            } finally {
+                _updateCheckInFlight.value = false
+            }
         }
     }
 
