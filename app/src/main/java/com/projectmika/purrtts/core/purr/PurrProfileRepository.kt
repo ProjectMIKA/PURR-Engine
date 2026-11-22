@@ -31,6 +31,18 @@ class PurrProfileRepository(filesDir: File) {
         encodeDefaults = true
     }
 
+    // ✨ INIT-ORDER LAW: these legacy JSON keys are read by migrateLegacyEnhancerFlags(), which
+    // runs DURING construction (`_state` below initializes via loadInitialState()). Kotlin
+    // initializes properties in DECLARATION ORDER — declared after `_state`, this set was still
+    // null when the migration read it: NPE inside runCatching → migration silently no-oped →
+    // every flag fell back to its data-class default (caught by PurrProfileRepositoryMigrationTest
+    // in the v1.8.3 CI run). It MUST stay declared before `_state`.
+    private val legacyProfileKeys = setOf(
+        "enableSlangAndHonorifics",
+        "slangDuringNeuralPure",
+        "qwen3GpuOffload"
+    )
+
     private val _state = MutableStateFlow(loadInitialState())
     val state: StateFlow<PurrForgeState> = _state.asStateFlow()
 
@@ -454,12 +466,6 @@ class PurrProfileRepository(filesDir: File) {
     // OFF (explicit full-v1.8.0 Neural Pure) START WITH SLANG OFF everywhere — their expressed
     // preference was clean speech on heavy engines, and one tap re-enables it everywhere
     // (Master's call). Everyone else seeds the Slang toggle from the old combined flag.
-    private val legacyProfileKeys = setOf(
-        "enableSlangAndHonorifics",
-        "slangDuringNeuralPure",
-        "qwen3GpuOffload"
-    )
-
     private fun migrateLegacyEnhancerFlags(raw: String): String {
         return runCatching {
             val root = Json.parseToJsonElement(raw) as? JsonObject ?: return@runCatching raw
@@ -502,6 +508,10 @@ class PurrProfileRepository(filesDir: File) {
                 if (hoistedGpuOffload) put("qwen3GpuOffload", JsonPrimitive(true))
             }
             migrated.toString()
+        }.onFailure { throwable ->
+            // ✨ LOUD-FAILURE LAW: a silently skipped migration re-defaults every new flag to
+            // ON — clean-prose presets would flip into slang mode and nobody would ever know why.
+            println("[PURR_REPO][MIGRATE_ERR] Legacy state migration failed; loading raw state: ${throwable.message}")
         }.getOrDefault(raw)
     }
 
