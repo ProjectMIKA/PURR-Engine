@@ -275,7 +275,7 @@ class PurrTextProcessorTest {
     }
 
     @Test
-    fun `catalog includes kittentts 6 piper expansion packs and 7 default-on tool cartridges`() {
+    fun `catalog includes kittentts 8 piper expansion packs and 8 default-on tool cartridges`() {
         val catalog = PurrDefaultPresets.modelCatalog()
         val voices = PurrDefaultPresets.builtInVoices()
         val defaultState = PurrForgeState()
@@ -288,9 +288,9 @@ class PurrTextProcessorTest {
         assertTrue(voices.any { it.id == "icefall_ljs_medium" && it.cartridgeId == "rom_icefall_vits" })
 
         val narratorSubs = catalog.filter { it.parentCartridgeId == "rom_piper" && it.isSubCartridge }
-        assertEquals(9, narratorSubs.size)
-        assertEquals(6, narratorSubs.count { it.id.startsWith("sub_piper_") })
-        assertEquals(6, voices.count { it.requiredSubCartridgeId?.startsWith("sub_piper_") == true })
+        assertEquals(12, narratorSubs.size)
+        assertEquals(8, narratorSubs.count { it.id.startsWith("sub_piper_") })
+        assertEquals(8, voices.count { it.requiredSubCartridgeId?.startsWith("sub_piper_") == true })
 
         val expectedTools = setOf(
             "tool_purr_engine",
@@ -298,7 +298,8 @@ class PurrTextProcessorTest {
             "tool_symbol_shield",
             "tool_audio_exporter",
             "tool_voice_design",
-            "tool_audiobook_constructor"
+            "tool_audiobook_constructor",
+            "tool_theme_engine"
         )
         val tools = catalog.filter { it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
