@@ -724,8 +724,12 @@ object MangaVisionResponseParser {
         val arrEnd = cleaned.lastIndexOf(']')
 
         val jsonCandidate: String? = when {
-            objStart >= 0 && objEnd > objStart -> cleaned.substring(objStart, objEnd + 1)
-            arrStart >= 0 && arrEnd > arrStart -> "{\"panels\":${cleaned.substring(arrStart, arrEnd + 1)}}"
+            arrStart >= 0 && arrEnd > arrStart && (objStart < 0 || arrStart < objStart) ->
+                "{\"panels\":${cleaned.substring(arrStart, arrEnd + 1)}}"
+            objStart >= 0 && objEnd > objStart ->
+                cleaned.substring(objStart, objEnd + 1)
+            arrStart >= 0 && arrEnd > arrStart ->
+                "{\"panels\":${cleaned.substring(arrStart, arrEnd + 1)}}"
             else -> null
         }
 
