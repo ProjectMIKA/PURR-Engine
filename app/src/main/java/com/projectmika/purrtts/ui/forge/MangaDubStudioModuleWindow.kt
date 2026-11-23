@@ -331,7 +331,7 @@ fun MangaDubStudioModuleWindowBody(
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                MikaCyberIcon(type = CyberIconType.BOLT, tint = MikaColors.SsrGold, size = 12.dp)
+                MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = MikaColors.SsrGold, size = 12.dp)
                 Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = "LOAD DEMO CHAPTER",
@@ -818,7 +818,7 @@ fun MangaDubStudioModuleWindowBody(
                 subtitle = "Draws speaker badge & dialogue pill on rendered frames",
                 checked = activeProject.burnInSubtitles,
                 accent = MikaColors.NeonCyan,
-                icon = CyberIconType.FILE_DOC,
+                icon = CyberIconType.BOOK_NARRATOR,
                 onToggle = { viewModel.updateMangaProjectConfig(activeProject.id, burnInSubtitles = it) }
             )
             SimplePurrToggle(
@@ -826,7 +826,7 @@ fun MangaDubStudioModuleWindowBody(
                 subtitle = "Adds animated battle embers, rain streaks, sakura petals or sparkles",
                 checked = activeProject.enableAtmosphereFx,
                 accent = MikaColors.SsrGold,
-                icon = CyberIconType.BOLT,
+                icon = CyberIconType.BOLT_ACCEL,
                 onToggle = { viewModel.updateMangaProjectConfig(activeProject.id, enableAtmosphereFx = it) }
             )
 
@@ -1039,10 +1039,10 @@ private fun MangaCharacterCastCard(
                 ?: availableVoices.firstOrNull { it.id == activeProfile.primaryVoiceId }
                 ?: availableVoices.first()
             MikaVoiceDropdownSelector(
-                title = "ASSIGNED VOICE (OR CLONE)",
+                label = "${character.name} // ASSIGNED VOICE (OR CLONE)",
                 voices = availableVoices,
                 selectedVoice = selectedVoiceDesc,
-                onSelect = { chosen ->
+                onSelectVoice = { chosen ->
                     viewModel.assignMangaCharacterVoice(
                         projectId = project.id,
                         characterId = character.id,
