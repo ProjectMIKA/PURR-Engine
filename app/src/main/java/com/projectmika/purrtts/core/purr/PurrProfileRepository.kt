@@ -210,6 +210,8 @@ class PurrProfileRepository(filesDir: File) {
 
     fun isSrtBatchModuleActive(): Boolean = isCartridgeSlotted("tool_srt_batch_studio")
 
+    fun isMangaDubStudioModuleActive(): Boolean = isCartridgeSlotted("tool_manga_dub_studio")
+
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
         val voicesForCart = allAvailableVoices().filter { it.cartridgeId == cartridgeId }
@@ -621,6 +623,9 @@ class PurrProfileRepository(filesDir: File) {
                 nextSlotted += "tool_voice_benchmark"
                 nextSlotted += "tool_srt_batch_studio"
             }
+            if (decoded.knownToolCatalogVersion < 5 || "tool_manga_dub_studio" !in decoded.modelStates) {
+                nextSlotted += "tool_manga_dub_studio"
+            }
             for ((legacyId, hubId) in legacyCartridgeToHub) {
                 if (normalizedModelStates[legacyId]?.state == DownloadState.INSTALLED) {
                     nextEnabledSubs += legacyId
@@ -702,7 +707,7 @@ class PurrProfileRepository(filesDir: File) {
                 profiles = remappedProfiles,
                 slottedCartridges = nextSlotted,
                 enabledSubCartridges = nextEnabledSubs,
-                knownToolCatalogVersion = 4
+                knownToolCatalogVersion = 5
             )
         }.getOrElse {
             PurrForgeState()

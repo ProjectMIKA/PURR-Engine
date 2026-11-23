@@ -1717,7 +1717,8 @@ enum class OsModuleIconType {
     THEME_ENGINE,
     SCRIPT_STUDIO,
     VOICE_BENCHMARK,
-    SRT_BATCH_STUDIO
+    SRT_BATCH_STUDIO,
+    MANGA_DUB_STUDIO
 }
 
 /**
@@ -2052,6 +2053,41 @@ fun MikaOsModuleIcon(
                     drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.24f, h * 0.50f), Offset(w * 0.76f, h * 0.50f), strokeWidth = (2.4f * s).dp.toPx(), cap = StrokeCap.Round)
                     drawLine(MikaColors.NeonPink.copy(alpha = activeAlpha), Offset(w * 0.24f, h * 0.66f), Offset(w * 0.60f, h * 0.66f), strokeWidth = (2.4f * s).dp.toPx(), cap = StrokeCap.Round)
                     drawCircle(MikaColors.TerminalGreen.copy(alpha = activeAlpha), radius = (2.8f * s).dp.toPx(), center = Offset(w * 0.74f, h * 0.66f))
+                }
+
+                OsModuleIconType.MANGA_DUB_STUDIO -> {
+                    // Split manga comic panels + glowing dialogue bubble + motion-comic play node
+                    drawRoundRect(
+                        color = drawColor.copy(alpha = 0.78f),
+                        topLeft = Offset(w * 0.12f, h * 0.12f),
+                        size = Size(w * 0.76f, h * 0.76f),
+                        cornerRadius = CornerRadius((5f * s).dp.toPx()),
+                        style = stroke
+                    )
+                    // Panel gutters (T-split manga page)
+                    drawLine(drawColor.copy(alpha = 0.55f), Offset(w * 0.12f, h * 0.46f), Offset(w * 0.88f, h * 0.46f), strokeWidth = (1.6f * s).dp.toPx())
+                    drawLine(drawColor.copy(alpha = 0.55f), Offset(w * 0.54f, h * 0.46f), Offset(w * 0.54f, h * 0.88f), strokeWidth = (1.6f * s).dp.toPx())
+                    // Speech bubble in top panel
+                    val bubble = Path().apply {
+                        moveTo(w * 0.22f, h * 0.20f)
+                        lineTo(w * 0.72f, h * 0.20f)
+                        lineTo(w * 0.72f, h * 0.36f)
+                        lineTo(w * 0.48f, h * 0.36f)
+                        lineTo(w * 0.36f, h * 0.43f)
+                        lineTo(w * 0.36f, h * 0.36f)
+                        lineTo(w * 0.22f, h * 0.36f)
+                        close()
+                    }
+                    drawPath(bubble, color = MikaColors.NeonCyan.copy(alpha = activeAlpha), style = thinStroke)
+                    // Play triangle in bottom-left panel
+                    val playTri = Path().apply {
+                        moveTo(w * 0.25f, h * 0.56f)
+                        lineTo(w * 0.44f, h * 0.67f)
+                        lineTo(w * 0.25f, h * 0.78f)
+                        close()
+                    }
+                    drawPath(playTri, color = MikaColors.TerminalGreen.copy(alpha = activeAlpha))
+                    drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = (3.0f * s).dp.toPx(), center = Offset(w * 0.72f, h * 0.67f))
                 }
             }
         }

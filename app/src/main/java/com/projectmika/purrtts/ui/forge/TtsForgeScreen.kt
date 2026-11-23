@@ -767,7 +767,14 @@ fun TtsForgeScreen(
                                         isPlayingPreview = isPlaying,
                                         viewModel = viewModel,
                                         onOpenSaveDialog = { showSaveProfileDialog = true },
-                                        onOpenCloneStudio = { showCloneStudio = true },
+                                        onOpenCloneStudio = {
+                                            viewModel.clearMangaCloneHandoff()
+                                            showCloneStudio = true
+                                        },
+                                        onLaunchCloneForMangaCharacter = { target ->
+                                            viewModel.setMangaCloneHandoff(target)
+                                            showCloneStudio = true
+                                        },
                                         onOpenCartridgeBayTools = {
                                             cartridgeBayCategory = CartridgeCategory.TOOLS
                                             activeTab = PurrTab.CARTRIDGE_BAY.ordinal
@@ -852,6 +859,7 @@ fun TtsForgeScreen(
             val isImportingClone by viewModel.isImportingClone.collectAsState()
             val importedCloneWav by viewModel.importedCloneWavPath.collectAsState()
             val cleanImportedAudio by viewModel.cleanImportedAudio.collectAsState()
+            val pendingMangaCloneTarget by viewModel.pendingMangaCloneTarget.collectAsState()
             val installedEngineIds = remember(forgeState.modelStates) {
                 forgeState.modelStates
                     .filterValues { it.state == DownloadState.INSTALLED }
@@ -879,7 +887,11 @@ fun TtsForgeScreen(
                         cloneEngineId = cloneEngineId
                     )
                 },
-                onDismiss = { showCloneStudio = false }
+                mangaCloneTarget = pendingMangaCloneTarget,
+                onDismiss = {
+                    viewModel.clearMangaCloneHandoff()
+                    showCloneStudio = false
+                }
             )
         }
 

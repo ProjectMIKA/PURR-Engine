@@ -41,10 +41,10 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `tools category hosts TOOL-01 through TOOL-10 including Neon Theme Engine and Studio Suite`() {
-        assertEquals(10, toolsModules.size)
+    fun `tools category hosts TOOL-01 through TOOL-11 plus Gemma 4 E2B Vision sub-cartridge`() {
+        assertEquals(11, toolsModules.size)
         assertEquals(
-            (1..10).map { idx -> "TOOL-%02d".format(idx) },
+            (1..11).map { idx -> "TOOL-%02d".format(idx) },
             toolsModules.map { it.romCode }
         )
         val themeTool = toolsModules.first { it.id == "tool_theme_engine" }
@@ -52,13 +52,24 @@ class PurrPremiumCatalogTest {
         assertEquals(CartridgeCategory.TOOLS, themeTool.category)
         assertTrue("tool_theme_engine" in PurrForgeState().slottedCartridges)
 
-        val studioIds = setOf("tool_script_studio", "tool_voice_benchmark", "tool_srt_batch_studio")
+        val studioIds = setOf(
+            "tool_script_studio",
+            "tool_voice_benchmark",
+            "tool_srt_batch_studio",
+            "tool_manga_dub_studio"
+        )
         studioIds.forEach { id ->
             val mod = toolsModules.first { it.id == id }
             assertTrue(mod.isBuiltInOsCartridge)
             assertEquals(CartridgeCategory.TOOLS, mod.category)
             assertTrue(id in PurrForgeState().slottedCartridges)
         }
+
+        val gemmaSub = catalog.first { it.id == "sub_gemma4_e2b_vision" }
+        assertTrue(gemmaSub.isSubCartridge)
+        assertEquals("tool_manga_dub_studio", gemmaSub.parentCartridgeId)
+        assertEquals(BackendType.LITERT_NPU_GPU, gemmaSub.backend)
+        assertTrue(gemmaSub.downloadUrl.contains("gemma-4-E2B-it-gpu.litertlm"))
     }
 
     @Test

@@ -302,9 +302,10 @@ class PurrTextProcessorTest {
             "tool_theme_engine",
             "tool_script_studio",
             "tool_voice_benchmark",
-            "tool_srt_batch_studio"
+            "tool_srt_batch_studio",
+            "tool_manga_dub_studio"
         )
-        val tools = catalog.filter { it.category == CartridgeCategory.TOOLS }
+        val tools = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
         assertTrue(expectedTools.all { it in defaultState.slottedCartridges })
 

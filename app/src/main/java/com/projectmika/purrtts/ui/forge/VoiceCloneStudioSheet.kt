@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.ui.theme.CyberDropdown
@@ -81,23 +82,38 @@ fun VoiceCloneStudioSheet(
     onImportClip: (Uri) -> Unit,
     onRecordFiveSeconds: () -> Unit,
     onRegisterClone: (String, SherpaModelFamily, VoiceGender, String, String, String) -> Boolean,
+    mangaCloneTarget: MangaCloneHandoffTarget? = null,
     onDismiss: () -> Unit
 ) {
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(onImportClip) }
-    var displayName by remember { mutableStateOf("MIKA_CLONE_01") }
+    var displayName by remember(mangaCloneTarget) {
+        mutableStateOf(
+            mangaCloneTarget?.let { "${it.characterName.uppercase()}_CLONE" } ?: "MIKA_CLONE_01"
+        )
+    }
     var selectedEngine by remember {
         mutableStateOf(
             CLONE_ENGINE_OPTIONS.firstOrNull { it.id in installedEngineIds }
                 ?: CLONE_ENGINE_OPTIONS.first()
         )
     }
-    var selectedGender by remember { mutableStateOf(VoiceGender.FEMALE) }
-    var transcript by remember {
-        mutableStateOf("Hello Master, this reference sample captures my natural pitch and cadence.")
+    var selectedGender by remember(mangaCloneTarget) {
+        mutableStateOf(mangaCloneTarget?.suggestedGender ?: VoiceGender.FEMALE)
     }
-    var tagsInput by remember { mutableStateOf("cute, teasing, cloned, american") }
+    var transcript by remember(mangaCloneTarget) {
+        mutableStateOf(
+            if (mangaCloneTarget != null) {
+                "You dare challenge me? Listen to the true power of my voice!"
+            } else {
+                "Hello Master, this reference sample captures my natural pitch and cadence."
+            }
+        )
+    }
+    var tagsInput by remember(mangaCloneTarget) {
+        mutableStateOf(mangaCloneTarget?.suggestedTags ?: "cute, teasing, cloned, american")
+    }
     val selectedEngineReady = selectedEngine.id in installedEngineIds
     val hasReferenceAudio = !lastRecordedWavPath.isNullOrBlank() ||
         !importedWavPath.isNullOrBlank() ||
@@ -144,6 +160,33 @@ fun VoiceCloneStudioSheet(
                 fontFamily = FontFamily.Monospace,
                 fontSize = 10.sp
             )
+
+            if (mangaCloneTarget != null) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MikaColors.NeonPink.copy(alpha = 0.14f))
+                        .border(1.2.dp, MikaColors.NeonPink, RoundedCornerShape(8.dp))
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = "> MANGA PRE-PRODUCTION // CLONING FOR: ${mangaCloneTarget.characterName.uppercase()}",
+                        color = MikaColors.NeonPink,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 9.5.sp
+                    )
+                    Text(
+                        text = "Registering this cloned voice will bind it directly to ${mangaCloneTarget.characterName} and return you to Manga Dub Studio.",
+                        color = MikaColors.WarmCream,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.5.sp,
+                        lineHeight = 12.sp
+                    )
+                }
+            }
 
             CyberDropdown(
                 label = "> CLONE_ENGINE_TARGET",
@@ -454,7 +497,11 @@ fun VoiceCloneStudioSheet(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = if (hasReferenceAudio) "[ REGISTER_CLONED_VOICE_TO_FORGE ]" else "[ RECORD OR IMPORT AUDIO FIRST ]",
+                    text = when {
+                        !hasReferenceAudio -> "[ RECORD OR IMPORT AUDIO FIRST ]"
+                        mangaCloneTarget != null -> "[ FORGE & ASSIGN TO ${mangaCloneTarget.characterName.uppercase()} ]"
+                        else -> "[ REGISTER_CLONED_VOICE_TO_FORGE ]"
+                    },
                     color = if (hasReferenceAudio) MikaColors.WarmCream else MikaColors.MikaAmber,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,

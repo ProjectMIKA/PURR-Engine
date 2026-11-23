@@ -1,0 +1,728 @@
+package com.projectmika.purrtts.core.manga
+
+import com.projectmika.purrtts.core.purr.VoiceGender
+import kotlin.math.abs
+import kotlin.math.max
+import kotlin.math.min
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.floatOrNull
+import kotlinx.serialization.json.intOrNull
+
+/**
+ * ✨ MIKA'S MANGA DUB & MOTION-COMIC STUDIO MODELS & PURE-KOTLIN ENGINES (TOOL-11) ✨
+ *
+ * Houses:
+ * - Serializable Manga Series / Chapter / Panel / Cast Roster models
+ * - GachaSwipe-ported BFS Edge-Connected Gutter Panel Slicer (`chromaKey.js` algorithm)
+ * - GachaSwipe-ported Emotional Pacer & Atmosphere FX detector (`RoleplayRenderer.jsx` + `AtmosphereEngine.jsx`)
+ * - MIKAReader-ported All-Caps Manga OCR Text Bender (`purrBender.js`)
+ * - Gemma 4 E2B LiteRT-LM `<thought>` + JSON response parser
+ */
+
+@Serializable
+enum class MangaReadingOrder(val label: String) {
+    RTL_MANGA("MANGA (Right -> Left)"),
+    LTR_COMIC("COMIC / MANHWA (Left -> Right)"),
+    WEBTOON_VERTICAL("WEBTOON (Vertical Scroll)")
+}
+
+@Serializable
+enum class MangaVideoAspect(val label: String, val widthPx: Int, val heightPx: Int) {
+    LANDSCAPE_16_9("16:9 LANDSCAPE (1280x720)", 1280, 720),
+    VERTICAL_9_16("9:16 VERTICAL (720x1280)", 720, 1280)
+}
+
+@Serializable
+enum class MangaAtmospherePreset(val label: String) {
+    AUTO("AUTO (Scene Mood)"),
+    NONE("NONE"),
+    EMBER_BATTLE("EMBER / BATTLE"),
+    RAIN_STORM("RAIN / GLOOM"),
+    SAKURA_PETALS("SAKURA / ROMANCE"),
+    CYBER_SPARKLE("HOLO / SPARKLE")
+}
+
+@Serializable
+enum class MangaChapterStatus(val label: String) {
+    IMPORTED("IMPORTED"),
+    ANALYZING_VISION("SCANNING (GEMMA 4 VISION)"),
+    PRE_PRODUCTION_READY("PRE-PRODUCTION"),
+    SYNTHESIZING_AUDIO("FORGING VOICES"),
+    RENDERING_VIDEO("RENDERING .MP4"),
+    COMPLETED("COMPLETED"),
+    FAILED("FAILED")
+}
+
+@Serializable
+data class MangaNormalizedRect(
+    val left: Float,
+    val top: Float,
+    val right: Float,
+    val bottom: Float
+) {
+    val width: Float get() = (right - left).coerceAtLeast(0.01f)
+    val height: Float get() = (bottom - top).coerceAtLeast(0.01f)
+    val centerX: Float get() = (left + right) * 0.5f
+    val centerY: Float get() = (top + bottom) * 0.5f
+
+    fun clamped(): MangaNormalizedRect {
+        val l = left.coerceIn(0f, 0.99f)
+        val t = top.coerceIn(0f, 0.99f)
+        val r = right.coerceIn(l + 0.01f, 1f)
+        val b = bottom.coerceIn(t + 0.01f, 1f)
+        return MangaNormalizedRect(l, t, r, b)
+    }
+}
+
+@Serializable
+data class MangaSpeechLine(
+    val id: String,
+    val bubbleIndex: Int,
+    val speakerId: String,
+    val speakerName: String,
+    val rawText: String,
+    val sanitizedText: String,
+    val emotionTag: String = "neutral",
+    val confidence: Float = 0.95f,
+    val needsUserDecision: Boolean = false,
+    val decisionReason: String = "",
+    val candidateSpeakers: List<String> = emptyList(),
+    val bubbleRect: MangaNormalizedRect? = null,
+    val renderedWavPath: String = "",
+    val durationMs: Long = 0L,
+    val postPauseMs: Int = 450
+)
+
+@Serializable
+data class MangaPanelNode(
+    val id: String,
+    val pageIndex: Int,
+    val panelIndex: Int,
+    val panelRect: MangaNormalizedRect,
+    val cameraStartRect: MangaNormalizedRect,
+    val cameraEndRect: MangaNormalizedRect,
+    val atmosphere: MangaAtmospherePreset = MangaAtmospherePreset.AUTO,
+    val sceneMood: String = "",
+    val gemmaThoughtTrace: String = "",
+    val lines: List<MangaSpeechLine> = emptyList()
+)
+
+@Serializable
+data class MangaPageEntry(
+    val pageIndex: Int,
+    val fileName: String,
+    val localImagePath: String,
+    val widthPx: Int,
+    val heightPx: Int,
+    val panels: List<MangaPanelNode> = emptyList()
+)
+
+@Serializable
+data class MangaCharacterProfile(
+    val id: String,
+    val name: String,
+    val gender: VoiceGender = VoiceGender.ANDROGYNOUS,
+    val visualDescription: String = "",
+    val avatarCropPath: String = "",
+    val voiceDesignPrompt: String = "",
+    val assignedVoiceId: String = "",
+    val assignedVoiceLabel: String = "AUTO (Qwen VoiceDesign)",
+    val speedScale: Float = 1.0f,
+    val pitchScale: Float = 1.0f,
+    val lineCount: Int = 0
+)
+
+@Serializable
+data class MangaChapterEntry(
+    val id: String,
+    val title: String,
+    val sourceCbzName: String,
+    val readingOrder: MangaReadingOrder = MangaReadingOrder.RTL_MANGA,
+    val status: MangaChapterStatus = MangaChapterStatus.IMPORTED,
+    val pages: List<MangaPageEntry> = emptyList(),
+    val exportedMp4Path: String = "",
+    val publicDownloadPath: String = "",
+    val durationSec: Float = 0f,
+    val errorMessage: String? = null
+) {
+    val pendingDecisionCount: Int
+        get() = pages.sumOf { p -> p.panels.sumOf { pan -> pan.lines.count { it.needsUserDecision } } }
+
+    val totalLineCount: Int
+        get() = pages.sumOf { p -> p.panels.sumOf { it.lines.size } }
+
+    val totalPanelCount: Int
+        get() = pages.sumOf { it.panels.size }
+}
+
+@Serializable
+data class MangaSeriesProject(
+    val id: String,
+    val seriesTitle: String,
+    val createdAtEpochMs: Long,
+    val updatedAtEpochMs: Long,
+    val readingOrder: MangaReadingOrder = MangaReadingOrder.RTL_MANGA,
+    val videoAspect: MangaVideoAspect = MangaVideoAspect.LANDSCAPE_16_9,
+    val burnInSubtitles: Boolean = true,
+    val enableAtmosphereFx: Boolean = true,
+    val powerUserVisionUrl: String = "",
+    val storyContextSummary: String = "",
+    val characters: List<MangaCharacterProfile> = emptyList(),
+    val chapters: List<MangaChapterEntry> = emptyList()
+)
+
+@Serializable
+data class MangaCloneHandoffTarget(
+    val projectId: String,
+    val characterId: String,
+    val characterName: String,
+    val suggestedGender: VoiceGender = VoiceGender.ANDROGYNOUS,
+    val suggestedTags: String = "manga, anime, character"
+)
+
+/**
+ * ✨ MANGA OCR TEXT BENDER (Ported from MIKAReader `purrBender.js`) ✨
+ * English manga lettering is conventionally ALL-CAPS ("WHAT DID YOU SAY, KAKAROT?!"),
+ * which makes neural TTS engines spell out capitalized words or stutter on repeated marks.
+ */
+object MangaTextBender {
+
+    val ACRONYM_WHITELIST: Set<String> = setOf(
+        "NASA", "DNA", "FBI", "CIA", "USA", "UK", "OK", "TV",
+        "AI", "ID", "UFO", "HUD", "SSR", "RPG", "HP", "MP"
+    )
+
+    fun sanitizeMangaDialogue(raw: String): String {
+        var out = raw
+            .replace(Regex("<[^>]+>"), " ")
+            .replace(Regex("[*_`~#]{1,3}"), "")
+            .replace("\u2014", ", ")
+            .replace("\u2013", ", ")
+            .replace("--", ", ")
+            .replace("\u2026", ".")
+            .replace(Regex("""["“”„«»]"""), "")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+        if (out.isEmpty()) return ""
+
+        // Collapse excessive manga punctuation storms cleanly
+        out = out
+            .replace(Regex("!{2,}"), "!")
+            .replace(Regex("\\?{2,}"), "?")
+            .replace(Regex("""[?!]*\?[?!]*![?!]*"""), "?!")
+            .replace(Regex("""[?!]*![?!]*\?[?!]*"""), "?!")
+            .replace(Regex("\\.{2,}"), ".")
+            .replace(Regex("\\s+([,.!?])"), "$1")
+
+        // Acronym Assassin: lowercase 2+ uppercase letter runs unless whitelisted
+        out = Regex("""\b[A-Z]{2,}\b""").replace(out) { m ->
+            val token = m.value
+            if (token in ACRONYM_WHITELIST) token else token.lowercase()
+        }
+
+        // Fix standalone lowercase pronoun "i" and contractions ("i'm", "i'll", "i've", "i'd")
+        out = Regex("""\bi(?=('(?:m|ll|ve|d)\b|\b))""").replace(out) { "I" }
+
+        // Capitalize first letter after start of string or sentence boundary (. ! ?)
+        val chars = out.toCharArray()
+        var capitalizeNext = true
+        for (i in chars.indices) {
+            val c = chars[i]
+            if (capitalizeNext && c.isLetter()) {
+                chars[i] = c.uppercaseChar()
+                capitalizeNext = false
+            } else if (c == '.' || c == '!' || c == '?') {
+                capitalizeNext = true
+            } else if (!c.isWhitespace() && c != '\'' && c != ',') {
+                capitalizeNext = false
+            }
+        }
+        out = String(chars).trim()
+
+        if (out.isNotEmpty() && !out.last().let { it == '.' || it == '!' || it == '?' }) {
+            out += "."
+        }
+        return out
+    }
+}
+
+/**
+ * ✨ MANGA EMOTIONAL PACER & ATMOSPHERE FX RESOLVER ✨
+ * Ported directly from GachaSwipe's `RoleplayRenderer.jsx` pause logic & `AtmosphereEngine.jsx`.
+ */
+object MangaEmotionalPacer {
+
+    fun computePostLinePauseMs(text: String, emotionTag: String): Int {
+        val em = emotionTag.lowercase()
+        var gapMs = when {
+            listOf("sad", "grief", "hesitant", "sorrow", "whisper", "melancholy").any { it in em } -> 850
+            listOf("love", "warm", "intimate", "tender", "affection", "blush").any { it in em } -> 700
+            listOf("joy", "excited", "happy", "cheerful", "laugh", "genki").any { it in em } -> 450
+            listOf("anger", "shout", "battle", "furious", "rage", "fierce", "scream").any { it in em } -> 400
+            else -> 500
+        }
+        val trimmed = text.trim()
+        if (trimmed.endsWith(",") || trimmed.endsWith(";") || trimmed.endsWith(":") || trimmed.endsWith("...")) {
+            gapMs /= 2
+        }
+        return gapMs.coerceIn(180, 1200)
+    }
+
+    fun resolveAtmosphere(
+        preset: MangaAtmospherePreset,
+        sceneMood: String,
+        dialogueText: String
+    ): MangaAtmospherePreset {
+        if (preset != MangaAtmospherePreset.AUTO) return preset
+        val corpus = "$sceneMood $dialogueText".lowercase()
+        return when {
+            listOf(
+                "fire", "flame", "ember", "battle", "attack", "blast",
+                "aura", "power", "fight", "explosion", "demon", "warrior", "clash"
+            ).any { it in corpus } -> MangaAtmospherePreset.EMBER_BATTLE
+
+            listOf(
+                "rain", "storm", "umbrella", "tears", "gloom",
+                "dark", "thunder", "wet", "shadow", "midnight"
+            ).any { it in corpus } -> MangaAtmospherePreset.RAIN_STORM
+
+            listOf(
+                "sakura", "blossom", "petal", "love", "blush",
+                "heart", "spring", "shrine", "romance", "kiss"
+            ).any { it in corpus } -> MangaAtmospherePreset.SAKURA_PETALS
+
+            listOf(
+                "magic", "neon", "cyber", "holo", "divine",
+                "star", "galaxy", "portal", "spell", "dream"
+            ).any { it in corpus } -> MangaAtmospherePreset.CYBER_SPARKLE
+
+            else -> MangaAtmospherePreset.NONE
+        }
+    }
+}
+
+/**
+ * ✨ BFS EDGE-CONNECTED MANGA PANEL SLICER (Ported from GachaSwipe `chromaKey.js`) ✨
+ * Flood-fills gutters starting from the border ring of the page luminance grid to isolate
+ * exact panel regions cleanly in RTL Manga, LTR Comic, or Webtoon vertical reading order.
+ */
+object MangaBfsPanelSlicer {
+
+    fun slicePanelsFromLuminanceGrid(
+        luminance: IntArray,
+        width: Int,
+        height: Int,
+        readingOrder: MangaReadingOrder
+    ): List<MangaNormalizedRect> {
+        if (width < 8 || height < 8 || luminance.size < width * height) {
+            return listOf(MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f))
+        }
+
+        // 1. Sample border ring median luminance to identify white or black manga gutters
+        val margin = max(2, min(width, height) / 50)
+        val samples = ArrayList<Int>(width * margin + height * margin)
+        for (y in 0 until margin) {
+            for (x in 0 until width) samples += luminance[y * width + x]
+        }
+        for (y in (height - margin) until height) {
+            for (x in 0 until width) samples += luminance[y * width + x]
+        }
+        for (y in 0 until height) {
+            for (x in 0 until margin) samples += luminance[y * width + x]
+            for (x in (width - margin) until width) samples += luminance[y * width + x]
+        }
+        samples.sort()
+        val gutterMed = samples[samples.size / 2]
+        val tolerance = 34
+
+        fun isGutterCandidate(lum: Int): Boolean = abs(lum - gutterMed) <= tolerance
+
+        // 2. Edge-connected BFS flood fill for gutter backdrop
+        val total = width * height
+        val isGutter = BooleanArray(total)
+        val queue = IntArray(total)
+        var head = 0
+        var tail = 0
+
+        fun seedPixel(idx: Int) {
+            if (!isGutter[idx] && isGutterCandidate(luminance[idx])) {
+                isGutter[idx] = true
+                queue[tail++] = idx
+            }
+        }
+
+        for (y in 0 until height) {
+            for (x in 0 until margin) seedPixel(y * width + x)
+            for (x in (width - margin) until width) seedPixel(y * width + x)
+        }
+        for (y in 0 until margin) {
+            for (x in 0 until width) seedPixel(y * width + x)
+        }
+        for (y in (height - margin) until height) {
+            for (x in 0 until width) seedPixel(y * width + x)
+        }
+
+        val dx4 = intArrayOf(1, -1, 0, 0)
+        val dy4 = intArrayOf(0, 0, 1, -1)
+        while (head < tail) {
+            val cur = queue[head++]
+            val cx = cur % width
+            val cy = cur / width
+            for (d in 0 until 4) {
+                val nx = cx + dx4[d]
+                val ny = cy + dy4[d]
+                if (nx in 0 until width && ny in 0 until height) {
+                    val nIdx = ny * width + nx
+                    if (!isGutter[nIdx] && isGutterCandidate(luminance[nIdx])) {
+                        isGutter[nIdx] = true
+                        queue[tail++] = nIdx
+                    }
+                }
+            }
+        }
+
+        // Also treat thin horizontal/vertical continuous gutter bands between panels as gutters
+        // so closed-margin comics still separate rows/columns cleanly.
+        for (y in 0 until height) {
+            var gutterRun = 0
+            for (x in 0 until width) {
+                if (isGutterCandidate(luminance[y * width + x])) gutterRun++
+            }
+            if (gutterRun >= (width * 0.96f).toInt()) {
+                val rowOff = y * width
+                for (x in 0 until width) {
+                    if (isGutterCandidate(luminance[rowOff + x])) isGutter[rowOff + x] = true
+                }
+            }
+        }
+        for (x in 0 until width) {
+            var gutterRun = 0
+            for (y in 0 until height) {
+                if (isGutterCandidate(luminance[y * width + x])) gutterRun++
+            }
+            if (gutterRun >= (height * 0.96f).toInt()) {
+                for (y in 0 until height) {
+                    if (isGutterCandidate(luminance[y * width + x])) isGutter[y * width + x] = true
+                }
+            }
+        }
+
+        // 3. Connected components of non-gutter panel pixels
+        val visited = BooleanArray(total)
+        val rawBoxes = ArrayList<MangaNormalizedRect>()
+        val minAreaPx = (total * 0.035f).toInt().coerceAtLeast(16)
+        val dx8 = intArrayOf(-1, 0, 1, -1, 1, -1, 0, 1)
+        val dy8 = intArrayOf(-1, -1, -1, 0, 0, 1, 1, 1)
+
+        for (startIdx in 0 until total) {
+            if (isGutter[startIdx] || visited[startIdx]) continue
+            var qh = 0
+            var qt = 0
+            visited[startIdx] = true
+            queue[qt++] = startIdx
+            var minX = startIdx % width
+            var maxX = minX
+            var minY = startIdx / width
+            var maxY = minY
+            var pixelCount = 0
+
+            while (qh < qt) {
+                val idx = queue[qh++]
+                pixelCount++
+                val px = idx % width
+                val py = idx / width
+                if (px < minX) minX = px
+                if (px > maxX) maxX = px
+                if (py < minY) minY = py
+                if (py > maxY) maxY = py
+
+                for (k in 0 until 8) {
+                    val nx = px + dx8[k]
+                    val ny = py + dy8[k]
+                    if (nx in 0 until width && ny in 0 until height) {
+                        val nIdx = ny * width + nx
+                        if (!visited[nIdx] && !isGutter[nIdx]) {
+                            visited[nIdx] = true
+                            queue[qt++] = nIdx
+                        }
+                    }
+                }
+            }
+
+            val boxW = maxX - minX + 1
+            val boxH = maxY - minY + 1
+            val boxArea = boxW * boxH
+            if (boxArea >= minAreaPx && pixelCount >= minAreaPx / 4) {
+                val rect = MangaNormalizedRect(
+                    left = (minX.toFloat() / width.toFloat()).coerceIn(0f, 0.98f),
+                    top = (minY.toFloat() / height.toFloat()).coerceIn(0f, 0.98f),
+                    right = ((maxX + 1).toFloat() / width.toFloat()).coerceIn(0.02f, 1f),
+                    bottom = ((maxY + 1).toFloat() / height.toFloat()).coerceIn(0.02f, 1f)
+                ).clamped()
+                rawBoxes += rect
+            }
+        }
+
+        // 4. Deduplicate & drop boxes >=75% contained inside larger boxes
+        val sortedByArea = rawBoxes.sortedByDescending { it.width * it.height }
+        val kept = ArrayList<MangaNormalizedRect>()
+        for (cand in sortedByArea) {
+            val candArea = cand.width * cand.height
+            val dominated = kept.any { outer ->
+                val ix1 = max(cand.left, outer.left)
+                val iy1 = max(cand.top, outer.top)
+                val ix2 = min(cand.right, outer.right)
+                val iy2 = min(cand.bottom, outer.bottom)
+                if (ix2 <= ix1 || iy2 <= iy1) false
+                else ((ix2 - ix1) * (iy2 - iy1)) / candArea >= 0.75f
+            }
+            if (!dominated) kept += cand
+        }
+
+        // Splash page or Webtoon vertical strip fallback
+        if (kept.isEmpty()) {
+            return if (readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
+                val bands = max(2, min(6, height / max(1, width)))
+                (0 until bands).map { idx ->
+                    val t0 = idx.toFloat() / bands.toFloat()
+                    val t1 = ((idx + 1).toFloat() / bands.toFloat()).coerceAtMost(1f)
+                    MangaNormalizedRect(0.02f, t0, 0.98f, t1).clamped()
+                }
+            } else {
+                listOf(MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f))
+            }
+        }
+
+        if (kept.size == 1 && readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
+            val bands = max(2, min(6, height / max(1, width)))
+            return (0 until bands).map { idx ->
+                val t0 = idx.toFloat() / bands.toFloat()
+                val t1 = ((idx + 1).toFloat() / bands.toFloat()).coerceAtMost(1f)
+                MangaNormalizedRect(0.02f, t0, 0.98f, t1).clamped()
+            }
+        }
+
+        // 5. Group into reading rows and order by RTL Manga / LTR Comic / Vertical
+        val orderedByTop = kept.sortedBy { it.top }
+        val rows = ArrayList<MutableList<MangaNormalizedRect>>()
+        for (box in orderedByTop) {
+            val targetRow = rows.firstOrNull { row ->
+                row.any { existing ->
+                    val overlapTop = max(existing.top, box.top)
+                    val overlapBot = min(existing.bottom, box.bottom)
+                    val overlapH = (overlapBot - overlapTop).coerceAtLeast(0f)
+                    val minH = min(existing.height, box.height).coerceAtLeast(0.01f)
+                    (overlapH / minH) >= 0.35f || abs(existing.centerY - box.centerY) < minH * 0.40f
+                }
+            }
+            if (targetRow != null) {
+                targetRow += box
+            } else {
+                rows += mutableListOf(box)
+            }
+        }
+
+        rows.sortBy { row -> row.minOf { it.top } }
+        val result = ArrayList<MangaNormalizedRect>(kept.size)
+        for (row in rows) {
+            when (readingOrder) {
+                MangaReadingOrder.RTL_MANGA -> row.sortByDescending { it.centerX }
+                MangaReadingOrder.LTR_COMIC,
+                MangaReadingOrder.WEBTOON_VERTICAL -> row.sortBy { it.centerX }
+            }
+            result += row
+        }
+        return result
+    }
+
+    /**
+     * Ported from GachaSwipe `photoViewerCamera.js`: generates a subtle 6% zoomed-in Ken Burns
+     * drift pair biased from reading entry corner to exit corner.
+     */
+    fun computeKenBurnsPair(
+        panelRect: MangaNormalizedRect,
+        readingOrder: MangaReadingOrder
+    ): Pair<MangaNormalizedRect, MangaNormalizedRect> {
+        val shrinkX = panelRect.width * 0.06f
+        val shrinkY = panelRect.height * 0.06f
+        val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
+        val start = if (rtl) {
+            MangaNormalizedRect(
+                left = panelRect.left + shrinkX * 0.8f,
+                top = panelRect.top + shrinkY * 0.2f,
+                right = panelRect.right - shrinkX * 0.2f,
+                bottom = panelRect.bottom - shrinkY * 0.8f
+            ).clamped()
+        } else {
+            MangaNormalizedRect(
+                left = panelRect.left + shrinkX * 0.2f,
+                top = panelRect.top + shrinkY * 0.2f,
+                right = panelRect.right - shrinkX * 0.8f,
+                bottom = panelRect.bottom - shrinkY * 0.8f
+            ).clamped()
+        }
+        val end = if (rtl) {
+            MangaNormalizedRect(
+                left = panelRect.left + shrinkX * 0.2f,
+                top = panelRect.top + shrinkY * 0.8f,
+                right = panelRect.right - shrinkX * 0.8f,
+                bottom = panelRect.bottom - shrinkY * 0.2f
+            ).clamped()
+        } else {
+            MangaNormalizedRect(
+                left = panelRect.left + shrinkX * 0.8f,
+                top = panelRect.top + shrinkY * 0.8f,
+                right = panelRect.right - shrinkX * 0.2f,
+                bottom = panelRect.bottom - shrinkY * 0.2f
+            ).clamped()
+        }
+        return start to end
+    }
+}
+
+/**
+ * ✨ GEMMA 4 E2B VISION + THINKING STRUCTURED RESPONSE PARSER ✨
+ */
+object MangaVisionResponseParser {
+
+    data class DiscoveredLineSpec(
+        val bubbleIndex: Int,
+        val speakerName: String,
+        val isNewCharacter: Boolean,
+        val gender: VoiceGender,
+        val visualDescription: String,
+        val voiceDesignPrompt: String,
+        val emotion: String,
+        val confidence: Float,
+        val candidateSpeakers: List<String>,
+        val rawText: String,
+        val needsUserDecision: Boolean,
+        val decisionReason: String
+    )
+
+    data class DiscoveredPanelSpec(
+        val panelIndex: Int,
+        val sceneMood: String,
+        val thoughtTrace: String,
+        val lines: List<DiscoveredLineSpec>
+    )
+
+    data class ParsedPageAnalysis(
+        val thoughtTrace: String,
+        val storySummary: String,
+        val panels: List<DiscoveredPanelSpec>
+    )
+
+    private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun parsePageAnalysis(
+        rawResponse: String,
+        panelCount: Int,
+        existingCharacters: List<MangaCharacterProfile>
+    ): ParsedPageAnalysis {
+        var thoughtTrace = ""
+        var cleaned = rawResponse.trim()
+
+        val thoughtMatch = Regex("""<(?:thought|thinking)>([\s\S]*?)</(?:thought|thinking)>""", RegexOption.IGNORE_CASE)
+            .find(cleaned)
+        if (thoughtMatch != null) {
+            thoughtTrace = thoughtMatch.groupValues[1].trim()
+            cleaned = cleaned.replaceRange(thoughtMatch.range, "").trim()
+        }
+
+        // Strip markdown fences if model wrapped JSON
+        cleaned = cleaned
+            .replace(Regex("""^```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\s*```$"""), "")
+            .trim()
+
+        val objStart = cleaned.indexOf('{')
+        val objEnd = cleaned.lastIndexOf('}')
+        if (objStart < 0 || objEnd <= objStart) {
+            return ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
+        }
+        val jsonSlice = cleaned.substring(objStart, objEnd + 1)
+
+        return runCatching {
+            val root = lenientJson.parseToJsonElement(jsonSlice) as? JsonObject
+                ?: return@runCatching ParsedPageAnalysis(thoughtTrace, "", emptyList())
+            val summary = (root["story_summary"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            val panelsArr = root["panels"] as? JsonArray ?: JsonArray(emptyList())
+            val knownNames = existingCharacters.map { it.name }.distinct()
+
+            val parsedPanels = panelsArr.mapIndexedNotNull { idx, elem ->
+                val pObj = elem as? JsonObject ?: return@mapIndexedNotNull null
+                val pIdx = (pObj["panel_index"] as? JsonPrimitive)?.intOrNull?.coerceIn(0, max(0, panelCount - 1))
+                    ?: idx.coerceIn(0, max(0, panelCount - 1))
+                val mood = (pObj["scene_mood"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                val panelThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                val linesArr = pObj["lines"] as? JsonArray ?: JsonArray(emptyList())
+
+                val parsedLines = linesArr.mapIndexedNotNull { lIdx, lElem ->
+                    val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
+                    val rawText = (lObj["text"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    if (rawText.isEmpty()) return@mapIndexedNotNull null
+                    val speakerRaw = (lObj["speaker"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                        .ifEmpty { "UNKNOWN" }
+                    val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
+                    val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
+                    val gender = when {
+                        genderStr.startsWith("f") -> VoiceGender.FEMALE
+                        genderStr.startsWith("m") -> VoiceGender.MALE
+                        else -> VoiceGender.ANDROGYNOUS
+                    }
+                    val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    val designPrompt = (lObj["voice_design_prompt"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                        .ifEmpty { "neutral" }
+                    val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.90f
+                    val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
+                    val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
+                        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                        .orEmpty()
+                    val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
+                        speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
+                        speakerRaw == "?"
+                    val needsDecision = ambiguousSpeaker || conf < 0.72f
+                    val reason = when {
+                        ambiguousSpeaker -> "Speaker ambiguous in Panel ${pIdx + 1} (conf=${(conf * 100).toInt()}%)"
+                        conf < 0.72f -> "Low Gemma confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
+                        else -> ""
+                    }
+                    val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
+
+                    DiscoveredLineSpec(
+                        bubbleIndex = bubbleNum,
+                        speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
+                        isNewCharacter = isNew && !ambiguousSpeaker,
+                        gender = gender,
+                        visualDescription = visualDesc,
+                        voiceDesignPrompt = designPrompt,
+                        emotion = emotion,
+                        confidence = conf,
+                        candidateSpeakers = mergedCandidates,
+                        rawText = rawText,
+                        needsUserDecision = needsDecision,
+                        decisionReason = reason
+                    )
+                }
+                DiscoveredPanelSpec(
+                    panelIndex = pIdx,
+                    sceneMood = mood,
+                    thoughtTrace = panelThought.ifEmpty { thoughtTrace },
+                    lines = parsedLines
+                )
+            }
+            ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = summary, panels = parsedPanels)
+        }.getOrElse {
+            ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
+        }
+    }
+}

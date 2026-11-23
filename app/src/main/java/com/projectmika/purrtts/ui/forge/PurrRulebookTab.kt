@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
+import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
 import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.ArchetypeTone
 import com.projectmika.purrtts.core.purr.CommaHandlingMode
@@ -183,6 +184,14 @@ private enum class ActiveOsModule(
         badge = "TOOL-10",
         iconType = OsModuleIconType.SRT_BATCH_STUDIO,
         accentResolver = { MikaColors.SsrGold }
+    ),
+    MANGA_DUB_STUDIO(
+        toolCartridgeId = "tool_manga_dub_studio",
+        title = "MANGA DUB STUDIO",
+        subtitle = "CBZ Vision Cast & .MP4 Dubs",
+        badge = "TOOL-11",
+        iconType = OsModuleIconType.MANGA_DUB_STUDIO,
+        accentResolver = { MikaColors.NeonPink }
     );
 
     fun accentColor(): Color = accentResolver()
@@ -203,6 +212,7 @@ fun PurrRulebookTab(
     viewModel: TtsForgeViewModel,
     onOpenSaveDialog: () -> Unit,
     onOpenCloneStudio: () -> Unit,
+    onLaunchCloneForMangaCharacter: (MangaCloneHandoffTarget) -> Unit = {},
     onOpenCartridgeBayTools: () -> Unit,
     onOpenCartridgeBayTts: () -> Unit,
     requestedToolId: String? = null,
@@ -304,6 +314,7 @@ fun PurrRulebookTab(
                                                 ActiveOsModule.SCRIPT_STUDIO -> "MULTI-CAST WAV"
                                                 ActiveOsModule.VOICE_BENCHMARK -> "A/B RTF LAB"
                                                 ActiveOsModule.SRT_BATCH_STUDIO -> ".SRT/.VTT QUEUE"
+                                                ActiveOsModule.MANGA_DUB_STUDIO -> "CBZ -> .MP4 DUB"
                                             },
                                             onClick = { openedModule = mod }
                                         )
@@ -570,6 +581,13 @@ fun PurrRulebookTab(
                                     activeProfile = activeProfile,
                                     isPlayingPreview = isPlayingPreview,
                                     viewModel = viewModel
+                                )
+                                ActiveOsModule.MANGA_DUB_STUDIO -> MangaDubStudioModuleWindowBody(
+                                    forgeState = forgeState,
+                                    activeProfile = activeProfile,
+                                    availableVoices = viewModel.allAvailableVoices(),
+                                    viewModel = viewModel,
+                                    onLaunchCloneForCharacter = onLaunchCloneForMangaCharacter
                                 )
                             }
                         }

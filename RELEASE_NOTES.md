@@ -1,3 +1,26 @@
+# 🌌 PURR-TTS v1.8.9 // Manga Dub Studio & Gemma 4 E2B LiteRT Vision
+
+### ✨ What's New since v1.8.8
+
+Turn full `.CBZ` manga chapters into dubbed motion-comic `.MP4` episodes right on Android with **`TOOL-11` Manga Dub Studio**, **Gemma 4 E2B LiteRT Vision + Thinking** (`SUB-11V`), a guided **Pre-Production Desk**, and 1-tap **Clone Studio Round-Trip** casting! 🎬📖🎙️
+
+* **📖 `TOOL-11` MANGA DUB & MOTION-COMIC STUDIO (`tool_manga_dub_studio`)**:
+  * **Auto-Pilot `.CBZ` Importer & GachaSwipe BFS Panel Slicer**: Unpacks `.cbz` archives in natural page order and slices every manga page into exact RTL Manga, LTR Comic, or Webtoon reading-order panels using GachaSwipe's edge-connected BFS gutter flood-fill algorithm (`MangaBfsPanelSlicer`), plus an instant 1-tap **Load Demo Chapter** starter project.
+  * **🧠 `SUB-11V` Gemma 4 E2B LiteRT Vision + Thinking Cartridge (`gemma-4-E2B-it-gpu.litertlm`)**: Annotated `[P1..PN]` Set-of-Mark page scanning on Google AI Edge `litertlm-android` (plus optional LAN OpenAI Vision endpoint for power users), extracting OCR dialogue, speaker attribution with chain-of-thought reasoning traces, character gender/appearance notes, and tailored **Qwen VoiceDesign** prompts — then strictly evicting Vision VRAM before TTS synthesis begins.
+  * **🎭 Pre-Production Desk (`Decisions` | `Cast Roster` | `Storyboard`)**:
+    * Surfaces only low-confidence or tail-less speech bubbles in a fast **`⚠️ DECISIONS`** inbox with 1-tap character speaker assignment pills.
+    * **Persistent Series Character Roster**: Crops character portraits and freezes voice assignments across chapters — tap **`CLONE VOICE`** on any character card (e.g., Vegeta) to jump straight into PURR's **Clone Studio**, forge a custom cloned voice, and automatically return with that clone bound directly to the character.
+  * **🎬 Hardware `MediaCodec` `.MP4` Motion-Comic Exporter**: Renders 24fps H.264/AAC `.mp4` episodes with smooth cubic-bezier pan/zoom transitions, Ken Burns camera drift, Holodeck dimmed page backdrops, GachaSwipe emotional pause pacing + `AtmosphereEngine` particle effects (`Embers`, `Rain`, `Sakura`, `Sparkle`), MIKAReader all-caps OCR sanitization, and burned-in speaker subtitle HUD saved to `Downloads/PURR-TTS/MangaDubs/`.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.9_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `25`).
+2. **`PURR-TTS_V1.8.9.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.8 // Bulletproof Mount Repairs & All-In-One Studio Suite
 
 ### ✨ What's New since v1.8.7

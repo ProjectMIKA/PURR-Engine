@@ -19,6 +19,12 @@ import com.projectmika.purrtts.BuildConfig
 import com.projectmika.purrtts.PurrApplication
 import com.projectmika.purrtts.core.audiobook.AudiobookChapter
 import com.projectmika.purrtts.core.audiobook.AudiobookProject
+import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
+import com.projectmika.purrtts.core.manga.MangaCharacterProfile
+import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
+import com.projectmika.purrtts.core.manga.MangaReadingOrder
+import com.projectmika.purrtts.core.manga.MangaSeriesProject
+import com.projectmika.purrtts.core.manga.MangaVideoAspect
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.CartridgeFilterMode
@@ -56,6 +62,7 @@ import android.os.SystemClock
 import com.projectmika.purrtts.engine.CloneClipImporter
 import com.projectmika.purrtts.engine.TtsBackendRouter
 import com.projectmika.purrtts.engine.audiobook.AudiobookConstructorManager
+import com.projectmika.purrtts.engine.manga.MangaDubStudioManager
 import com.projectmika.purrtts.engine.qwen3.Qwen3TtsEngine
 import java.io.File
 import java.io.FileInputStream
@@ -94,6 +101,16 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val backendRouter = app.backendRouter
     val catalogManager = app.modelCatalogManager
     val audiobookManager = app.audiobookManager
+    val mangaDubManager = MangaDubStudioManager(app, repository, backendRouter)
+
+    val mangaProjects: StateFlow<List<MangaSeriesProject>> = mangaDubManager.projects
+    val activeMangaProjectId: StateFlow<String?> = mangaDubManager.activeProjectId
+    val isMangaBusy: StateFlow<Boolean> = mangaDubManager.isBusy
+    val mangaStatusLabel: StateFlow<String> = mangaDubManager.statusLabel
+    val mangaProgress: StateFlow<Float> = mangaDubManager.overallProgress
+
+    private val _pendingMangaCloneTarget = MutableStateFlow<MangaCloneHandoffTarget?>(null)
+    val pendingMangaCloneTarget: StateFlow<MangaCloneHandoffTarget?> = _pendingMangaCloneTarget.asStateFlow()
 
     val audiobookProjects: StateFlow<List<AudiobookProject>> = audiobookManager.projects
     val activeAudiobookId: StateFlow<String?> = audiobookManager.activeProjectId
@@ -931,6 +948,18 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             cloneEngineId = cloneEngineId
         )
         repository.registerClonedVoice(cloned)
+        val mangaTarget = _pendingMangaCloneTarget.value
+        if (mangaTarget != null) {
+            mangaDubManager.assignVoiceToCharacter(
+                projectId = mangaTarget.projectId,
+                characterId = mangaTarget.characterId,
+                voiceId = cloned.id,
+                voiceLabel = "${cloned.displayName} [CLONED]"
+            )
+            _pendingMangaCloneTarget.value = null
+            showToast("Bound [$cleanName] directly to ${mangaTarget.characterName}!")
+            return true
+        }
         val engineInstalled = repository.state.value.modelStates[cloneEngineId]?.state == DownloadState.INSTALLED
         showToast(
             if (engineInstalled) "Registered Cloned Voice [$cleanName]"
@@ -1751,6 +1780,173 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         _srtBatchProgress.value = 0f
         _srtBatchStatus.value = "CANCELLED // READY"
         backendRouter.markIdle()
+    }
+
+    // =========================================================================
+    // ✨ TOOL-11: MANGA DUB & MOTION-COMIC STUDIO ACTIONS
+    // =========================================================================
+
+    fun selectMangaProject(projectId: String) = mangaDubManager.selectProject(projectId)
+
+    fun deleteMangaProject(projectId: String) {
+        mangaDubManager.deleteProject(projectId)
+        showToast("Deleted manga project")
+    }
+
+    fun importMangaCbz(
+        uri: Uri,
+        targetProjectId: String?,
+        seriesTitleInput: String,
+        readingOrder: MangaReadingOrder
+    ) {
+        mangaDubManager.importCbzChapter(uri, targetProjectId, seriesTitleInput, readingOrder) { msg ->
+            showToast(msg)
+        }
+    }
+
+    fun createSampleMangaProject() {
+        mangaDubManager.createSampleMangaProject { msg -> showToast(msg) }
+    }
+
+    fun resolveMangaDecision(
+        projectId: String,
+        chapterId: String,
+        pageIndex: Int,
+        panelId: String,
+        lineId: String,
+        characterId: String
+    ) = mangaDubManager.resolvePanelDecision(projectId, chapterId, pageIndex, panelId, lineId, characterId)
+
+    fun assignMangaCharacterVoice(
+        projectId: String,
+        characterId: String,
+        voiceId: String,
+        voiceLabel: String,
+        voiceDesignPrompt: String? = null,
+        speedScale: Float? = null,
+        pitchScale: Float? = null
+    ) = mangaDubManager.assignVoiceToCharacter(
+        projectId = projectId,
+        characterId = characterId,
+        voiceId = voiceId,
+        voiceLabel = voiceLabel,
+        voiceDesignPrompt = voiceDesignPrompt,
+        speedScale = speedScale,
+        pitchScale = pitchScale
+    )
+
+    fun addCustomMangaCharacter(
+        projectId: String,
+        name: String,
+        gender: VoiceGender,
+        voiceDesignPrompt: String
+    ) {
+        mangaDubManager.addCustomCharacter(projectId, name, gender, voiceDesignPrompt)
+        showToast("Added character ${name.trim().uppercase()}")
+    }
+
+    fun updateMangaLineText(
+        projectId: String,
+        chapterId: String,
+        pageIndex: Int,
+        panelId: String,
+        lineId: String,
+        newText: String
+    ) = mangaDubManager.updateLineText(projectId, chapterId, pageIndex, panelId, lineId, newText)
+
+    fun addMangaLineToPanel(
+        projectId: String,
+        chapterId: String,
+        pageIndex: Int,
+        panelId: String,
+        speakerId: String,
+        text: String
+    ) = mangaDubManager.addLineToPanel(projectId, chapterId, pageIndex, panelId, speakerId, text)
+
+    fun updateMangaPanelAtmosphere(
+        projectId: String,
+        chapterId: String,
+        pageIndex: Int,
+        panelId: String,
+        atmosphere: MangaAtmospherePreset
+    ) = mangaDubManager.updatePanelAtmosphere(projectId, chapterId, pageIndex, panelId, atmosphere)
+
+    fun updateMangaProjectConfig(
+        projectId: String,
+        readingOrder: MangaReadingOrder? = null,
+        videoAspect: MangaVideoAspect? = null,
+        burnInSubtitles: Boolean? = null,
+        enableAtmosphereFx: Boolean? = null,
+        powerUserVisionUrl: String? = null
+    ) = mangaDubManager.updateProjectConfig(
+        projectId = projectId,
+        readingOrder = readingOrder,
+        videoAspect = videoAspect,
+        burnInSubtitles = burnInSubtitles,
+        enableAtmosphereFx = enableAtmosphereFx,
+        powerUserVisionUrl = powerUserVisionUrl
+    )
+
+    fun reanalyzeMangaChapter(projectId: String, chapterId: String) {
+        mangaDubManager.reanalyzeChapterWithVision(projectId, chapterId) { msg -> showToast(msg) }
+    }
+
+    fun produceMangaChapterMp4(projectId: String, chapterId: String) {
+        mangaDubManager.produceDubbedChapterMp4(projectId, chapterId) { msg -> showToast(msg) }
+    }
+
+    fun cancelMangaWork() {
+        mangaDubManager.cancelActiveWork()
+        showToast("Cancelled Manga Studio task")
+    }
+
+    fun setMangaCloneHandoff(target: MangaCloneHandoffTarget) {
+        _pendingMangaCloneTarget.value = target
+    }
+
+    fun clearMangaCloneHandoff() {
+        _pendingMangaCloneTarget.value = null
+    }
+
+    fun auditionVoiceDescriptor(voice: VoiceDescriptor) {
+        auditionText(overrideVoice = voice)
+    }
+
+    fun auditionMangaCharacter(character: MangaCharacterProfile) {
+        val voices = allAvailableVoices()
+        val resolved = mangaDubManager.resolveSynthesisProfileForCharacter(
+            baseProfile = repository.currentProfile,
+            character = character,
+            availableVoices = voices
+        )
+        val voiceDesc = voices.firstOrNull { it.id == resolved.primaryVoiceId }
+        val sampleLine = "Listen closely! This is ${character.name} checking in for manga dub pre-production."
+        if (voiceDesc != null) {
+            auditionText(text = sampleLine, overrideVoice = voiceDesc)
+        } else {
+            viewModelScope.launch(Dispatchers.IO) {
+                val out = backendRouter.synthesizeSpeechChunk(
+                    chunk = PurrChunk.Speech(
+                        text = sampleLine,
+                        role = SegmentRole.DIALOGUE,
+                        targetVoiceId = resolved.primaryVoiceId,
+                        speakingRate = resolved.baseSpeed,
+                        pitch = resolved.basePitch,
+                        volumeGain = 1.0f,
+                        sentiment = SentimentResult()
+                    ),
+                    profile = resolved
+                )
+                if (out.pcmFloat24k.isNotEmpty()) {
+                    val tempWav = File(app.cacheDir, "manga_char_audition.wav")
+                    val pcm = PurrDspProcessor.float32ToPcm16Le(out.pcmFloat24k)
+                    writePcm16MonoWav(tempWav, pcm, pcm.size, PurrDspProcessor.SAMPLE_RATE_HZ)
+                    playWavFileInternal(tempWav, "[MANGA] ${character.name}", out.engineSummary)
+                } else {
+                    showToast("No voice engine produced audio for ${character.name} — install a TTS/Clone cartridge!")
+                }
+            }
+        }
     }
 
     private fun sanitizeFileBasename(rawTitle: String, fallback: String): String = rawTitle.trim()

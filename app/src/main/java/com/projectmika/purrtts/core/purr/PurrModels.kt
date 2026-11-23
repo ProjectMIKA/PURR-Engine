@@ -563,6 +563,12 @@ data class PurrForgeState(
             state = DownloadState.INSTALLED,
             sha256Verified = true,
             localPath = "builtin://tool/srt_batch_studio"
+        ),
+        "tool_manga_dub_studio" to ModelBundleState(
+            specId = "tool_manga_dub_studio",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/manga_dub_studio"
         )
     ),
     val slottedCartridges: Set<String> = setOf(
@@ -577,11 +583,12 @@ data class PurrForgeState(
         "tool_theme_engine",
         "tool_script_studio",
         "tool_voice_benchmark",
-        "tool_srt_batch_studio"
+        "tool_srt_batch_studio",
+        "tool_manga_dub_studio"
     ),
     val enabledSubCartridges: Set<String> = emptySet(),
     val savedVoiceDesigns: List<SavedVoiceDesign> = emptyList(),
-    val knownToolCatalogVersion: Int = 4,
+    val knownToolCatalogVersion: Int = 5,
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
     val seenTutorialVersion: Int = 0,
@@ -3122,6 +3129,47 @@ object PurrDefaultPresets {
             unlocksSummary = "ENABLES: SRT Subtitle & Batch Queue Studio OS Module (`TOOL-10`).",
             category = CartridgeCategory.TOOLS,
             releaseOrder = 16
+        ),
+        ModelBundleSpec(
+            id = "tool_manga_dub_studio",
+            romCode = "TOOL-11",
+            badge = "MANGA_DUB_FORGE",
+            accentHex = 0xFFFF3366,
+            name = "MANGA_DUB_STUDIO",
+            subtitle = "CBZ Manga -> Auto-Pilot Vision Cast, Pre-Production & Dynamic .MP4 Video",
+            description = "Converts .CBZ manga chapters into full dubbed motion-comic .MP4 episodes: slices panels via GachaSwipe BFS, scans characters & speech with Gemma 4 E2B LiteRT Vision + Thinking, lets you customize voices or jump straight into Clone Studio for specific characters, and renders hardware H.264/AAC video with Ken Burns pan/zoom & Atmosphere FX.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/manga_dub_studio",
+            fileName = "manga_dub_studio.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "BFS Panel Slicer + Gemma 4 Vision Pre-Production + .MP4 Renderer • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Manga Dub & Motion-Comic Studio OS Module (`TOOL-11`). Expand below for Gemma 4 E2B Vision.",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 17
+        ),
+        ModelBundleSpec(
+            id = "sub_gemma4_e2b_vision",
+            romCode = "SUB-11V",
+            badge = "GEMMA4_E2B_LITERT",
+            accentHex = 0xFF00E5FF,
+            name = "GEMMA_4_E2B_VISION_LITERT",
+            subtitle = "Google Gemma 4 E2B LiteRT-LM • Multimodal Vision + Thinking Mode (+2232 MB)",
+            description = "On-device multimodal Vision + Thinking model (gemma-4-E2B-it-gpu.litertlm) for Manga Dub Studio: scans manga panels, extracts OCR dialogue, deduces speakers with chain-of-thought reasoning, and crafts Qwen VoiceDesign prompts offline before unloading for TTS.",
+            backend = BackendType.LITERT_NPU_GPU,
+            downloadUrl = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm",
+            fileName = "gemma-4-E2B-it-gpu.litertlm",
+            expectedSha256 = "d3cfec6ae2e027a994e51366d44dbf522ec7531a4a35fbbfcd3e9cc9b927afc1",
+            approximateSizeMb = 2232,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "LiteRT-LM GPU/NPU Vision + Thinking • Unloads before TTS",
+            unlocksSummary = "UNLOCKS: On-Device Gemma 4 E2B Multimodal Vision & Thinking Director for TOOL-11.",
+            isSubCartridge = true,
+            parentCartridgeId = "tool_manga_dub_studio",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 17
         )
     )
 }
