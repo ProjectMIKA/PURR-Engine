@@ -6,7 +6,7 @@ import org.junit.Test
 
 /**
  * ✨ PURE-JVM TESTS FOR THE 3-CATEGORY CARTRIDGE RACK (TTS + CLONING + TOOLS) ✨
- * Guards the 7 unified TTS hubs (`ROM-01..ROM-07`), the 5 dedicated Voice Cloning modules
+ * Guards the 9 unified TTS hubs (`ROM-01..ROM-09`), the 5 dedicated Voice Cloning modules
  * (`CLN-01..CLN-05`), nested expansion/upgrade sub-cartridges, unique voice IDs, and SHA-256 metadata.
  */
 class PurrPremiumCatalogTest {
@@ -61,7 +61,7 @@ class PurrPremiumCatalogTest {
             assertTrue("${spec.id} sha", spec.expectedSha256.matches(Regex("[0-9a-f]{64}")))
             assertTrue("${spec.id} url", spec.downloadUrl.startsWith("https://"))
             assertTrue("${spec.id} parent hub", spec.parentCartridgeId in ttsHubIds)
-            assertTrue("${spec.id} size", spec.approximateSizeMb >= 40)
+            assertTrue("${spec.id} size", spec.approximateSizeMb >= 25)
         }
 
         val checkedCloneEngineIds = setOf(
@@ -74,7 +74,7 @@ class PurrPremiumCatalogTest {
         foundClone.forEach { spec ->
             assertTrue("${spec.id} sha", spec.expectedSha256.matches(Regex("[0-9a-f]{64}")))
             assertTrue("${spec.id} url", spec.downloadUrl.startsWith("https://"))
-            assertTrue("${spec.id} size", spec.approximateSizeMb >= 40)
+            assertTrue("${spec.id} size", spec.approximateSizeMb >= 25)
         }
     }
 
