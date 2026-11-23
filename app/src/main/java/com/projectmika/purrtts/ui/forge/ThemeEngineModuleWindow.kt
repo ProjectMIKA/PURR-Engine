@@ -12,12 +12,12 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
@@ -30,7 +30,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +47,7 @@ import com.projectmika.purrtts.ui.theme.CyberIconType
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaTagPill
+import com.projectmika.purrtts.ui.theme.bringIntoViewWithIme
 import kotlin.math.roundToInt
 
 /**
@@ -234,7 +237,7 @@ fun ThemeEngineModuleWindowBody(
                 fontSize = 10.sp,
                 letterSpacing = 0.8.sp
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             ColorPresetSwatchRow(
                 presets = PurrThemeEngine.BACKGROUND_PRESETS,
                 selectedArgb = cfg.neonBackgroundHex,
@@ -250,10 +253,11 @@ fun ThemeEngineModuleWindowBody(
                     }
                 }
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             HexColorApplyRow(
-                label = "CUSTOM_BG_HEX",
+                label = "BG_HEX",
                 value = bgHexInput,
+                previewArgb = PurrThemeEngine.parseHexColorOrNull(bgHexInput) ?: cfg.neonBackgroundHex,
                 errorText = bgHexError,
                 accent = MikaColors.NeonPurple,
                 onValueChange = {
@@ -288,7 +292,7 @@ fun ThemeEngineModuleWindowBody(
                 fontSize = 10.sp,
                 letterSpacing = 0.8.sp
             )
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
             ColorPresetSwatchRow(
                 presets = PurrThemeEngine.GLOW_PRESETS,
                 selectedArgb = cfg.neonPrimaryHex,
@@ -304,10 +308,11 @@ fun ThemeEngineModuleWindowBody(
                     }
                 }
             )
-            Spacer(modifier = Modifier.height(10.dp))
+            Spacer(modifier = Modifier.height(14.dp))
             HexColorApplyRow(
-                label = "CUSTOM_GLOW_HEX",
+                label = "GLOW_HEX",
                 value = glowHexInput,
+                previewArgb = PurrThemeEngine.parseHexColorOrNull(glowHexInput) ?: cfg.neonPrimaryHex,
                 errorText = glowHexError,
                 accent = MikaColors.NeonCyan,
                 onValueChange = {
@@ -440,7 +445,7 @@ private fun ColorPresetSwatchRow(
 ) {
     FlowRow(
         horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
         presets.forEach { preset ->
@@ -450,29 +455,30 @@ private fun ColorPresetSwatchRow(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 modifier = Modifier
+                    .heightIn(min = 38.dp)
                     .clip(RoundedCornerShape(6.dp))
-                    .background(if (selected) borderAccent.copy(alpha = 0.16f) else MikaColors.DeepWellBg)
+                    .background(if (selected) borderAccent.copy(alpha = 0.18f) else MikaColors.DeepWellBg)
                     .border(
                         width = if (selected) 1.5.dp else 1.dp,
                         color = if (selected) borderAccent else MikaColors.SubtleBorder,
                         shape = RoundedCornerShape(6.dp)
                     )
                     .clickable { onSelect(preset) }
-                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .padding(horizontal = 10.dp, vertical = 7.dp)
             ) {
                 Box(
                     modifier = Modifier
                         .size(14.dp)
                         .clip(CircleShape)
                         .background(swatch)
-                        .border(1.dp, MikaColors.PrimaryText.copy(alpha = 0.55f), CircleShape)
+                        .border(1.dp, MikaColors.PrimaryText.copy(alpha = 0.65f), CircleShape)
                 )
                 Text(
                     text = preset.label.uppercase(),
                     color = if (selected) borderAccent else MikaColors.PrimaryText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
-                    fontSize = 8.5.sp
+                    fontSize = 9.sp
                 )
             }
         }
@@ -483,38 +489,64 @@ private fun ColorPresetSwatchRow(
 private fun HexColorApplyRow(
     label: String,
     value: String,
+    previewArgb: Long,
     errorText: String?,
     accent: Color,
     onValueChange: (String) -> Unit,
     onApply: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    var isFocused by remember { mutableStateOf(false) }
+
+    Column(
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier.bringIntoViewWithIme()
+    ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(36.dp)
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.DeepWellBg)
+                .border(
+                    width = if (isFocused) 1.4.dp else 1.dp,
+                    color = if (isFocused) accent else accent.copy(alpha = 0.35f),
+                    shape = RoundedCornerShape(6.dp)
+                )
+                .padding(start = 8.dp, end = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(7.dp)
         ) {
-            OutlinedTextField(
+            Box(
+                modifier = Modifier
+                    .size(12.dp)
+                    .clip(CircleShape)
+                    .background(Color(previewArgb))
+                    .border(1.dp, MikaColors.PrimaryText.copy(alpha = 0.5f), CircleShape)
+            )
+            Text(
+                text = label,
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 8.5.sp
+            )
+            BasicTextField(
                 value = value,
                 onValueChange = onValueChange,
-                label = { Text(label, fontFamily = FontFamily.Monospace, fontSize = 8.5.sp) },
                 singleLine = true,
+                cursorBrush = SolidColor(accent),
                 textStyle = TextStyle(
                     color = MikaColors.PrimaryText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp
                 ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = accent,
-                    unfocusedBorderColor = accent.copy(alpha = 0.35f),
-                    focusedContainerColor = MikaColors.DeepWellBg,
-                    unfocusedContainerColor = MikaColors.DeepWellBg
-                ),
-                modifier = Modifier.weight(1f)
+                modifier = Modifier
+                    .weight(1f)
+                    .onFocusChanged { isFocused = it.isFocused }
             )
             MikaTagPill(
-                label = "APPLY",
+                label = "SET",
                 selected = true,
                 activeColor = accent,
                 leadingIcon = CyberIconType.CHECK,

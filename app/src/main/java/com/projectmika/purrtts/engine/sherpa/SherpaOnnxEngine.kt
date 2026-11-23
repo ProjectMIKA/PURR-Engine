@@ -421,6 +421,9 @@ class SherpaOnnxEngine(
         val ruleFsts = files.filter { it.extension.equals("fst", ignoreCase = true) }
             .sortedBy { it.name }
             .joinToString(",") { it.absolutePath }
+        val ruleFars = files.filter { it.extension.equals("far", ignoreCase = true) }
+            .sortedBy { it.name }
+            .joinToString(",") { it.absolutePath }
 
         val threads = if (smartOffload) hardwareProfile.optimalCpuThreads else 4
 
@@ -598,7 +601,25 @@ class SherpaOnnxEngine(
             }
         }
 
-        val ruleFstsArg = if (family == SherpaModelFamily.KOKORO || family == SherpaModelFamily.MELO_TTS) ruleFsts else ""
+        val ruleFarsArg = if (family in setOf(
+                SherpaModelFamily.KOKORO,
+                SherpaModelFamily.MELO_TTS,
+                SherpaModelFamily.PIPER
+            )
+        ) {
+            ruleFars
+        } else {
+            ""
+        }
+        val ruleFstsArg = when {
+            ruleFarsArg.isNotEmpty() -> ""
+            family in setOf(
+                SherpaModelFamily.KOKORO,
+                SherpaModelFamily.MELO_TTS,
+                SherpaModelFamily.PIPER
+            ) -> ruleFsts
+            else -> ""
+        }
 
         // ✨ SMART HARDWARE OFFLOAD (v1.8.5): try NNAPI first when enabled & supported on
         // architectures with predictable shapes (Kokoro/Kitten/Supertonic/Pocket/ZipVoice).
@@ -611,7 +632,14 @@ class SherpaOnnxEngine(
         if (allowNnapi) {
             val nnapiCfg = buildConfigForProvider("nnapi") ?: return
             val nnapiAttempt = runCatching {
-                OfflineTts(assetManager = null, config = OfflineTtsConfig(model = nnapiCfg, ruleFsts = ruleFstsArg))
+                OfflineTts(
+                    assetManager = null,
+                    config = OfflineTtsConfig(
+                        model = nnapiCfg,
+                        ruleFsts = ruleFstsArg,
+                        ruleFars = ruleFarsArg
+                    )
+                )
             }
             if (nnapiAttempt.isSuccess) {
                 activeOfflineTts = nnapiAttempt.getOrThrow()
@@ -625,7 +653,11 @@ class SherpaOnnxEngine(
 
         val cpuCfg = buildConfigForProvider("cpu") ?: return
         runCatching {
-            val config = OfflineTtsConfig(model = cpuCfg, ruleFsts = ruleFstsArg)
+            val config = OfflineTtsConfig(
+                model = cpuCfg,
+                ruleFsts = ruleFstsArg,
+                ruleFars = ruleFarsArg
+            )
             activeOfflineTts = OfflineTts(assetManager = null, config = config)
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
             Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")
@@ -702,7 +734,9 @@ class SherpaOnnxEngine(
                 cleanId.startsWith("coqui_") ||
                 cleanId.startsWith("mms_") ||
                 cleanId.startsWith("vctk_") ||
-                cleanId.startsWith("mimic3_") -> SherpaModelFamily.PIPER
+                cleanId.startsWith("mimic3_") ||
+                cleanId.startsWith("ljs_") ||
+                cleanId.startsWith("aishell3_") -> SherpaModelFamily.PIPER
             else -> defaultFamily
         }
     }

@@ -48,13 +48,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -63,6 +71,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
@@ -75,6 +84,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
@@ -83,6 +93,42 @@ import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import kotlinx.coroutines.delay
 import kotlin.math.roundToInt
+
+/**
+ * Scrolls the decorated input cleanly into view whenever it gains focus or the soft keyboard opens,
+ * leaving [extraBottomDp] of clearance below the input so the IME never covers the text cursor.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+fun Modifier.bringIntoViewWithIme(extraBottomDp: Dp = 28.dp): Modifier = composed {
+    val requester = remember { BringIntoViewRequester() }
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    var isFocused by remember { mutableStateOf(false) }
+    var boxSize by remember { mutableStateOf(IntSize.Zero) }
+
+    LaunchedEffect(isFocused, imeBottom) {
+        if (isFocused) {
+            val padPx = with(density) { extraBottomDp.toPx() }
+            val rect = Rect(
+                left = 0f,
+                top = 0f,
+                right = boxSize.width.toFloat().coerceAtLeast(1f),
+                bottom = (boxSize.height.toFloat() + padPx).coerceAtLeast(1f)
+            )
+            delay(90)
+            requester.bringIntoView(rect)
+            if (imeBottom > 0) {
+                delay(220)
+                requester.bringIntoView(rect)
+            }
+        }
+    }
+
+    this
+        .bringIntoViewRequester(requester)
+        .onSizeChanged { boxSize = it }
+        .onFocusChanged { isFocused = it.isFocused }
+}
 
 /**
  * Full-screen GachaSwipe CRT Stage: `#050308` void background, cyan hairline monitor side

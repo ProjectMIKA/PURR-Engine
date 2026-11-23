@@ -1,3 +1,23 @@
+# 🌌 PURR-TTS v1.8.7 // The Full 16-Bay Fleet & Neon HUD Polish
+
+### ✨ What's New since v1.8.6
+
+Completed all 16 TTS Cartridge Bays (`ROM-01..ROM-16`), sleek single-row HUD dropdowns, clean Neon Theme swatch hitboxes, and smart keyboard avoidance across the terminal! 🎛️⌨️🚀
+
+* **🎛️ COMPLETE 16-BAY TTS RACK (`ROM-15` & `ROM-16`)**: Filled the final 2 bays in the 2×8 TTS Motherboard Rack with **VITS LJSpeech Direct Lexicon** (`ROM-15`: 104MB English US studio voice backed by a direct 120k-word pronunciation lexicon) and **Icefall AISHELL-3 Multi-Speaker** (`ROM-16`: ultra-compact 30MB Mandarin VITS engine with 10 curated speakers and full `rule.far` OpenFst text normalization wired cleanly into `OfflineTtsConfig`).
+* **🎨 NEON THEME ENGINE SWATCH HITBOXES & COMPACT HEX BAR**: Replaced oversized `OutlinedTextField` hex inputs with sleek `36.dp` Cyberdeck `BasicTextField` HUD bars, increased swatch heights (`>= 38.dp`) and row spacing so every preset button taps cleanly in the middle without adjacent text-field touch overlap.
+* **🔽 SLEEK SINGLE-ROW FILTER & SORT HUD BAR**: Redesigned the Cartridge Bay `FLT` and `SRT` dropdown controls into a compact single-row beveled Cyberdeck HUD bar with live count badge and inline `[×]` reset.
+* **⌨️ SMART KEYBOARD AVOIDANCE (`imePadding` + `bringIntoViewWithIme`)**: Fixed soft keyboards covering bottom text boxes — the viewport shrinks above the IME keyboard, the floating bottom HUD auto-hides while typing, and bottom inputs automatically scroll into view with clear padding above the keyboard.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.7_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `23`).
+2. **`PURR-TTS_V1.8.7.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.6 // The Neon Synthesis Fleet
 
 ### ✨ What's New since v1.8.5

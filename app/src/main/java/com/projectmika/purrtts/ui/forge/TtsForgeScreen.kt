@@ -8,7 +8,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,15 +23,19 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -82,6 +88,7 @@ import com.projectmika.purrtts.ui.theme.MikaTagPill
 import com.projectmika.purrtts.ui.theme.MikaTerminalStage
 import com.projectmika.purrtts.ui.theme.MikaVoiceDropdownSelector
 import com.projectmika.purrtts.ui.theme.TerminalToastBanner
+import com.projectmika.purrtts.ui.theme.bringIntoViewWithIme
 import kotlin.math.roundToInt
 
 private enum class PurrTab(val title: String) {
@@ -172,9 +179,15 @@ fun TtsForgeScreen(
         viewModel.toolCartridgeCatalog.count { it.id in forgeState.slottedCartridges }
     }
 
+    val isImeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
+
     MikaTerminalStage {
         Box(modifier = Modifier.fillMaxSize()) {
-            Column(modifier = Modifier.fillMaxSize()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .imePadding()
+            ) {
                 // Pinned Top HUD Header across the entire Cyberdeck OS.
                 // ✨ FIXED-SIZE SLOT LAW (v1.3.3 scar): every dynamic element in this header
                 // (hardware badge labels `[IDLE]..[NPU ACTIVE]` + VRAM countdown) must live in a
@@ -275,7 +288,12 @@ fun TtsForgeScreen(
                 ) { targetTabIndex ->
                     LazyColumn(
                         modifier = Modifier.fillMaxSize(),
-                        contentPadding = PaddingValues(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 92.dp),
+                        contentPadding = PaddingValues(
+                            start = 14.dp,
+                            end = 14.dp,
+                            top = 10.dp,
+                            bottom = if (isImeVisible) 28.dp else 92.dp
+                        ),
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         when (PurrTab.entries[targetTabIndex]) {
@@ -734,7 +752,7 @@ fun TtsForgeScreen(
                                                 focusedContainerColor = MikaColors.DeepWellBg,
                                                 unfocusedContainerColor = MikaColors.DeepWellBg
                                             ),
-                                            modifier = Modifier.fillMaxWidth()
+                                            modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
                                         )
                                     }
                                 }
@@ -787,14 +805,20 @@ fun TtsForgeScreen(
                 }
             }
 
-            // Floating Glassmorphic Icon-Only Bottom HUD Capsule (overlaid over scroll area)
-            MikaBottomHudBar(
-                activeTab = activeTab,
-                activeToolCount = activeToolCount,
-                slottedTtsCount = slottedSpecs.size,
-                onSelectTab = { activeTab = it },
+            // Floating Glassmorphic Icon-Only Bottom HUD Capsule (auto-hides when soft keyboard is up)
+            AnimatedVisibility(
+                visible = !isImeVisible,
+                enter = fadeIn(tween(140)) + slideInVertically { it / 2 },
+                exit = fadeOut(tween(110)) + slideOutVertically { it / 2 },
                 modifier = Modifier.align(Alignment.BottomCenter)
-            )
+            ) {
+                MikaBottomHudBar(
+                    activeTab = activeTab,
+                    activeToolCount = activeToolCount,
+                    slottedTtsCount = slottedSpecs.size,
+                    onSelectTab = { activeTab = it }
+                )
+            }
 
             // Dramatic ROM Cartridge Slot / Eject HUD Overlay
             CartridgeSlamOverlay(

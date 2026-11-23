@@ -21,15 +21,21 @@ class PurrPremiumCatalogTest {
     private val toolsModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
 
     @Test
-    fun `top level tts catalog forms a 14-hub rack ROM-01 through ROM-14`() {
-        assertEquals(14, mainTtsHubs.size)
+    fun `top level tts catalog forms a 16-hub rack ROM-01 through ROM-16`() {
+        assertEquals(16, mainTtsHubs.size)
         val codes = mainTtsHubs.map { it.romCode }
         assertEquals(
-            (1..14).map { idx -> "ROM-%02d".format(idx) },
+            (1..16).map { idx -> "ROM-%02d".format(idx) },
             codes
         )
         val expectedIds = setOf(
-            "rom_coqui_vits", "rom_meta_mms", "rom_vctk_studio", "rom_matcha_en", "rom_mimic3_neural"
+            "rom_coqui_vits",
+            "rom_meta_mms",
+            "rom_vctk_studio",
+            "rom_matcha_en",
+            "rom_mimic3_neural",
+            "rom_vits_ljs",
+            "rom_aishell3_zh"
         )
         assertTrue(mainTtsHubs.map { it.id }.toSet().containsAll(expectedIds))
     }
@@ -216,6 +222,13 @@ class PurrPremiumCatalogTest {
 
         assertEquals("rom_mimic3_neural", all["mimic3_es_mailabs"]?.cartridgeId)
         assertEquals("sub_mimic3_ko", all["mimic3_ko_kss"]?.requiredSubCartridgeId)
+
+        assertEquals("rom_vits_ljs", all["ljs_lexicon_en"]?.cartridgeId)
+        assertEquals(SherpaModelFamily.PIPER, all["ljs_lexicon_en"]?.sherpaFamily)
+        assertEquals(BackendType.SHERPA_ONNX, all["ljs_lexicon_en"]?.engine)
+
+        val aishellVoices = (0..9).map { idx -> all["aishell3_s$idx"] }
+        assertTrue(aishellVoices.all { it != null && it.cartridgeId == "rom_aishell3_zh" && it.sherpaFamily == SherpaModelFamily.PIPER })
     }
 
     @Test

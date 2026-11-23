@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -402,176 +403,185 @@ fun ModelCatalogTab(
             }
         }
 
-        // 1b. Compact Filter & Sort Dropdown Controls (persisted across screen switches)
+        // 1b. Sleek Single-Row Cyberdeck HUD Bar for Filter & Sort Dropdowns (persisted)
         var filterMenuOpen by remember { mutableStateOf(false) }
         var sortMenuOpen by remember { mutableStateOf(false) }
-        MikaGlowPanel(accent = categoryAccent, contentPadding = 10.dp) {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp)
+                .clip(RoundedCornerShape(8.dp))
+                .background(MikaColors.PanelBg)
+                .border(1.dp, categoryAccent.copy(alpha = 0.42f), RoundedCornerShape(8.dp))
+                .padding(horizontal = 8.dp, vertical = 5.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(categoryAccent.copy(alpha = 0.14f))
+                    .border(0.8.dp, categoryAccent.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 5.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "${visibleCatalog.size}/${categoryCatalog.size}",
+                    color = categoryAccent,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 9.sp,
+                    maxLines = 1
+                )
+            }
+
+            // FILTER HUD Dropdown
+            Box(modifier = Modifier.weight(1f)) {
+                val filterActive = filterMode != CartridgeFilterMode.ALL
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 32.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(if (filterActive) categoryAccent.copy(alpha = 0.14f) else MikaColors.DeepWellBg)
+                        .border(
+                            width = 1.dp,
+                            color = if (filterActive) categoryAccent else MikaColors.SubtleBorder,
+                            shape = RoundedCornerShape(5.dp)
+                        )
+                        .clickable { filterMenuOpen = true }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "> CATALOG_VIEW // ${visibleCatalog.size} OF ${categoryCatalog.size}",
-                        color = categoryAccent,
+                        text = "FLT: ${filterMode.label}",
+                        color = if (filterActive) categoryAccent else MikaColors.PrimaryText,
                         fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Black,
-                        fontSize = 9.5.sp
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
-                    if (filterMode != CartridgeFilterMode.ALL || sortMode != CartridgeSortMode.BAY_ORDER) {
-                        Text(
-                            text = "[RESET]",
-                            color = MikaColors.MikaAmber,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 9.sp,
-                            modifier = Modifier.clickable {
-                                viewModel.setCatalogFilterMode(CartridgeFilterMode.ALL)
-                                viewModel.setCatalogSortMode(CartridgeSortMode.BAY_ORDER)
+                    MikaCyberIcon(
+                        type = if (filterMenuOpen) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
+                        tint = if (filterActive) categoryAccent else MikaColors.DimText,
+                        size = 10.dp
+                    )
+                }
+                DropdownMenu(
+                    expanded = filterMenuOpen,
+                    onDismissRequest = { filterMenuOpen = false },
+                    modifier = Modifier
+                        .background(MikaColors.PanelBg)
+                        .border(1.dp, categoryAccent.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                ) {
+                    CartridgeFilterMode.entries.forEach { mode ->
+                        val selected = mode == filterMode
+                        DropdownMenuItem(
+                            text = {
+                                Text(
+                                    text = if (selected) "✓ ${mode.label}" else mode.label,
+                                    color = if (selected) categoryAccent else MikaColors.PrimaryText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                    fontSize = 10.sp
+                                )
+                            },
+                            onClick = {
+                                viewModel.setCatalogFilterMode(mode)
+                                filterMenuOpen = false
                             }
                         )
                     }
                 }
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Box(modifier = Modifier.weight(1f)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MikaColors.DeepWellBg)
-                                .border(
-                                    width = 1.dp,
-                                    color = if (filterMode != CartridgeFilterMode.ALL) categoryAccent else MikaColors.SubtleBorder,
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                                .clickable { filterMenuOpen = true }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "FILTER",
-                                    color = MikaColors.DimText,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 8.sp
-                                )
-                                Text(
-                                    text = filterMode.label,
-                                    color = if (filterMode != CartridgeFilterMode.ALL) categoryAccent else MikaColors.PrimaryText,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 10.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                            MikaCyberIcon(
-                                type = if (filterMenuOpen) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
-                                tint = categoryAccent,
-                                size = 11.dp
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = filterMenuOpen,
-                            onDismissRequest = { filterMenuOpen = false },
-                            modifier = Modifier
-                                .background(MikaColors.PanelBg)
-                                .border(1.dp, categoryAccent.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                        ) {
-                            CartridgeFilterMode.entries.forEach { mode ->
-                                val selected = mode == filterMode
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = if (selected) "✓ ${mode.label}" else mode.label,
-                                            color = if (selected) categoryAccent else MikaColors.PrimaryText,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
-                                            fontSize = 10.sp
-                                        )
-                                    },
-                                    onClick = {
-                                        viewModel.setCatalogFilterMode(mode)
-                                        filterMenuOpen = false
-                                    }
-                                )
-                            }
-                        }
-                    }
+            }
 
-                    Box(modifier = Modifier.weight(1f)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(MikaColors.DeepWellBg)
-                                .border(
-                                    width = 1.dp,
-                                    color = if (sortMode != CartridgeSortMode.BAY_ORDER) MikaColors.SsrGold else MikaColors.SubtleBorder,
-                                    shape = RoundedCornerShape(6.dp)
-                                )
-                                .clickable { sortMenuOpen = true }
-                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
+            // SORT HUD Dropdown
+            Box(modifier = Modifier.weight(1f)) {
+                val sortActive = sortMode != CartridgeSortMode.BAY_ORDER
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 32.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(if (sortActive) MikaColors.SsrGold.copy(alpha = 0.14f) else MikaColors.DeepWellBg)
+                        .border(
+                            width = 1.dp,
+                            color = if (sortActive) MikaColors.SsrGold else MikaColors.SubtleBorder,
+                            shape = RoundedCornerShape(5.dp)
+                        )
+                        .clickable { sortMenuOpen = true }
+                        .padding(horizontal = 8.dp, vertical = 5.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "SRT: ${sortMode.label}",
+                        color = if (sortActive) MikaColors.SsrGold else MikaColors.PrimaryText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.5.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MikaCyberIcon(
+                        type = if (sortMenuOpen) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
+                        tint = if (sortActive) MikaColors.SsrGold else MikaColors.DimText,
+                        size = 10.dp
+                    )
+                }
+                DropdownMenu(
+                    expanded = sortMenuOpen,
+                    onDismissRequest = { sortMenuOpen = false },
+                    modifier = Modifier
+                        .background(MikaColors.PanelBg)
+                        .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                ) {
+                    CartridgeSortMode.entries.forEach { mode ->
+                        val selected = mode == sortMode
+                        DropdownMenuItem(
+                            text = {
                                 Text(
-                                    text = "SORT",
-                                    color = MikaColors.DimText,
+                                    text = if (selected) "✓ ${mode.label}" else mode.label,
+                                    color = if (selected) MikaColors.SsrGold else MikaColors.PrimaryText,
                                     fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 8.sp
+                                    fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                    fontSize = 10.sp
                                 )
-                                Text(
-                                    text = sortMode.label,
-                                    color = if (sortMode != CartridgeSortMode.BAY_ORDER) MikaColors.SsrGold else MikaColors.PrimaryText,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 10.sp,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
+                            },
+                            onClick = {
+                                viewModel.setCatalogSortMode(mode)
+                                sortMenuOpen = false
                             }
-                            MikaCyberIcon(
-                                type = if (sortMenuOpen) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
-                                tint = MikaColors.SsrGold,
-                                size = 11.dp
-                            )
-                        }
-                        DropdownMenu(
-                            expanded = sortMenuOpen,
-                            onDismissRequest = { sortMenuOpen = false },
-                            modifier = Modifier
-                                .background(MikaColors.PanelBg)
-                                .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
-                        ) {
-                            CartridgeSortMode.entries.forEach { mode ->
-                                val selected = mode == sortMode
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = if (selected) "✓ ${mode.label}" else mode.label,
-                                            color = if (selected) MikaColors.SsrGold else MikaColors.PrimaryText,
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
-                                            fontSize = 10.sp
-                                        )
-                                    },
-                                    onClick = {
-                                        viewModel.setCatalogSortMode(mode)
-                                        sortMenuOpen = false
-                                    }
-                                )
-                            }
-                        }
+                        )
                     }
+                }
+            }
+
+            if (filterMode != CartridgeFilterMode.ALL || sortMode != CartridgeSortMode.BAY_ORDER) {
+                Box(
+                    modifier = Modifier
+                        .heightIn(min = 32.dp)
+                        .clip(RoundedCornerShape(5.dp))
+                        .background(MikaColors.MikaAmber.copy(alpha = 0.14f))
+                        .border(1.dp, MikaColors.MikaAmber.copy(alpha = 0.6f), RoundedCornerShape(5.dp))
+                        .clickable {
+                            viewModel.setCatalogFilterMode(CartridgeFilterMode.ALL)
+                            viewModel.setCatalogSortMode(CartridgeSortMode.BAY_ORDER)
+                        }
+                        .padding(horizontal = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "×",
+                        color = MikaColors.MikaAmber,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 11.sp
+                    )
                 }
             }
         }

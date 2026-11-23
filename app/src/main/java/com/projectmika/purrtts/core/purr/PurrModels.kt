@@ -1410,7 +1410,36 @@ object PurrDefaultPresets {
             )
         )
 
-        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + sherpaSpecialized + heavyNativeVoices + proxyVoices
+        val vitsLjsVoices = listOf(
+            VoiceDescriptor(
+                id = "ljs_lexicon_en",
+                displayName = "VITS LJSpeech // Direct Lexicon (US)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_vits_ljs",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "ljspeech", "lexicon", "narrator")
+            )
+        )
+
+        val aishell3Voices = (0..9).map { idx ->
+            val isFemale = idx % 2 == 0
+            VoiceDescriptor(
+                id = "aishell3_s$idx",
+                displayName = "AISHELL-3 // Mandarin Speaker #$idx (${if (isFemale) "F" else "M"})",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_aishell3_zh",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = if (isFemale) VoiceGender.FEMALE else VoiceGender.MALE,
+                languageCode = "zh-CN",
+                speakerIndex = idx,
+                nativeTags = listOf(if (isFemale) "female" else "male", "chinese", "mandarin", "aishell3", "icefall")
+            )
+        }
+
+        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + vitsLjsVoices + aishell3Voices + sherpaSpecialized + heavyNativeVoices + proxyVoices
     }
 
     /**
@@ -2021,6 +2050,46 @@ object PurrDefaultPresets {
             unlocksSummary = "UNLOCKS: Mimic3 Spanish (es-ES) + Korean KSS (ko-KR) sub-cartridge below.",
             category = CartridgeCategory.TTS,
             releaseOrder = 14
+        ),
+        ModelBundleSpec(
+            id = "rom_vits_ljs",
+            romCode = "ROM-15",
+            badge = "LJS_LEXICON",
+            accentHex = 0xFFFF6E91,
+            name = "VITS_LJS_LEXICON",
+            subtitle = "VITS LJSpeech Direct Lexicon • Clean US Studio (104MB)",
+            description = "Classic Icefall/k2-fsa VITS LJSpeech US female studio narrator powered by a direct 120k-word pronunciation lexicon for silky cadence without espeak.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-ljs.tar.bz2",
+            fileName = "vits-ljs.tar.bz2",
+            expectedSha256 = "78f7df445fcd42d1dd6df2c78c66c2c2fee8b7abecc6ae255a5950097a6558bc",
+            approximateSizeMb = 104,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Direct VITS ONNX + Built-In US English Lexicon",
+            unlocksSummary = "UNLOCKS: VITS LJSpeech Direct Lexicon US studio voice.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 15
+        ),
+        ModelBundleSpec(
+            id = "rom_aishell3_zh",
+            romCode = "ROM-16",
+            badge = "AISHELL3_174",
+            accentHex = 0xFF38BDF8,
+            name = "AISHELL3_174_VITS",
+            subtitle = "Icefall AISHELL-3 Multi-Speaker Mandarin VITS + rule.far (30MB)",
+            description = "Ultra-compact 30MB Icefall Mandarin VITS multi-speaker engine trained on AISHELL-3 with full Chinese date/number rule.far text normalization.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-zh-aishell3.tar.bz2",
+            fileName = "vits-icefall-zh-aishell3.tar.bz2",
+            expectedSha256 = "ab468db3a3308cdd861495e0db2f25d79418a0c00639f74944c7cdf5dd8c6ec1",
+            approximateSizeMb = 30,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Icefall AISHELL-3 VITS + OpenFst rule.far Normalizer",
+            unlocksSummary = "UNLOCKS: 10 curated Mandarin speakers (female & male) under zh-CN.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 16
         ),
 
         // =========================================================================

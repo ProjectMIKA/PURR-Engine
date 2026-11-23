@@ -85,6 +85,7 @@ import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaOsModuleIcon
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 import com.projectmika.purrtts.ui.theme.OsModuleIconType
+import com.projectmika.purrtts.ui.theme.bringIntoViewWithIme
 import kotlin.math.roundToInt
 
 private enum class ActiveOsModule(
@@ -1519,7 +1520,7 @@ private fun AudioExporterModuleWindowBody(
                 focusedContainerColor = MikaColors.DeepWellBg,
                 unfocusedContainerColor = MikaColors.DeepWellBg
             ),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -1567,7 +1568,7 @@ private fun AudioExporterModuleWindowBody(
                 focusedContainerColor = MikaColors.DeepWellBg,
                 unfocusedContainerColor = MikaColors.DeepWellBg
             ),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
         )
 
         Spacer(modifier = Modifier.height(6.dp))

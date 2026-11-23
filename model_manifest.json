@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAtUtc": "2026-11-23T01:49:55Z",
+  "generatedAtUtc": "2026-11-23T02:30:42Z",
   "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
   "assets": {
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
