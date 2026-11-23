@@ -208,10 +208,11 @@ enum class MangaVisionModelTier(
 
 enum class MangaPipelineStage(val stepNum: Int, val label: String) {
     IDLE(0, "IDLE"),
-    EXTRACT_AND_SLICE(1, "1/4 EXTRACT & SLICE"),
-    VISION_SCAN(2, "2/4 GEMMA VISION"),
-    VOICE_FORGE(3, "3/4 VOICE FORGE"),
-    VIDEO_MUX(4, "4/4 VIDEO & AAC MUX")
+    EXTRACT_AND_SLICE(1, "1/5 UNPACK & SLICE"),
+    VISION_SCAN(2, "2/5 GEMMA VISION OCR"),
+    VOICE_CASTING(3, "3/5 QWEN VOICEDESIGN CAST"),
+    VOICE_FORGE(4, "4/5 VOICE SYNTHESIS"),
+    VIDEO_MUX(5, "5/5 MOTION .MP4 MUX")
 }
 
 data class MangaJobTelemetry(
@@ -236,6 +237,8 @@ data class MangaSeriesProject(
     val enableAtmosphereFx: Boolean = true,
     val powerUserVisionUrl: String = "",
     val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO,
+    val autoCookFullMp4: Boolean = true,
+    val pauseOnFlaggedDecisions: Boolean = true,
     val storyContextSummary: String = "",
     val characters: List<MangaCharacterProfile> = emptyList(),
     val chapters: List<MangaChapterEntry> = emptyList()
@@ -711,91 +714,220 @@ object MangaVisionResponseParser {
 
         // Strip markdown fences if model wrapped JSON
         cleaned = cleaned
-            .replace(Regex("""^```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\s*```$"""), "")
+            .replace(Regex("""```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace("```", "")
             .trim()
 
         val objStart = cleaned.indexOf('{')
         val objEnd = cleaned.lastIndexOf('}')
-        if (objStart < 0 || objEnd <= objStart) {
-            return ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
+        val arrStart = cleaned.indexOf('[')
+        val arrEnd = cleaned.lastIndexOf(']')
+
+        val jsonCandidate: String? = when {
+            objStart >= 0 && objEnd > objStart -> cleaned.substring(objStart, objEnd + 1)
+            arrStart >= 0 && arrEnd > arrStart -> "{\"panels\":${cleaned.substring(arrStart, arrEnd + 1)}}"
+            else -> null
         }
-        val jsonSlice = cleaned.substring(objStart, objEnd + 1)
 
-        return runCatching {
-            val root = lenientJson.parseToJsonElement(jsonSlice) as? JsonObject
-                ?: return@runCatching ParsedPageAnalysis(thoughtTrace, "", emptyList())
-            val summary = (root["story_summary"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-            val panelsArr = root["panels"] as? JsonArray ?: JsonArray(emptyList())
-            val knownNames = existingCharacters.map { it.name }.distinct()
+        if (jsonCandidate != null) {
+            val sanitizedJson = cleanupTrailingCommas(jsonCandidate)
+            val parsedJson = runCatching {
+                val root = lenientJson.parseToJsonElement(sanitizedJson) as? JsonObject ?: return@runCatching null
+                val summary = (root["story_summary"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                val panelsArr = root["panels"] as? JsonArray ?: JsonArray(emptyList())
+                val knownNames = existingCharacters.map { it.name }.distinct()
 
-            val parsedPanels = panelsArr.mapIndexedNotNull { idx, elem ->
-                val pObj = elem as? JsonObject ?: return@mapIndexedNotNull null
-                val pIdx = (pObj["panel_index"] as? JsonPrimitive)?.intOrNull?.coerceIn(0, max(0, panelCount - 1))
-                    ?: idx.coerceIn(0, max(0, panelCount - 1))
-                val mood = (pObj["scene_mood"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                val panelThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                val linesArr = pObj["lines"] as? JsonArray ?: JsonArray(emptyList())
+                val rawPanelNums = panelsArr.mapIndexedNotNull { idx, elem ->
+                    val pObj = elem as? JsonObject ?: return@mapIndexedNotNull null
+                    parsePanelNumber(pObj["panel_index"] ?: pObj["panel"])
+                }
+                val looksOneBased = rawPanelNums.isNotEmpty() &&
+                    rawPanelNums.all { it in 1..max(1, panelCount) } &&
+                    rawPanelNums.none { it == 0 }
 
-                val parsedLines = linesArr.mapIndexedNotNull { lIdx, lElem ->
-                    val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
-                    val rawText = (lObj["text"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                    if (rawText.isEmpty()) return@mapIndexedNotNull null
-                    val speakerRaw = (lObj["speaker"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                        .ifEmpty { "UNKNOWN" }
-                    val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
-                    val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
-                    val gender = when {
-                        genderStr.startsWith("f") -> VoiceGender.FEMALE
-                        genderStr.startsWith("m") -> VoiceGender.MALE
-                        else -> VoiceGender.ANDROGYNOUS
+                val parsedPanels = panelsArr.mapIndexedNotNull { idx, elem ->
+                    val pObj = elem as? JsonObject ?: return@mapIndexedNotNull null
+                    val rawNum = parsePanelNumber(pObj["panel_index"] ?: pObj["panel"])
+                    val adjusted = if (rawNum != null && looksOneBased) rawNum - 1 else rawNum
+                    val pIdx = (adjusted ?: idx).coerceIn(0, max(0, panelCount - 1))
+                    val mood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    val panelThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    val linesArr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: JsonArray(emptyList())
+
+                    val parsedLines = linesArr.mapIndexedNotNull { lIdx, lElem ->
+                        val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
+                        val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
+                            ?.contentOrNull.orEmpty().trim()
+                        if (rawText.isEmpty()) return@mapIndexedNotNull null
+                        val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
+                            ?.contentOrNull.orEmpty().trim()
+                            .ifEmpty { "UNKNOWN" }
+                        val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
+                        val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
+                        val gender = when {
+                            genderStr.startsWith("f") -> VoiceGender.FEMALE
+                            genderStr.startsWith("m") -> VoiceGender.MALE
+                            else -> VoiceGender.ANDROGYNOUS
+                        }
+                        val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                        val designPrompt = ((lObj["voice_design_prompt"] ?: lObj["voice_prompt"]) as? JsonPrimitive)
+                            ?.contentOrNull.orEmpty().trim()
+                        val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                            .ifEmpty { "neutral" }
+                        val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.88f
+                        val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
+                        val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
+                            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                            .orEmpty()
+                        val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
+                            speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
+                            speakerRaw == "?"
+                        val needsDecision = ambiguousSpeaker || conf < 0.55f
+                        val reason = when {
+                            ambiguousSpeaker -> "Gemma flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
+                            conf < 0.55f -> "Low Gemma confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
+                            else -> ""
+                        }
+                        val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
+
+                        DiscoveredLineSpec(
+                            bubbleIndex = bubbleNum,
+                            speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
+                            isNewCharacter = isNew && !ambiguousSpeaker,
+                            gender = gender,
+                            visualDescription = visualDesc,
+                            voiceDesignPrompt = designPrompt,
+                            emotion = emotion,
+                            confidence = conf,
+                            candidateSpeakers = mergedCandidates,
+                            rawText = rawText,
+                            needsUserDecision = needsDecision,
+                            decisionReason = reason
+                        )
                     }
-                    val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                    val designPrompt = (lObj["voice_design_prompt"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                    val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                        .ifEmpty { "neutral" }
-                    val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.90f
-                    val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
-                    val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
-                        ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
-                        .orEmpty()
-                    val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
-                        speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
-                        speakerRaw == "?"
-                    val needsDecision = ambiguousSpeaker || conf < 0.72f
-                    val reason = when {
-                        ambiguousSpeaker -> "Speaker ambiguous in Panel ${pIdx + 1} (conf=${(conf * 100).toInt()}%)"
-                        conf < 0.72f -> "Low Gemma confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
-                        else -> ""
-                    }
-                    val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
-
-                    DiscoveredLineSpec(
-                        bubbleIndex = bubbleNum,
-                        speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
-                        isNewCharacter = isNew && !ambiguousSpeaker,
-                        gender = gender,
-                        visualDescription = visualDesc,
-                        voiceDesignPrompt = designPrompt,
-                        emotion = emotion,
-                        confidence = conf,
-                        candidateSpeakers = mergedCandidates,
-                        rawText = rawText,
-                        needsUserDecision = needsDecision,
-                        decisionReason = reason
+                    DiscoveredPanelSpec(
+                        panelIndex = pIdx,
+                        sceneMood = mood,
+                        thoughtTrace = panelThought.ifEmpty { thoughtTrace },
+                        lines = parsedLines
                     )
                 }
-                DiscoveredPanelSpec(
-                    panelIndex = pIdx,
-                    sceneMood = mood,
-                    thoughtTrace = panelThought.ifEmpty { thoughtTrace },
-                    lines = parsedLines
-                )
+                ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = summary, panels = parsedPanels)
+            }.getOrNull()
+
+            if (parsedJson != null && parsedJson.panels.isNotEmpty()) {
+                return parsedJson
             }
-            ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = summary, panels = parsedPanels)
-        }.getOrElse {
-            ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
         }
+
+        // Structured plain-text fallback if Gemma responded outside JSON
+        val textFallback = parseStructuredTextFallback(cleaned, panelCount, existingCharacters, thoughtTrace)
+        return textFallback ?: ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
+    }
+
+    fun parseVoiceDesignRoster(
+        rawResponse: String,
+        existingRoster: List<MangaCharacterProfile>
+    ): List<MangaCharacterProfile> {
+        var cleaned = rawResponse.trim()
+            .replace(Regex("""<(?:thought|thinking)>[\s\S]*?</(?:thought|thinking)>""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace("```", "")
+            .trim()
+        val objStart = cleaned.indexOf('{')
+        val objEnd = cleaned.lastIndexOf('}')
+        if (objStart < 0 || objEnd <= objStart) return existingRoster
+
+        val jsonSlice = cleanupTrailingCommas(cleaned.substring(objStart, objEnd + 1))
+        val parsedMap = runCatching {
+            val root = lenientJson.parseToJsonElement(jsonSlice) as? JsonObject ?: return@runCatching null
+            val arr = root["characters"] as? JsonArray ?: return@runCatching null
+            val byName = HashMap<String, JsonObject>()
+            for (elem in arr) {
+                val obj = elem as? JsonObject ?: continue
+                val n = (obj["name"] as? JsonPrimitive)?.contentOrNull?.trim()?.uppercase() ?: continue
+                byName[n] = obj
+            }
+            byName
+        }.getOrNull() ?: return existingRoster
+
+        return existingRoster.map { ch ->
+            val update = parsedMap[ch.name.uppercase()]
+                ?: parsedMap.entries.firstOrNull { (k, _) ->
+                    k.contains(ch.name, ignoreCase = true) || ch.name.contains(k, ignoreCase = true)
+                }?.value
+                ?: return@map ch
+
+            val gStr = (update["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
+            val nextGender = when {
+                gStr.startsWith("f") -> VoiceGender.FEMALE
+                gStr.startsWith("m") -> VoiceGender.MALE
+                gStr.startsWith("a") -> VoiceGender.ANDROGYNOUS
+                else -> ch.gender
+            }
+            val nextVis = (update["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                .ifBlank { ch.visualDescription }
+            val nextVoice = (update["voice_design_prompt"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                .ifBlank { ch.voiceDesignPrompt }
+            val nextSpeed = ((update["speed_scale"] as? JsonPrimitive)?.floatOrNull ?: ch.speedScale).coerceIn(0.85f, 1.15f)
+            val nextPitch = ((update["pitch_scale"] as? JsonPrimitive)?.floatOrNull ?: ch.pitchScale).coerceIn(0.90f, 1.10f)
+
+            ch.copy(
+                gender = nextGender,
+                visualDescription = nextVis,
+                voiceDesignPrompt = nextVoice,
+                speedScale = nextSpeed,
+                pitchScale = nextPitch
+            )
+        }
+    }
+
+    private fun cleanupTrailingCommas(jsonText: String): String =
+        jsonText.replace(Regex(",\\s*([}\\]])"), "$1")
+
+    private fun parsePanelNumber(elem: kotlinx.serialization.json.JsonElement?): Int? {
+        val prim = elem as? JsonPrimitive ?: return null
+        prim.intOrNull?.let { return it }
+        val digits = prim.contentOrNull.orEmpty().replace(Regex("[^0-9]"), "")
+        return digits.toIntOrNull()
+    }
+
+    private fun parseStructuredTextFallback(
+        body: String,
+        panelCount: Int,
+        existingCharacters: List<MangaCharacterProfile>,
+        thoughtTrace: String
+    ): ParsedPageAnalysis? {
+        val knownNames = existingCharacters.map { it.name }.distinct()
+        val lineRe = Regex("""^\s*(?:\[?P(\d+)\]?\s*[-:]\s*)?([A-Za-z0-9_ ]{2,22}):\s*["“]?(.+?)["”]?\s*$""")
+        val grouped = LinkedHashMap<Int, MutableList<DiscoveredLineSpec>>()
+        body.lines().forEach { line ->
+            val m = lineRe.find(line) ?: return@forEach
+            val pIdx = ((m.groupValues[1].toIntOrNull() ?: 1) - 1).coerceIn(0, max(0, panelCount - 1))
+            val speaker = m.groupValues[2].trim().uppercase()
+            val text = m.groupValues[3].trim()
+            if (text.length < 2 || speaker in setOf("THOUGHT", "MOOD", "SCENE", "SUMMARY")) return@forEach
+            val list = grouped.getOrPut(pIdx) { mutableListOf() }
+            list += DiscoveredLineSpec(
+                bubbleIndex = list.size + 1,
+                speakerName = speaker,
+                isNewCharacter = existingCharacters.none { it.name.equals(speaker, ignoreCase = true) },
+                gender = VoiceGender.ANDROGYNOUS,
+                visualDescription = "",
+                voiceDesignPrompt = "Expressive anime character dialogue voice, clear articulation",
+                emotion = "neutral",
+                confidence = 0.78f,
+                candidateSpeakers = knownNames,
+                rawText = text,
+                needsUserDecision = speaker == "UNKNOWN",
+                decisionReason = if (speaker == "UNKNOWN") "Confirm speaker" else ""
+            )
+        }
+        if (grouped.isEmpty()) return null
+        val panels = grouped.entries.map { (pIdx, lines) ->
+            DiscoveredPanelSpec(panelIndex = pIdx, sceneMood = "action", thoughtTrace = thoughtTrace, lines = lines)
+        }
+        return ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = panels)
     }
 }
 

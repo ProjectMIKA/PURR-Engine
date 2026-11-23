@@ -1810,9 +1810,24 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         uri: Uri,
         targetProjectId: String?,
         seriesTitleInput: String,
-        readingOrder: MangaReadingOrder
+        readingOrder: MangaReadingOrder,
+        autoProduceMp4: Boolean = true,
+        pauseOnFlags: Boolean = true
     ) {
-        mangaDubManager.importCbzChapter(uri, targetProjectId, seriesTitleInput, readingOrder) { msg ->
+        mangaDubManager.importCbzChapter(
+            uri = uri,
+            targetProjectId = targetProjectId,
+            seriesTitleInput = seriesTitleInput,
+            readingOrder = readingOrder,
+            autoProduceMp4 = autoProduceMp4,
+            pauseOnFlags = pauseOnFlags
+        ) { msg ->
+            showToast(msg)
+        }
+    }
+
+    fun autoResolveAndProduceMangaMp4(projectId: String, chapterId: String) {
+        mangaDubManager.autoResolveDecisionsAndProduce(projectId, chapterId) { msg ->
             showToast(msg)
         }
     }

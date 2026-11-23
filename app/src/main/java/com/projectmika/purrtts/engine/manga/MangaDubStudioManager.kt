@@ -119,11 +119,16 @@ class MangaDubStudioManager(
         val line = "[$stamp] $entry"
         synchronized(logLines) {
             if (logLines.lastOrNull() != line) {
-                if (logLines.size >= 6) logLines.removeFirst()
+                while (logLines.size >= 40) logLines.removeFirst()
                 logLines.addLast(line)
             }
         }
     }
+
+    private fun customVisionPaths(): List<String> = listOfNotNull(
+        repository.state.value.modelStates[LiteRtGemmaVisionEngine.GEMMA_E2B_SPEC_ID]?.localPath,
+        repository.state.value.modelStates[LiteRtGemmaVisionEngine.GEMMA_E4B_SPEC_ID]?.localPath
+    )
 
     private fun startTelemetryTicker(stage: MangaPipelineStage, detail: String, itemTotal: Int = 0) {
         telemetryTickerJob?.cancel()
@@ -307,6 +312,8 @@ class MangaDubStudioManager(
         targetProjectId: String?,
         seriesTitleInput: String,
         readingOrder: MangaReadingOrder,
+        autoProduceMp4: Boolean = true,
+        pauseOnFlags: Boolean = true,
         onComplete: (String) -> Unit
     ) {
         if (_isBusy.value) {
@@ -315,10 +322,10 @@ class MangaDubStudioManager(
         }
         activeJob = scope.launch {
             _isBusy.value = true
-            _overallProgress.value = 0.03f
+            _overallProgress.value = 0.02f
             startTelemetryTicker(
                 stage = MangaPipelineStage.EXTRACT_AND_SLICE,
-                detail = "OPENING .CBZ ARCHIVE STREAM..."
+                detail = "📦 OPENING .CBZ ARCHIVE STREAM..."
             )
             try {
                 val rawName = resolveFileName(uri)
@@ -331,8 +338,8 @@ class MangaDubStudioManager(
 
                 reportTelemetry(
                     stage = MangaPipelineStage.EXTRACT_AND_SLICE,
-                    detail = "UNPACKING .CBZ ($rawName)...",
-                    progress = 0.05f,
+                    detail = "📦 UNPACKING .CBZ ($rawName)...",
+                    progress = 0.04f,
                     addLog = true
                 )
                 val extractedFiles = extractCbzImages(uri, chapterPagesDir, rawName)
@@ -340,19 +347,25 @@ class MangaDubStudioManager(
                     throw IllegalStateException("No readable manga image pages (.jpg/.png/.webp) found in $rawName")
                 }
 
-                val initialProj = existingProject?.copy(updatedAtEpochMs = now, readingOrder = readingOrder)
-                    ?: MangaSeriesProject(
-                        id = projectId,
-                        seriesTitle = seriesTitleInput.trim().ifEmpty { chapterTitle },
-                        createdAtEpochMs = now,
-                        updatedAtEpochMs = now,
-                        readingOrder = readingOrder
-                    )
+                val initialProj = existingProject?.copy(
+                    updatedAtEpochMs = now,
+                    readingOrder = readingOrder,
+                    autoCookFullMp4 = autoProduceMp4,
+                    pauseOnFlaggedDecisions = pauseOnFlags
+                ) ?: MangaSeriesProject(
+                    id = projectId,
+                    seriesTitle = seriesTitleInput.trim().ifEmpty { chapterTitle },
+                    createdAtEpochMs = now,
+                    updatedAtEpochMs = now,
+                    readingOrder = readingOrder,
+                    autoCookFullMp4 = autoProduceMp4,
+                    pauseOnFlaggedDecisions = pauseOnFlags
+                )
 
                 reportTelemetry(
                     stage = MangaPipelineStage.EXTRACT_AND_SLICE,
-                    detail = "BFS SLICING ${extractedFiles.size} PAGES...",
-                    progress = 0.08f,
+                    detail = "✂️ BFS SLICING ${extractedFiles.size} PAGES...",
+                    progress = 0.06f,
                     itemCurrent = 0,
                     itemTotal = extractedFiles.size,
                     addLog = true
@@ -360,8 +373,8 @@ class MangaDubStudioManager(
                 val rawPages = extractedFiles.mapIndexedNotNull { pageIdx, imgFile ->
                     reportTelemetry(
                         stage = MangaPipelineStage.EXTRACT_AND_SLICE,
-                        detail = "SLICING PAGE ${pageIdx + 1}/${extractedFiles.size} (${imgFile.name})...",
-                        progress = 0.08f + 0.18f * ((pageIdx + 1).toFloat() / extractedFiles.size.toFloat()),
+                        detail = "✂️ SLICING PAGE ${pageIdx + 1}/${extractedFiles.size} (${imgFile.name})...",
+                        progress = 0.06f + 0.08f * ((pageIdx + 1).toFloat() / extractedFiles.size.toFloat()),
                         itemCurrent = pageIdx + 1,
                         itemTotal = extractedFiles.size
                     )
@@ -370,6 +383,8 @@ class MangaDubStudioManager(
                 if (rawPages.isEmpty()) {
                     throw IllegalStateException("Failed to decode extracted manga images")
                 }
+                val totalPanelCount = rawPages.sumOf { it.panels.size }
+                appendLog("✂️ Sliced ${rawPages.size} page(s) into $totalPanelCount reading-order panels")
 
                 val importedChapter = MangaChapterEntry(
                     id = chapterId,
@@ -385,21 +400,56 @@ class MangaDubStudioManager(
                 persistAndPublish(projWithChapter)
                 _activeProjectId.value = projWithChapter.id
 
-                val finalProj = runVisionPhaseOnChapter(projWithChapter.id, chapterId)
+                val visionSpan = if (autoProduceMp4) 0.36f else 0.86f
+                val finalProj = runVisionPhaseOnChapter(
+                    projectId = projWithChapter.id,
+                    chapterId = chapterId,
+                    progressOffset = 0.14f,
+                    progressSpan = visionSpan
+                )
                 val ch = finalProj.chapters.firstOrNull { it.id == chapterId }
                 val pending = ch?.pendingDecisionCount ?: 0
-                val summaryMsg = "Scanned ${rawPages.size} pages, ${ch?.totalPanelCount ?: 0} panels ($pending decision(s) flagged)"
+
+                if (!autoProduceMp4) {
+                    val summaryMsg = "Scanned ${rawPages.size} pages, ${ch?.totalPanelCount ?: 0} panels ($pending decision(s))"
+                    _overallProgress.value = 1f
+                    finishTelemetry("✅ PRE-PRODUCTION READY // $summaryMsg")
+                    onComplete(summaryMsg)
+                    return@launch
+                }
+
+                if (pauseOnFlags && pending > 0) {
+                    val pauseMsg = "Paused: $pending bubble(s) flagged for quick speaker confirmation (${ch?.totalLineCount ?: 0} lines)"
+                    _overallProgress.value = 0.50f
+                    finishTelemetry("⏸️ $pauseMsg")
+                    onComplete(pauseMsg)
+                    return@launch
+                }
+
+                reportTelemetry(
+                    stage = MangaPipelineStage.VOICE_FORGE,
+                    detail = "🚀 AUTO-COOK ENGAGED (${ch?.totalLineCount ?: 0} LINES, ${finalProj.characters.size} CAST) -> FORGING VOICES...",
+                    progress = 0.50f,
+                    addLog = true
+                )
+                val destNote = executeProduceDubbedChapterMp4(
+                    projectId = projWithChapter.id,
+                    chapterId = chapterId,
+                    progressOffset = 0.50f,
+                    progressSpan = 0.50f
+                )
                 _overallProgress.value = 1f
-                finishTelemetry("PRE-PRODUCTION READY // $summaryMsg")
-                onComplete(summaryMsg)
+                finishTelemetry("🎉 DUBBED EPISODE READY -> $destNote")
+                onComplete("Dubbed Manga .MP4 ready: $destNote")
             } catch (ce: CancellationException) {
                 throw ce
             } catch (err: Exception) {
                 val msg = err.message ?: "Unknown extract error"
-                finishTelemetry("IMPORT ERROR: $msg")
-                onComplete("CBZ import failed: $msg")
+                finishTelemetry("❌ COOK ERROR: $msg")
+                onComplete("Manga dub failed: $msg")
             } finally {
                 runCatching { visionEngine.unload() }
+                backendRouter.markIdle()
                 _isBusy.value = false
             }
         }
@@ -598,19 +648,24 @@ class MangaDubStudioManager(
             _overallProgress.value = 0.05f
             startTelemetryTicker(
                 stage = MangaPipelineStage.VISION_SCAN,
-                detail = "MOUNTING GEMMA 4 VISION FOR CHAPTER RESCAN..."
+                detail = "🧠 MOUNTING GEMMA 4 VISION FOR CHAPTER RESCAN..."
             )
             try {
-                val updated = runVisionPhaseOnChapter(projectId, chapterId)
+                val updated = runVisionPhaseOnChapter(
+                    projectId = projectId,
+                    chapterId = chapterId,
+                    progressOffset = 0.05f,
+                    progressSpan = 0.95f
+                )
                 val ch = updated.chapters.firstOrNull { it.id == chapterId }
                 val pending = ch?.pendingDecisionCount ?: 0
                 _overallProgress.value = 1f
-                finishTelemetry("VISION RESCAN COMPLETE ($pending DECISION(S))")
+                finishTelemetry("✅ VISION & VOICEDESIGN RESCAN COMPLETE ($pending DECISION(S))")
                 onComplete("Re-scanned chapter (${ch?.totalLineCount ?: 0} lines, $pending decision(s))")
             } catch (ce: CancellationException) {
                 throw ce
             } catch (err: Exception) {
-                finishTelemetry("VISION RESCAN FAILED: ${err.message}")
+                finishTelemetry("❌ VISION RESCAN FAILED: ${err.message}")
                 onComplete("Vision rescan failed: ${err.message}")
             } finally {
                 runCatching { visionEngine.unload() }
@@ -619,7 +674,12 @@ class MangaDubStudioManager(
         }
     }
 
-    private suspend fun runVisionPhaseOnChapter(projectId: String, chapterId: String): MangaSeriesProject {
+    private suspend fun runVisionPhaseOnChapter(
+        projectId: String,
+        chapterId: String,
+        progressOffset: Float = 0.14f,
+        progressSpan: Float = 0.80f
+    ): MangaSeriesProject {
         var proj = _projects.value.firstOrNull { it.id == projectId }
             ?: throw IllegalStateException("Project not found")
         val ch = proj.chapters.firstOrNull { it.id == chapterId }
@@ -628,15 +688,22 @@ class MangaDubStudioManager(
         val charsDir = File(projectDir(projectId), "characters").apply { mkdirs() }
         val roster = proj.characters.toMutableList()
         val recentLines = mutableListOf<String>()
+        val sampleLinesBySpeaker = LinkedHashMap<String, MutableList<String>>()
         val updatedPages = ArrayList<MangaPageEntry>(ch.pages.size)
+        val modelPaths = customVisionPaths()
+
+        val pageScanSpan = progressSpan * 0.78f
+        val castingOffset = progressOffset + pageScanSpan
+        val castingSpan = progressSpan * 0.22f
 
         try {
             for ((pageIdx, page) in ch.pages.withIndex()) {
+                if (!isActive) throw CancellationException("Cancelled")
                 val tierNote = proj.preferredVisionModel.shortLabel
                 reportTelemetry(
                     stage = MangaPipelineStage.VISION_SCAN,
-                    detail = "GEMMA 4 [$tierNote] SCANNING PAGE ${pageIdx + 1}/${ch.pages.size}...",
-                    progress = 0.25f + 0.70f * (pageIdx.toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
+                    detail = "🧠 GEMMA 4 [$tierNote] SCANNING PAGE ${pageIdx + 1}/${ch.pages.size}...",
+                    progress = progressOffset + pageScanSpan * (pageIdx.toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
                     itemCurrent = pageIdx + 1,
                     itemTotal = ch.pages.size,
                     addLog = true
@@ -652,18 +719,17 @@ class MangaDubStudioManager(
                         existingCharacters = roster,
                         recentDialogueContext = recentLines,
                         powerUserVisionUrl = proj.powerUserVisionUrl,
-                        preferredVisionModel = proj.preferredVisionModel
+                        preferredVisionModel = proj.preferredVisionModel,
+                        customModelPaths = modelPaths,
+                        onLog = { msg -> appendLog(msg) }
                     )
-                    reportTelemetry(
-                        stage = MangaPipelineStage.VISION_SCAN,
-                        detail = "PAGE ${pageIdx + 1}/${ch.pages.size} // $engineBadge",
-                        progress = 0.25f + 0.70f * ((pageIdx + 1).toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
-                        itemCurrent = pageIdx + 1,
-                        itemTotal = ch.pages.size,
-                        addLog = true
-                    )
+                    val thoughtPreview = analysis.thoughtTrace.replace('\n', ' ').trim().take(90)
+                    if (thoughtPreview.isNotBlank()) {
+                        appendLog("💭 P${pageIdx + 1} thought: \"$thoughtPreview...\"")
+                    }
 
                     val panelByIdx = analysis.panels.associateBy { it.panelIndex }
+                    var pageDialogueCount = 0
                     val nextPanels = page.panels.mapIndexed { pIdx, existingPanel ->
                         val spec = panelByIdx[pIdx]
                         if (spec == null) {
@@ -690,10 +756,16 @@ class MangaDubStudioManager(
                                     )
                                     roster += newChar
                                     matchedChar = newChar
+                                    appendLog("👤 Cast discovered: ${newChar.name} (${newChar.gender.tag})")
                                 }
                                 val cleanText = MangaTextBender.sanitizeMangaDialogue(ls.rawText)
-                                if (cleanText.isNotEmpty() && !ls.needsUserDecision) {
-                                    recentLines += "$speakerKey: $cleanText"
+                                if (cleanText.isNotEmpty()) {
+                                    pageDialogueCount++
+                                    if (!ls.needsUserDecision) {
+                                        recentLines += "$speakerKey: $cleanText"
+                                    }
+                                    val key = matchedChar?.name ?: speakerKey
+                                    sampleLinesBySpeaker.getOrPut(key) { mutableListOf() } += cleanText
                                 }
                                 MangaSpeechLine(
                                     id = "ln_${pageIdx}_${pIdx}_$lIdx",
@@ -721,13 +793,56 @@ class MangaDubStudioManager(
                     if (analysis.storySummary.isNotBlank()) {
                         proj = proj.copy(storyContextSummary = analysis.storySummary)
                     }
+                    reportTelemetry(
+                        stage = MangaPipelineStage.VISION_SCAN,
+                        detail = "🧠 PAGE ${pageIdx + 1}/${ch.pages.size} ($pageDialogueCount lines) // $engineBadge",
+                        progress = progressOffset + pageScanSpan * ((pageIdx + 1).toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
+                        itemCurrent = pageIdx + 1,
+                        itemTotal = ch.pages.size,
+                        addLog = true
+                    )
                 } finally {
                     bmp.recycle()
                 }
             }
+
+            if (roster.isNotEmpty()) {
+                reportTelemetry(
+                    stage = MangaPipelineStage.VOICE_CASTING,
+                    detail = "🎭 GEMMA 4 DESIGNING QWEN3 1.7B VOICES FOR ${roster.size} CHARACTER(S)...",
+                    progress = castingOffset + castingSpan * 0.2f,
+                    itemCurrent = 0,
+                    itemTotal = roster.size,
+                    addLog = true
+                )
+                val designedRoster = visionEngine.craftQwenVoiceDesignsForRoster(
+                    seriesTitle = proj.seriesTitle,
+                    storySummary = proj.storyContextSummary,
+                    characters = roster,
+                    sampleLinesBySpeaker = sampleLinesBySpeaker,
+                    preferredVisionModel = proj.preferredVisionModel,
+                    powerUserVisionUrl = proj.powerUserVisionUrl,
+                    customModelPaths = modelPaths,
+                    onLog = { msg -> appendLog(msg) }
+                )
+                roster.clear()
+                roster.addAll(designedRoster)
+                roster.forEach { chProf ->
+                    appendLog("🎭 Cast [${chProf.name}]: \"${chProf.voiceDesignPrompt.take(72)}\"")
+                }
+                reportTelemetry(
+                    stage = MangaPipelineStage.VOICE_CASTING,
+                    detail = "🎭 DESIGNED ${roster.size} CUSTOM QWEN3 VOICE PROMPTS",
+                    progress = castingOffset + castingSpan,
+                    itemCurrent = roster.size,
+                    itemTotal = roster.size,
+                    addLog = true
+                )
+            }
         } finally {
-            // Strict LMKD protection: release Gemma 4 LiteRT weights immediately after Vision pass
+            // Strict LMKD protection: release Gemma 4 LiteRT weights immediately after Vision + Casting pass
             visionEngine.unload()
+            appendLog("🧹 Evicted Gemma 4 Vision VRAM -> ready for Qwen3 VoiceDesign")
         }
 
         val recomputedRoster = recomputeCharacterLineCounts(roster, ch.copy(pages = updatedPages), proj.chapters.filter { it.id != chapterId })
@@ -962,7 +1077,9 @@ class MangaDubStudioManager(
         burnInSubtitles: Boolean? = null,
         enableAtmosphereFx: Boolean? = null,
         powerUserVisionUrl: String? = null,
-        preferredVisionModel: MangaVisionModelTier? = null
+        preferredVisionModel: MangaVisionModelTier? = null,
+        autoCookFullMp4: Boolean? = null,
+        pauseOnFlaggedDecisions: Boolean? = null
     ) {
         mutateProject(projectId) { proj ->
             proj.copy(
@@ -972,13 +1089,80 @@ class MangaDubStudioManager(
                 burnInSubtitles = burnInSubtitles ?: proj.burnInSubtitles,
                 enableAtmosphereFx = enableAtmosphereFx ?: proj.enableAtmosphereFx,
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
-                preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel
+                preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
+                autoCookFullMp4 = autoCookFullMp4 ?: proj.autoCookFullMp4,
+                pauseOnFlaggedDecisions = pauseOnFlaggedDecisions ?: proj.pauseOnFlaggedDecisions
             )
         }
     }
 
+    fun autoResolveDecisionsAndProduce(
+        projectId: String,
+        chapterId: String,
+        onComplete: (String) -> Unit
+    ) {
+        if (_isBusy.value) {
+            onComplete("Manga Studio task already running!")
+            return
+        }
+        mutateProject(projectId) { proj ->
+            val roster = proj.characters.toMutableList()
+            val fallbackChar = roster.firstOrNull { it.name.equals("NARRATOR", ignoreCase = true) }
+                ?: roster.firstOrNull()
+                ?: MangaCharacterProfile(
+                    id = "char_narrator_auto",
+                    name = "NARRATOR",
+                    gender = VoiceGender.ANDROGYNOUS,
+                    voiceDesignPrompt = "Commanding theatrical narrator voice, crisp articulation, dramatic pacing"
+                ).also { roster += it }
+
+            val updatedChapters = proj.chapters.map { ch ->
+                if (ch.id != chapterId) ch
+                else ch.copy(
+                    pages = ch.pages.map { pg ->
+                        pg.copy(
+                            panels = pg.panels.map { pan ->
+                                pan.copy(
+                                    lines = pan.lines.map { ln ->
+                                        if (!ln.needsUserDecision) ln
+                                        else {
+                                            val candidate = ln.candidateSpeakers
+                                                .firstNotNullOfOrNull { candName ->
+                                                    roster.firstOrNull { it.name.equals(candName, ignoreCase = true) }
+                                                }
+                                                ?: fallbackChar
+                                            ln.copy(
+                                                speakerId = candidate.id,
+                                                speakerName = candidate.name,
+                                                confidence = 0.85f,
+                                                needsUserDecision = false,
+                                                decisionReason = ""
+                                            )
+                                        }
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            }
+            val nextCh = updatedChapters.firstOrNull { it.id == chapterId }
+            val syncedRoster = recomputeCharacterLineCounts(
+                roster,
+                nextCh,
+                updatedChapters.filter { it.id != chapterId }
+            )
+            proj.copy(
+                updatedAtEpochMs = System.currentTimeMillis(),
+                characters = syncedRoster,
+                chapters = updatedChapters
+            )
+        }
+        produceDubbedChapterMp4(projectId, chapterId, onComplete)
+    }
+
     // =========================================================================
-    // ✨ PHASE 2 (VOICE FORGE) -> VRAM EVICT -> PHASE 3 (HARDWARE .MP4 MUX) ✨
+    // ✨ PHASE 4 (VOICE FORGE) -> VRAM EVICT -> PHASE 5 (HARDWARE .MP4 MUX) ✨
     // =========================================================================
 
     fun produceDubbedChapterMp4(
@@ -995,172 +1179,192 @@ class MangaDubStudioManager(
             _overallProgress.value = 0.02f
             startTelemetryTicker(
                 stage = MangaPipelineStage.VOICE_FORGE,
-                detail = "EVICTING VISION VRAM & PREPARING VOICE CAST..."
+                detail = "🧹 EVICTING VISION VRAM & PREPARING VOICE CAST..."
             )
             try {
-                // Phase 1 safety: guarantee Gemma 4 Vision is completely out of RAM
-                visionEngine.unload()
-
-                val proj = _projects.value.firstOrNull { it.id == projectId }
-                    ?: throw IllegalStateException("Project not found")
-                val chapter = proj.chapters.firstOrNull { it.id == chapterId }
-                    ?: throw IllegalStateException("Chapter not found")
-
-                val allLinesCount = chapter.totalLineCount.coerceAtLeast(1)
-                val audioDir = File(projectDir(projectId), "chapters/$chapterId/audio").apply { mkdirs() }
-                val voices = repository.allAvailableVoices()
-                val baseProfile = repository.currentProfile
-                val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
-
-                mutateChapterStatus(projectId, chapterId, MangaChapterStatus.SYNTHESIZING_AUDIO, null)
-                reportTelemetry(
-                    stage = MangaPipelineStage.VOICE_FORGE,
-                    detail = "SYNTHESIZING $allLinesCount DIALOGUE LINES (${chapter.title})...",
-                    progress = 0.04f,
-                    itemCurrent = 0,
-                    itemTotal = allLinesCount,
-                    addLog = true
+                val destNote = executeProduceDubbedChapterMp4(
+                    projectId = projectId,
+                    chapterId = chapterId,
+                    progressOffset = 0f,
+                    progressSpan = 1f
                 )
-
-                var linesDone = 0
-                val renderedPages = ArrayList<MangaPageEntry>(chapter.pages.size)
-
-                for (page in chapter.pages) {
-                    val renderedPanels = ArrayList<MangaPanelNode>(page.panels.size)
-                    for (panel in page.panels) {
-                        val renderedLines = ArrayList<MangaSpeechLine>(panel.lines.size)
-                        for (line in panel.lines) {
-                            if (!isActive) throw CancellationException("Cancelled")
-                            linesDone++
-                            val textToSpeak = line.sanitizedText.ifBlank { line.rawText }.trim()
-                            if (textToSpeak.isEmpty()) {
-                                renderedLines += line
-                                continue
-                            }
-
-                            reportTelemetry(
-                                stage = MangaPipelineStage.VOICE_FORGE,
-                                detail = "FORGING VOICE [${line.speakerName}] ($linesDone/$allLinesCount)...",
-                                progress = 0.05f + 0.55f * ((linesDone - 1).toFloat() / allLinesCount.toFloat()),
-                                itemCurrent = linesDone,
-                                itemTotal = allLinesCount,
-                                addLog = true
-                            )
-
-                            val charProfile = proj.characters.firstOrNull {
-                                it.id == line.speakerId || it.name.equals(line.speakerName, ignoreCase = true)
-                            }
-                            val synthProfile = resolveSynthesisProfileForCharacter(
-                                baseProfile = baseProfile,
-                                character = charProfile,
-                                availableVoices = voices
-                            )
-                            val outcome = backendRouter.synthesizeSpeechChunk(
-                                chunk = PurrChunk.Speech(
-                                    text = textToSpeak,
-                                    role = if (line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
-                                    targetVoiceId = synthProfile.primaryVoiceId,
-                                    speakingRate = synthProfile.baseSpeed,
-                                    pitch = synthProfile.basePitch,
-                                    volumeGain = 1.0f,
-                                    sentiment = SentimentResult()
-                                ),
-                                profile = synthProfile
-                            )
-
-                            val wavFile = File(audioDir, "${line.id}.wav")
-                            val pcmFloat = outcome.pcmFloat24k
-                            val durMs = if (pcmFloat.isNotEmpty()) {
-                                val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
-                                writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
-                                ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
-                            } else {
-                                maxOf(1400L, textToSpeak.length * 60L)
-                            }
-                            renderedLines += line.copy(
-                                renderedWavPath = if (pcmFloat.isNotEmpty()) wavFile.absolutePath else "",
-                                durationMs = durMs
-                            )
-                            reportTelemetry(
-                                stage = MangaPipelineStage.VOICE_FORGE,
-                                detail = "VOICED [${line.speakerName}] $linesDone/$allLinesCount (${"%.1f".format(durMs / 1000f)}s)",
-                                progress = 0.05f + 0.55f * (linesDone.toFloat() / allLinesCount.toFloat()),
-                                itemCurrent = linesDone,
-                                itemTotal = allLinesCount
-                            )
-                        }
-                        renderedPanels += panel.copy(lines = renderedLines)
-                    }
-                    renderedPages += page.copy(panels = renderedPanels)
-                }
-
-                // Release all TTS VRAM before hardware H.264/AAC encoding
-                reportTelemetry(
-                    stage = MangaPipelineStage.VIDEO_MUX,
-                    detail = "EVICTING TTS VRAM FOR H.264 + AAC ENCODE...",
-                    progress = 0.61f,
-                    itemCurrent = 0,
-                    itemTotal = chapter.pages.size,
-                    addLog = true
-                )
-                backendRouter.evictAllVram()
-
-                val chapterReadyForMux = chapter.copy(
-                    status = MangaChapterStatus.RENDERING_VIDEO,
-                    pages = renderedPages
-                )
-                mutateChapter(projectId, chapterId) { chapterReadyForMux }
-
-                val safeBase = sanitizeSlug("${proj.seriesTitle}_${chapter.title}")
-                val outMp4File = File(projectDir(projectId), "exports/${safeBase}.mp4").apply {
-                    parentFile?.mkdirs()
-                }
-                var lastMuxStageLog = ""
-                val renderRes = MangaMotionVideoMuxer.renderChapterMp4(
-                    context = context,
-                    chapter = chapterReadyForMux,
-                    aspect = proj.videoAspect,
-                    burnInSubtitles = proj.burnInSubtitles,
-                    enableAtmosphereFx = proj.enableAtmosphereFx,
-                    destMp4File = outMp4File
-                ) { p, label ->
-                    val prefix = label.substringBefore('(').trim()
-                    val shouldLog = prefix != lastMuxStageLog
-                    if (shouldLog) lastMuxStageLog = prefix
-                    reportTelemetry(
-                        stage = MangaPipelineStage.VIDEO_MUX,
-                        detail = label,
-                        progress = 0.62f + p * 0.38f,
-                        itemCurrent = (p * 100).toInt(),
-                        itemTotal = 100,
-                        addLog = shouldLog
-                    )
-                }
-
-                val finishedChapter = chapterReadyForMux.copy(
-                    status = MangaChapterStatus.COMPLETED,
-                    exportedMp4Path = renderRes.internalMp4File.absolutePath,
-                    publicDownloadPath = renderRes.publicDownloadPath,
-                    durationSec = renderRes.durationSec,
-                    errorMessage = null
-                )
-                mutateChapter(projectId, chapterId) { finishedChapter }
-
-                val destNote = renderRes.publicDownloadPath.ifBlank { renderRes.internalMp4File.name }
                 _overallProgress.value = 1f
-                finishTelemetry("EXPORTED ${"%.1f".format(renderRes.durationSec)}s -> $destNote")
+                finishTelemetry("🎉 EXPORTED -> $destNote")
                 onComplete("Dubbed Manga .MP4 ready: $destNote")
             } catch (ce: CancellationException) {
                 throw ce
             } catch (err: Exception) {
                 mutateChapterStatus(projectId, chapterId, MangaChapterStatus.FAILED, err.message)
-                finishTelemetry("PRODUCTION ERROR: ${err.message}")
+                finishTelemetry("❌ PRODUCTION ERROR: ${err.message}")
                 onComplete("Production failed: ${err.message}")
             } finally {
                 backendRouter.markIdle()
                 _isBusy.value = false
             }
         }
+    }
+
+    private suspend fun executeProduceDubbedChapterMp4(
+        projectId: String,
+        chapterId: String,
+        progressOffset: Float,
+        progressSpan: Float
+    ): String {
+        // Guarantee Gemma 4 Vision is completely out of RAM before loading Qwen3 / TTS
+        visionEngine.unload()
+
+        val proj = _projects.value.firstOrNull { it.id == projectId }
+            ?: throw IllegalStateException("Project not found")
+        val chapter = proj.chapters.firstOrNull { it.id == chapterId }
+            ?: throw IllegalStateException("Chapter not found")
+
+        val allLinesCount = chapter.totalLineCount.coerceAtLeast(1)
+        val audioDir = File(projectDir(projectId), "chapters/$chapterId/audio").apply { mkdirs() }
+        val voices = repository.allAvailableVoices()
+        val baseProfile = repository.currentProfile
+        val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+        val designInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+
+        mutateChapterStatus(projectId, chapterId, MangaChapterStatus.SYNTHESIZING_AUDIO, null)
+        reportTelemetry(
+            stage = MangaPipelineStage.VOICE_FORGE,
+            detail = if (designInstalled) {
+                "🎙️ QWEN3 1.7B VOICEDESIGN SYNTHESIS ($allLinesCount LINES)..."
+            } else {
+                "🎙️ VOICE SYNTHESIS ($allLinesCount LINES, ${chapter.title})..."
+            },
+            progress = progressOffset + progressSpan * 0.04f,
+            itemCurrent = 0,
+            itemTotal = allLinesCount,
+            addLog = true
+        )
+
+        var linesDone = 0
+        val renderedPages = ArrayList<MangaPageEntry>(chapter.pages.size)
+
+        for (page in chapter.pages) {
+            val renderedPanels = ArrayList<MangaPanelNode>(page.panels.size)
+            for (panel in page.panels) {
+                val renderedLines = ArrayList<MangaSpeechLine>(panel.lines.size)
+                for (line in panel.lines) {
+                    if (!isActive) throw CancellationException("Cancelled")
+                    linesDone++
+                    val textToSpeak = line.sanitizedText.ifBlank { line.rawText }.trim()
+                    if (textToSpeak.isEmpty()) {
+                        renderedLines += line
+                        continue
+                    }
+
+                    reportTelemetry(
+                        stage = MangaPipelineStage.VOICE_FORGE,
+                        detail = "🎙️ FORGING VOICE [${line.speakerName}] ($linesDone/$allLinesCount)...",
+                        progress = progressOffset + progressSpan * (0.05f + 0.52f * ((linesDone - 1).toFloat() / allLinesCount.toFloat())),
+                        itemCurrent = linesDone,
+                        itemTotal = allLinesCount,
+                        addLog = true
+                    )
+
+                    val charProfile = proj.characters.firstOrNull {
+                        it.id == line.speakerId || it.name.equals(line.speakerName, ignoreCase = true)
+                    }
+                    val synthProfile = resolveSynthesisProfileForCharacter(
+                        baseProfile = baseProfile,
+                        character = charProfile,
+                        availableVoices = voices
+                    )
+                    val outcome = backendRouter.synthesizeSpeechChunk(
+                        chunk = PurrChunk.Speech(
+                            text = textToSpeak,
+                            role = if (line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
+                            targetVoiceId = synthProfile.primaryVoiceId,
+                            speakingRate = synthProfile.baseSpeed,
+                            pitch = synthProfile.basePitch,
+                            volumeGain = 1.0f,
+                            sentiment = SentimentResult()
+                        ),
+                        profile = synthProfile
+                    )
+
+                    val wavFile = File(audioDir, "${line.id}.wav")
+                    val pcmFloat = outcome.pcmFloat24k
+                    val durMs = if (pcmFloat.isNotEmpty()) {
+                        val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
+                        writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
+                        ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
+                    } else {
+                        maxOf(1400L, textToSpeak.length * 60L)
+                    }
+                    renderedLines += line.copy(
+                        renderedWavPath = if (pcmFloat.isNotEmpty()) wavFile.absolutePath else "",
+                        durationMs = durMs
+                    )
+                    reportTelemetry(
+                        stage = MangaPipelineStage.VOICE_FORGE,
+                        detail = "🎙️ VOICED [${line.speakerName}] $linesDone/$allLinesCount (${"%.1f".format(durMs / 1000f)}s via ${outcome.engineSummary.take(22)})",
+                        progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / allLinesCount.toFloat())),
+                        itemCurrent = linesDone,
+                        itemTotal = allLinesCount,
+                        addLog = true
+                    )
+                }
+                renderedPanels += panel.copy(lines = renderedLines)
+            }
+            renderedPages += page.copy(panels = renderedPanels)
+        }
+
+        // Release all TTS VRAM before hardware H.264/AAC encoding
+        reportTelemetry(
+            stage = MangaPipelineStage.VIDEO_MUX,
+            detail = "🧹 EVICTING TTS VRAM FOR H.264 + AAC ENCODE...",
+            progress = progressOffset + progressSpan * 0.60f,
+            itemCurrent = 0,
+            itemTotal = 100,
+            addLog = true
+        )
+        backendRouter.evictAllVram()
+
+        val chapterReadyForMux = chapter.copy(
+            status = MangaChapterStatus.RENDERING_VIDEO,
+            pages = renderedPages
+        )
+        mutateChapter(projectId, chapterId) { chapterReadyForMux }
+
+        val safeBase = sanitizeSlug("${proj.seriesTitle}_${chapter.title}")
+        val outMp4File = File(projectDir(projectId), "exports/${safeBase}.mp4").apply {
+            parentFile?.mkdirs()
+        }
+        var lastMuxStageLog = ""
+        val renderRes = MangaMotionVideoMuxer.renderChapterMp4(
+            context = context,
+            chapter = chapterReadyForMux,
+            aspect = proj.videoAspect,
+            burnInSubtitles = proj.burnInSubtitles,
+            enableAtmosphereFx = proj.enableAtmosphereFx,
+            destMp4File = outMp4File
+        ) { p, label ->
+            val prefix = label.substringBefore('(').trim()
+            val shouldLog = prefix != lastMuxStageLog
+            if (shouldLog) lastMuxStageLog = prefix
+            reportTelemetry(
+                stage = MangaPipelineStage.VIDEO_MUX,
+                detail = "🎬 $label",
+                progress = progressOffset + progressSpan * (0.61f + p * 0.39f),
+                itemCurrent = (p * 100).toInt(),
+                itemTotal = 100,
+                addLog = shouldLog
+            )
+        }
+
+        val finishedChapter = chapterReadyForMux.copy(
+            status = MangaChapterStatus.COMPLETED,
+            exportedMp4Path = renderRes.internalMp4File.absolutePath,
+            publicDownloadPath = renderRes.publicDownloadPath,
+            durationSec = renderRes.durationSec,
+            errorMessage = null
+        )
+        mutateChapter(projectId, chapterId) { finishedChapter }
+
+        return renderRes.publicDownloadPath.ifBlank { renderRes.internalMp4File.name }
     }
 
     fun resolveSynthesisProfileForCharacter(

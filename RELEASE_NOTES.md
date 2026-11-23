@@ -1,3 +1,28 @@
+# 🌌 PURR-TTS v1.9.1 // Direct Gemma 4 Vision Binding, 2-Phase VoiceDesign & Auto-Cook UI
+
+### ✨ What's New since v1.9.0
+
+Fixes the silent Gemma 4 bypass in Manga Dub Studio and brings **1-Tap Auto-Cook** (`Import Manga -> Series Title -> Watch It Cook`) with a live multi-phase cooking console! 🧠🎭🎬
+
+* **🧠 Fixed Gemma 4 E2B / E4B Vision Not Being Used When Installed (`LiteRtGemmaVisionEngine`)**:
+  * Replaced fragile Java reflection calls with direct compile-time bindings to Google AI Edge `com.google.ai.edge.litertlm` (`EngineConfig` with explicit `visionBackend` + `maxNumImages = 1`, `ConversationConfig` with `ThinkingConfig(enableThinking = true)`, `Contents.of(Content.ImageFile/ImageBytes, Content.Text)` + `Message.contents`/`channels["thought"]`, and automatic `Session.generateContent` fallback).
+  * Fixed the misleading offline fallback message so when a local `.litertlm` file is installed, diagnostics surface transparently instead of claiming Gemma 4 isn't installed.
+* **🎭 2-Phase Gemma 4 -> Qwen3 1.7B VoiceDesign Casting Director (`MangaDubStudioManager`)**:
+  * **Phase 2A (Vision OCR + Thinking)**: Scans cyan-boxed `[P1..PN]` reading-order panels, traces bubble tails via `<thought>`, and populates confident speaker attributions automatically (lowering unnecessary manual flags to `< 55%` confidence or `UNKNOWN`).
+  * **Phase 2B (VoiceDesign Casting Prompt Generation)**: While Gemma 4 is still loaded, automatically feeds the discovered cast roster + sample lines back through a dedicated casting pass to generate tailored **Qwen3 1.7B VoiceDesign** prompts, speaking cadence, and pitch scales for every character before evicting Vision VRAM for TTS.
+* **🚀 1-Tap Auto-Cook Workflow & Live 5-Stage Cooking Console (`MangaDubStudioModuleWindow`)**:
+  * **Surface-Simple UX**: Enter a **Series Title**, pick your **`.CBZ`**, and watch the 5-Stage Console (**`1 SLICE` -> `2 VISION` -> `3 CAST` -> `4 VOICE` -> `5 .MP4`**) with an auto-scrolling color-coded live log (Gemma `<thought>` traces, crafted Qwen3 VoiceDesign prompts, voiced lines, frame progress, elapsed time & ETA).
+  * Pauses only when Gemma explicitly flags an uncertain speech bubble (offering both 1-tap speaker assignment and **`AUTO-RESOLVE GUESSES & FINISH .MP4`**), while tucking Cast Customization, Vegeta Clone Studio round-trip, Storyboards, Aspect Ratio, and LAN Vision overrides into an optional collapsible **`CUSTOMIZE`** drawer.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `27`).
+2. **`PURR-TTS_V1.9.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.0 // Hardened Manga Dub Studio, Keep-Awake & Gemma 4 E4B
 
 ### ✨ What's New since v1.8.9

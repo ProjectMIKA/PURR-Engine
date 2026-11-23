@@ -8,14 +8,23 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.util.Base64
 import android.util.Log
-import com.projectmika.purrtts.core.manga.MangaBfsPanelSlicer
+import com.google.ai.edge.litertlm.Backend
+import com.google.ai.edge.litertlm.Content
+import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.ConversationConfig
+import com.google.ai.edge.litertlm.Engine
+import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.InputData
+import com.google.ai.edge.litertlm.Message
+import com.google.ai.edge.litertlm.SamplerConfig
+import com.google.ai.edge.litertlm.SessionConfig
+import com.google.ai.edge.litertlm.ThinkingConfig
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaNormalizedRect
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.manga.MangaVisionResponseParser
 import com.projectmika.purrtts.core.purr.VoiceGender
-import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.TimeUnit
@@ -37,13 +46,14 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 
 /**
- * ✨ GEMMA 4 E2B LITERT-LM MULTIMODAL VISION & THINKING DIRECTOR (TOOL-11 / SUB-11V) ✨
+ * ✨ GEMMA 4 E2B/E4B LITERT-LM MULTIMODAL VISION & QWEN VOICEDESIGN DIRECTOR (TOOL-11 / SUB-11V / SUB-11X) ✨
  *
- * Mounts `gemma-4-E2B-it-gpu.litertlm` via Google AI Edge LiteRT-LM (`litertlm-android`)
- * on GPU/CPU with reflection-safe API binding, annotates sliced manga panels with visual
- * `[P1..PN]` Set-of-Mark badges, collects chain-of-thought reasoning + structured dialogue JSON,
- * and supports both an optional power-user OpenAI-compatible Vision URL and an offline fallback
- * so Pre-Production always completes cleanly and VRAM is evicted before TTS synthesis starts.
+ * Uses direct compile-time bindings to `com.google.ai.edge.litertlm` (`litertlm-android:0.19.1`)
+ * with explicit `visionBackend` + `maxNumImages = 1` + `ThinkingConfig(enableThinking = true)`:
+ * - Phase 2A: Scans cyan-boxed `[P1..PN]` Set-of-Mark panels for OCR dialogue, speakers, thoughts & mood.
+ * - Phase 2B: While Gemma 4 remains resident in RAM, crafts specialized Qwen3 1.7B VoiceDesign
+ *   acoustic casting prompts tailored to each character's visual identity & dialogue lines.
+ * - Strictly evicts LiteRT-LM memory via `unload()` before TTS synthesis starts.
  */
 class LiteRtGemmaVisionEngine(private val context: Context) {
 
@@ -58,8 +68,12 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
 
     private val mutex = Mutex()
     private var loadedModelPath: String? = null
-    private var engineHandle: AutoCloseable? = null
+    private var engineHandle: Engine? = null
     private var activeBackendLabel: String = "NONE"
+
+    @Volatile
+    var lastEngineError: String? = null
+        private set
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -69,19 +83,39 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
     fun resolveInstalledGemmaModelFile(
-        preferredTier: MangaVisionModelTier = MangaVisionModelTier.AUTO
+        preferredTier: MangaVisionModelTier = MangaVisionModelTier.AUTO,
+        customPaths: List<String> = emptyList()
     ): File? {
-        val litertDir = File(context.filesDir, "models/litert")
-        if (!litertDir.isDirectory) return null
-        val e2b = File(litertDir, GEMMA_PRIMARY_FILE).takeIf { it.isFile && it.length() > 1024L * 1024L }
-        val e4b = File(litertDir, GEMMA_E4B_FILE).takeIf { it.isFile && it.length() > 1024L * 1024L }
+        val candidateDirs = listOf(
+            File(context.filesDir, "models/litert"),
+            File(context.filesDir, "models/downloads")
+        )
+        val explicitFiles = customPaths
+            .filter { it.isNotBlank() }
+            .map(::File)
+            .filter { it.isFile && it.length() > 1024L * 1024L }
+
+        val e2b = explicitFiles.firstOrNull { it.name.contains("E2B", ignoreCase = true) }
+            ?: candidateDirs.firstNotNullOfOrNull { dir ->
+                File(dir, GEMMA_PRIMARY_FILE).takeIf { it.isFile && it.length() > 1024L * 1024L }
+            }
+        val e4b = explicitFiles.firstOrNull { it.name.contains("E4B", ignoreCase = true) }
+            ?: candidateDirs.firstNotNullOfOrNull { dir ->
+                File(dir, GEMMA_E4B_FILE).takeIf { it.isFile && it.length() > 1024L * 1024L }
+            }
+
         val preferred = when (preferredTier) {
             MangaVisionModelTier.GEMMA4_E4B -> e4b ?: e2b
             MangaVisionModelTier.GEMMA4_E2B, MangaVisionModelTier.AUTO -> e2b ?: e4b
         }
         if (preferred != null) return preferred
-        return litertDir.listFiles()
-            ?.firstOrNull {
+
+        explicitFiles.firstOrNull()?.let { return it }
+
+        return candidateDirs
+            .filter { it.isDirectory }
+            .flatMap { it.listFiles()?.toList().orEmpty() }
+            .firstOrNull {
                 it.isFile &&
                     it.name.contains("gemma", ignoreCase = true) &&
                     it.extension.equals("litertlm", ignoreCase = true) &&
@@ -89,21 +123,24 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
             }
     }
 
-    fun isModelTierInstalled(tier: MangaVisionModelTier): Boolean {
-        val litertDir = File(context.filesDir, "models/litert")
-        return when (tier) {
-            MangaVisionModelTier.GEMMA4_E4B -> File(litertDir, GEMMA_E4B_FILE).let { it.isFile && it.length() > 1024L * 1024L }
-            MangaVisionModelTier.GEMMA4_E2B -> File(litertDir, GEMMA_PRIMARY_FILE).let { it.isFile && it.length() > 1024L * 1024L }
-            MangaVisionModelTier.AUTO -> resolveInstalledGemmaModelFile(MangaVisionModelTier.AUTO) != null
+    fun isModelTierInstalled(
+        tier: MangaVisionModelTier,
+        customPaths: List<String> = emptyList()
+    ): Boolean = when (tier) {
+        MangaVisionModelTier.GEMMA4_E4B -> {
+            val f = resolveInstalledGemmaModelFile(MangaVisionModelTier.GEMMA4_E4B, customPaths)
+            f != null && f.name.contains("E4B", ignoreCase = true)
         }
+        MangaVisionModelTier.GEMMA4_E2B -> {
+            val f = resolveInstalledGemmaModelFile(MangaVisionModelTier.GEMMA4_E2B, customPaths)
+            f != null && f.name.contains("E2B", ignoreCase = true)
+        }
+        MangaVisionModelTier.AUTO -> resolveInstalledGemmaModelFile(MangaVisionModelTier.AUTO, customPaths) != null
     }
-
-    val isOnDeviceGemmaReady: Boolean
-        get() = resolveInstalledGemmaModelFile() != null
 
     /**
      * Scales a manga page down to <=1024px and stamps numbered `[P1]`, `[P2]` Set-of-Mark frames
-     * over the BFS-detected panels so Gemma 4 E2B never has to guess pixel bounding boxes.
+     * over the BFS-detected panels so Gemma 4 never has to guess pixel bounding boxes.
      */
     fun renderAnnotatedPageForVision(
         pageBitmap: Bitmap,
@@ -149,7 +186,7 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
 
         targetFile.parentFile?.mkdirs()
         FileOutputStream(targetFile).use { fos ->
-            scaled.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+            scaled.compress(Bitmap.CompressFormat.JPEG, 90, fos)
         }
         if (scaled !== pageBitmap) {
             scaled.recycle()
@@ -157,8 +194,8 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     }
 
     /**
-     * Analyzes one manga page with Gemma 4 E2B LiteRT (or Power-User Vision Endpoint / offline
-     * fallback) using the numbered panel regions and prior series character memory.
+     * Phase 2A: Analyzes one manga page with Gemma 4 E2B/E4B LiteRT-LM (with Vision + Thinking)
+     * or LAN Power-User Vision URL, extracting dialogue lines, speakers, mood, and voice traits.
      */
     suspend fun analyzeMangaPage(
         pageIndex: Int,
@@ -168,7 +205,9 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         existingCharacters: List<MangaCharacterProfile>,
         recentDialogueContext: List<String>,
         powerUserVisionUrl: String,
-        preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO
+        preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO,
+        customModelPaths: List<String> = emptyList(),
+        onLog: (String) -> Unit = {}
     ): Pair<MangaVisionResponseParser.ParsedPageAnalysis, String> = withContext(Dispatchers.IO) {
         val annotatedFile = File(context.cacheDir, "manga_vision_page_$pageIndex.jpg")
         renderAnnotatedPageForVision(pageBitmap, panels, annotatedFile)
@@ -180,9 +219,12 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
             recentDialogueContext = recentDialogueContext
         )
 
-        // Tier 1: Optional Power-User External OpenAI-Compatible Vision Server (if explicitly configured)
+        // Tier 1: Optional Power-User External OpenAI-Compatible Vision Server
         if (powerUserVisionUrl.isNotBlank()) {
-            val rawRemote = runCatching { queryOpenAiVisionEndpoint(powerUserVisionUrl.trim(), annotatedFile, prompt) }.getOrNull()
+            onLog("Querying LAN Vision Endpoint for Page ${pageIndex + 1}...")
+            val rawRemote = runCatching { queryOpenAiVisionEndpoint(powerUserVisionUrl.trim(), annotatedFile, prompt) }
+                .onFailure { onLog("LAN Vision error: ${it.message}") }
+                .getOrNull()
             if (!rawRemote.isNullOrBlank()) {
                 val parsed = MangaVisionResponseParser.parsePageAnalysis(rawRemote, panels.size, existingCharacters)
                 if (parsed.panels.isNotEmpty()) {
@@ -191,35 +233,120 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
             }
         }
 
-        // Tier 2: On-Device Google Gemma 4 E2B / E4B LiteRT-LM (with Thinking Mode)
-        val localModel = resolveInstalledGemmaModelFile(preferredVisionModel)
+        // Tier 2: On-Device Google Gemma 4 E2B / E4B LiteRT-LM (with direct Vision + Thinking bindings)
+        val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
         if (localModel != null) {
             val modelLabel = if (localModel.name.contains("E4B", ignoreCase = true)) {
                 "Gemma 4 E4B LiteRT"
             } else {
                 "Gemma 4 E2B LiteRT"
             }
+            onLog("Mounting $modelLabel (${localModel.name})...")
+
             val rawLocal = mutex.withLock {
-                queryLiteRtGemmaOnDevice(localModel, annotatedFile, prompt)
+                queryLiteRtGemmaMultimodalLocked(localModel, annotatedFile, prompt, onLog)
             }
             if (!rawLocal.isNullOrBlank()) {
                 val parsed = MangaVisionResponseParser.parsePageAnalysis(rawLocal, panels.size, existingCharacters)
                 if (parsed.panels.isNotEmpty()) {
                     return@withContext parsed to "$modelLabel ($activeBackendLabel)"
                 }
+                // Compact repair attempt if Gemma output freeform text instead of structured JSON
+                onLog("Re-prompting $modelLabel for strict JSON on Page ${pageIndex + 1}...")
+                val repairPrompt = buildCompactRepairPrompt(panels.size, rawLocal.take(600))
+                val repairedRaw = mutex.withLock {
+                    queryLiteRtGemmaTextLocked(localModel, repairPrompt, onLog)
+                }
+                if (!repairedRaw.isNullOrBlank()) {
+                    val repairedParsed = MangaVisionResponseParser.parsePageAnalysis(repairedRaw, panels.size, existingCharacters)
+                    if (repairedParsed.panels.isNotEmpty()) {
+                        return@withContext repairedParsed to "$modelLabel ($activeBackendLabel)"
+                    }
+                }
+                onLog("⚠️ $modelLabel returned unparseable layout on Page ${pageIndex + 1}; raw preview: ${rawLocal.take(120)}")
+            } else {
+                onLog("⚠️ $modelLabel returned empty output on Page ${pageIndex + 1}: ${lastEngineError ?: "unknown error"}")
             }
+        } else {
+            onLog("ℹ️ No local Gemma 4 .litertlm found in filesDir/models/litert (checked E2B/E4B)")
         }
 
         // Tier 3: Offline Heuristic Fallback (pre-populates panels cleanly for Pre-Production review)
+        val diagReason = lastEngineError ?: if (localModel != null) {
+            "Gemma 4 (${localModel.name}) produced no dialogue JSON — review panels below"
+        } else {
+            "Install SUB-11V Gemma 4 E2B [Recommended] or SUB-11X E4B for Auto-OCR"
+        }
         val fallback = buildOfflineHeuristicAnalysis(
             pageIndex = pageIndex,
             panels = panels,
-            existingCharacters = existingCharacters
+            existingCharacters = existingCharacters,
+            modelWasInstalled = localModel != null,
+            diagnosticReason = diagReason
         )
         fallback to if (localModel == null) {
-            "Offline Layout Slicer (Install SUB-11V Gemma 4 E2B [Rec] or SUB-11X E4B)"
+            "Offline Layout Slicer (No Gemma 4 .litertlm)"
         } else {
-            "Gemma Fallback Review"
+            "Fallback Review ($diagReason)"
+        }
+    }
+
+    /**
+     * Phase 2B: Text-only Qwen3 1.7B VoiceDesign Casting Director.
+     * Runs while Gemma 4 is already mounted in memory (zero extra model load) to refine every
+     * character's acoustic Qwen3 VoiceDesign prompt, speaking cadence, and pitch scale from
+     * their visual traits and spoken dialogue in this chapter.
+     */
+    suspend fun craftQwenVoiceDesignsForRoster(
+        seriesTitle: String,
+        storySummary: String,
+        characters: List<MangaCharacterProfile>,
+        sampleLinesBySpeaker: Map<String, List<String>>,
+        preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO,
+        powerUserVisionUrl: String = "",
+        customModelPaths: List<String> = emptyList(),
+        onLog: (String) -> Unit = {}
+    ): List<MangaCharacterProfile> = withContext(Dispatchers.IO) {
+        if (characters.isEmpty()) return@withContext characters
+
+        val castingPrompt = buildQwenVoiceCastingPrompt(
+            seriesTitle = seriesTitle,
+            storySummary = storySummary,
+            characters = characters,
+            sampleLinesBySpeaker = sampleLinesBySpeaker
+        )
+
+        var rawCasting: String? = null
+        if (powerUserVisionUrl.isNotBlank()) {
+            rawCasting = runCatching { queryOpenAiTextEndpoint(powerUserVisionUrl.trim(), castingPrompt) }.getOrNull()
+        }
+        if (rawCasting.isNullOrBlank()) {
+            val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
+            if (localModel != null) {
+                rawCasting = mutex.withLock {
+                    queryLiteRtGemmaTextLocked(localModel, castingPrompt, onLog)
+                }
+            }
+        }
+
+        if (!rawCasting.isNullOrBlank()) {
+            val updated = MangaVisionResponseParser.parseVoiceDesignRoster(rawCasting, characters)
+            onLog("🎭 Gemma crafted ${updated.size} Qwen3 VoiceDesign casting profile(s)")
+            return@withContext updated
+        }
+
+        // Deterministic enrichment fallback if text-only pass had no model available
+        characters.map { ch ->
+            if (ch.voiceDesignPrompt.isBlank()) {
+                val basePrompt = when (ch.gender) {
+                    VoiceGender.FEMALE -> "Expressive young anime heroine voice, clear crisp articulation, warm bright midrange, dynamic emotional projection"
+                    VoiceGender.MALE -> "Confident anime protagonist baritone-tenor, punchy consonant attack, rich chest resonance, studio dub clarity"
+                    VoiceGender.ANDROGYNOUS -> "Commanding theatrical narrator voice, balanced poise, crisp diction, dramatic pacing"
+                }
+                ch.copy(voiceDesignPrompt = basePrompt)
+            } else {
+                ch
+            }
         }
     }
 
@@ -231,7 +358,7 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         recentDialogueContext: List<String>
     ): String {
         val rosterSummary = if (existingCharacters.isEmpty()) {
-            "None yet — create clear character names (e.g. HERO_1, RIVAL_1, NARRATOR) when discovered."
+            "None yet — name speakers consistently (e.g. NARRATOR, PROTAGONIST, HEROINE, RIVAL, or their actual manga name if visible)."
         } else {
             existingCharacters.joinToString("\n") { ch ->
                 "- ${ch.name} (${ch.gender.tag}): ${ch.visualDescription.ifBlank { ch.voiceDesignPrompt }}"
@@ -244,8 +371,8 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         }
 
         return """
-You are MIKA's Manga Dubbing Director scanning Page ${pageIndex + 1} (${readingOrder.label}).
-Cyan boxes label the exact reading-order panels [P1..P$panelCount].
+You are MIKA's Manga Dubbing & Voice Casting Director scanning Page ${pageIndex + 1} (${readingOrder.label}).
+Cyan boxes outline the exact reading-order panels labeled P1..P$panelCount.
 
 KNOWN SERIES CHARACTER ROSTER:
 $rosterSummary
@@ -254,8 +381,11 @@ RECENT DIALOGUE CONTEXT:
 $contextLines
 
 TASK:
-First use a <thought>...</thought> block to trace who appears in each numbered panel P1..P$panelCount, which direction each speech bubble tail points, the scene mood, and who is speaking.
-Then output ONLY a valid JSON object matching this exact schema:
+1. First think carefully inside `<thought>...</thought>` about each panel P1..P$panelCount:
+   - Who appears visually in the panel?
+   - Read every speech bubble / narration box / SFX shout in proper ${readingOrder.label} reading order.
+   - Follow speech bubble tails to identify the speaker (or use NARRATOR for rectangular narration boxes).
+2. Immediately output ONLY a valid JSON object matching this schema:
 {
   "story_summary": "1-sentence running summary update",
   "panels": [
@@ -266,188 +396,255 @@ Then output ONLY a valid JSON object matching this exact schema:
       "lines": [
         {
           "bubble": 1,
-          "speaker": "CHARACTER_NAME or NARRATOR or UNKNOWN",
-          "is_new_character": false,
+          "speaker": "CHARACTER_NAME or NARRATOR or PROTAGONIST",
+          "is_new_character": true,
           "gender": "male | female | androgynous",
-          "visual_description": "short appearance traits if new character",
-          "voice_design_prompt": "Qwen3 VoiceDesign acoustic prompt for timbre, pitch, energy",
+          "visual_description": "concise appearance traits if new character (age, vibe, armor/uniform)",
+          "voice_design_prompt": "Qwen3-TTS 1.7B VoiceDesign prompt: pitch, vocal timbre, grit/warmth, energy, pacing",
           "emotion": "fierce | calm | sad | joyful | shy | angry | neutral",
-          "confidence": 0.92,
+          "confidence": 0.90,
           "candidate_speakers": ["CHAR_A", "CHAR_B"],
-          "text": "Exact dialogue text in reading order"
+          "text": "Exact dialogue text transcribed cleanly in reading order"
         }
       ]
     }
   ]
 }
-If a floating/tail-less speech bubble's speaker is ambiguous, set "speaker": "UNKNOWN", "confidence": 0.45, and list plausible "candidate_speakers" so the user decides in Pre-Production.
+Rules:
+- Use 0-based panel_index (0 to ${maxOf(0, panelCount - 1)}).
+- Transcribe ALL spoken text visible inside bubbles/narration boxes. Skip empty panels with `"lines": []`.
+- Only set `"speaker": "UNKNOWN"` and `"confidence": 0.45` if it is genuinely impossible to tell which of two characters spoke without asking the user.
 """.trim()
     }
 
-    private fun ensureLiteRtEngineMountedLocked(modelFile: File): AutoCloseable? {
+    private fun buildCompactRepairPrompt(panelCount: Int, previousSnippet: String): String = """
+Convert your previous manga page notes into strict JSON matching:
+{"story_summary":"","panels":[{"panel_index":0,"scene_mood":"action","thought":"","lines":[{"bubble":1,"speaker":"NARRATOR","is_new_character":true,"gender":"male","visual_description":"","voice_design_prompt":"Clear dramatic anime voice","emotion":"neutral","confidence":0.85,"candidate_speakers":["NARRATOR"],"text":"Dialogue line"}]}]}
+Valid panel_index range: 0..${maxOf(0, panelCount - 1)}. Output JSON ONLY.
+
+Notes:
+$previousSnippet
+""".trim()
+
+    private fun buildQwenVoiceCastingPrompt(
+        seriesTitle: String,
+        storySummary: String,
+        characters: List<MangaCharacterProfile>,
+        sampleLinesBySpeaker: Map<String, List<String>>
+    ): String {
+        val rosterBlock = characters.joinToString("\n\n") { ch ->
+            val samples = sampleLinesBySpeaker[ch.id]
+                ?: sampleLinesBySpeaker[ch.name]
+                ?: emptyList()
+            val sampleStr = if (samples.isEmpty()) "(no sample lines)" else samples.take(3).joinToString(" | ") { "\"$it\"" }
+            """
+            CHARACTER: ${ch.name}
+            GENDER: ${ch.gender.tag}
+            VISUAL APPEARANCE: ${ch.visualDescription.ifBlank { "Manga character" }}
+            CURRENT VOICE DRAFT: ${ch.voiceDesignPrompt.ifBlank { "None" }}
+            SAMPLE LINES: $sampleStr
+            """.trimIndent()
+        }
+
+        return """
+You are casting voices for the dubbed anime adaptation of "$seriesTitle" using Qwen3-TTS 1.7B VoiceDesign.
+Story context: ${storySummary.ifBlank { "Chapter 1" }}
+
+Below is the discovered cast roster. For EVERY character, craft a rich acoustic VoiceDesign instruction specifically optimized for Qwen3-TTS 1.7B VoiceDesign (describe vocal pitch register, texture/raspy/breathy/resonant quality, age archetype, tempo, and dramatic delivery — 15 to 30 words, no character proper names inside the voice_design_prompt).
+
+ROSTER:
+$rosterBlock
+
+Output ONLY valid JSON:
+{
+  "characters": [
+    {
+      "name": "EXACT_CHARACTER_NAME",
+      "gender": "male | female | androgynous",
+      "visual_description": "refined 1-line character summary",
+      "voice_design_prompt": "Crisp low-baritone raspy warrior voice with fierce gravelly projection, punchy dramatic anime cadence, slight growl on emphasis",
+      "speed_scale": 1.0,
+      "pitch_scale": 1.0
+    }
+  ]
+}
+Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
+""".trim()
+    }
+
+    private fun ensureLiteRtEngineMountedLocked(
+        modelFile: File,
+        onLog: (String) -> Unit
+    ): Engine? {
         if (engineHandle != null && loadedModelPath == modelFile.absolutePath) {
             return engineHandle
         }
         unloadLocked()
         val cacheDir = File(context.cacheDir, "gemma_litert_cache").apply { mkdirs() }.absolutePath
-        val gpuAttempt = tryInitLiteRtEngine(modelFile.absolutePath, cacheDir, preferGpu = true)
-        if (gpuAttempt != null) {
-            engineHandle = gpuAttempt
-            loadedModelPath = modelFile.absolutePath
-            activeBackendLabel = "GPU"
-            return gpuAttempt
+
+        val configs = listOf(
+            "GPU+VISION_GPU" to EngineConfig(
+                modelPath = modelFile.absolutePath,
+                backend = Backend.GPU(),
+                visionBackend = Backend.GPU(),
+                audioBackend = null,
+                maxNumTokens = 4096,
+                maxNumImages = 1,
+                cacheDir = cacheDir
+            ),
+            "GPU+VISION_CPU" to EngineConfig(
+                modelPath = modelFile.absolutePath,
+                backend = Backend.GPU(),
+                visionBackend = Backend.CPU(),
+                audioBackend = null,
+                maxNumTokens = 4096,
+                maxNumImages = 1,
+                cacheDir = cacheDir
+            ),
+            "CPU_VISION_CPU" to EngineConfig(
+                modelPath = modelFile.absolutePath,
+                backend = Backend.CPU(),
+                visionBackend = Backend.CPU(),
+                audioBackend = null,
+                maxNumTokens = 4096,
+                maxNumImages = 1,
+                cacheDir = cacheDir
+            ),
+            "CPU_COMPACT" to EngineConfig(
+                modelPath = modelFile.absolutePath,
+                backend = Backend.CPU(),
+                visionBackend = Backend.CPU(),
+                audioBackend = null,
+                maxNumTokens = 2048,
+                maxNumImages = 1,
+                cacheDir = cacheDir
+            )
+        )
+
+        var lastErr: String? = null
+        for ((label, cfg) in configs) {
+            val attempt = runCatching {
+                Engine(cfg).apply { initialize() }
+            }
+            val engine = attempt.getOrNull()
+            if (engine != null) {
+                engineHandle = engine
+                loadedModelPath = modelFile.absolutePath
+                activeBackendLabel = label
+                lastEngineError = null
+                Log.i(TAG, "[GEMMA4_VISION] Mounted ${modelFile.name} via $label")
+                onLog("Mounted ${modelFile.name} [$label]")
+                return engine
+            } else {
+                val msg = attempt.exceptionOrNull()?.message ?: "init failed"
+                lastErr = "$label: $msg"
+                Log.w(TAG, "[GEMMA4_VISION] Mount attempt $label skipped: $msg")
+            }
         }
-        val cpuAttempt = tryInitLiteRtEngine(modelFile.absolutePath, cacheDir, preferGpu = false)
-        if (cpuAttempt != null) {
-            engineHandle = cpuAttempt
-            loadedModelPath = modelFile.absolutePath
-            activeBackendLabel = "CPU"
-            return cpuAttempt
-        }
+        lastEngineError = lastErr
+        onLog("❌ Failed mounting ${modelFile.name}: $lastErr")
         return null
     }
 
-    private fun tryInitLiteRtEngine(
-        modelPath: String,
-        cachePath: String,
-        preferGpu: Boolean
-    ): AutoCloseable? = runCatching {
-        val backendBase = Class.forName("com.google.ai.edge.litertlm.Backend")
-        val targetClass = Class.forName(
-            if (preferGpu) "com.google.ai.edge.litertlm.Backend\$GPU"
-            else "com.google.ai.edge.litertlm.Backend\$CPU"
-        )
-        val backendInstance = targetClass.getDeclaredConstructor().newInstance()
-        val cpuInstance = Class.forName("com.google.ai.edge.litertlm.Backend\$CPU")
-            .getDeclaredConstructor().newInstance()
-
-        val configClass = Class.forName("com.google.ai.edge.litertlm.EngineConfig")
-        val ctors = configClass.constructors.sortedBy { it.parameterCount }
-        var builtConfig: Any? = null
-        for (ctor in ctors) {
-            val params = ctor.parameterTypes
-            if (params.isEmpty() || params[0] != String::class.java) continue
-            val args = arrayOfNulls<Any?>(params.size)
-            args[0] = modelPath
-            var backendSlots = 0
-            var stringSlots = 1
-            var valid = true
-            for (i in 1 until params.size) {
-                val pt = params[i]
-                when {
-                    backendBase.isAssignableFrom(pt) -> {
-                        args[i] = if (backendSlots == 0) backendInstance else if (preferGpu) backendInstance else cpuInstance
-                        backendSlots++
-                    }
-                    pt == String::class.java -> {
-                        args[i] = if (stringSlots == 1) cachePath else null
-                        stringSlots++
-                    }
-                    pt == Int::class.javaPrimitiveType || pt == Int::class.javaObjectType -> args[i] = 2048
-                    pt == Boolean::class.javaPrimitiveType || pt == Boolean::class.javaObjectType -> args[i] = true
-                    else -> valid = false
-                }
-            }
-            if (valid) {
-                builtConfig = runCatching { ctor.newInstance(*args) }.getOrNull()
-                if (builtConfig != null) break
-            }
-        }
-        if (builtConfig == null) return null
-
-        val engineClass = Class.forName("com.google.ai.edge.litertlm.Engine")
-        val engine = engineClass.getDeclaredConstructor(configClass).newInstance(builtConfig)
-        engineClass.getMethod("initialize").invoke(engine)
-        Log.i(TAG, "[GEMMA4_VISION] Mounted $modelPath (GPU=$preferGpu)")
-        engine as? AutoCloseable
-    }.onFailure { err ->
-        Log.w(TAG, "[GEMMA4_VISION] Init (GPU=$preferGpu) skipped: ${err.message}")
-    }.getOrNull()
-
-    private fun queryLiteRtGemmaOnDevice(
+    private fun queryLiteRtGemmaMultimodalLocked(
         modelFile: File,
         annotatedJpegFile: File,
-        prompt: String
-    ): String? = runCatching {
-        val engine = ensureLiteRtEngineMountedLocked(modelFile) ?: return null
-        val conv = (engine.javaClass.methods.firstOrNull {
-            it.name == "createConversation" && it.parameterCount == 0
-        }?.invoke(engine) ?: run {
-            val ccClass = Class.forName("com.google.ai.edge.litertlm.ConversationConfig")
-            val defaultCc = ccClass.constructors.firstOrNull { it.parameterCount == 0 }?.newInstance()
-            engine.javaClass.methods.firstOrNull {
-                it.name == "createConversation" && it.parameterCount == 1
-            }?.invoke(engine, defaultCc)
-        }) as? AutoCloseable ?: return null
+        prompt: String,
+        onLog: (String) -> Unit
+    ): String? {
+        val engine = ensureLiteRtEngineMountedLocked(modelFile, onLog) ?: return null
 
-        conv.use { session ->
-            val msgObj = buildMultimodalMessage(annotatedJpegFile, prompt)
-            val sendMsgMethod = msgObj?.let { m ->
-                session.javaClass.methods.firstOrNull {
-                    it.name == "sendMessage" && it.parameterCount == 1 &&
-                        it.parameterTypes[0].isAssignableFrom(m.javaClass)
+        // Primary path: Conversation API with ThinkingConfig enabled
+        val convConfigWithThinking = ConversationConfig(
+            samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.2, seed = 42),
+            thinkingConfig = ThinkingConfig(enableThinking = true, thinkingTokenBudget = 1024)
+        )
+        val convAttempt = runCatching {
+            val conv = runCatching { engine.createConversation(convConfigWithThinking) }
+                .getOrElse { engine.createConversation(ConversationConfig()) }
+            conv.use { session ->
+                val msg = runCatching {
+                    session.sendMessage(
+                        Contents.of(listOf(Content.ImageFile(annotatedJpegFile.absolutePath), Content.Text(prompt)))
+                    )
+                }.getOrElse {
+                    session.sendMessage(
+                        Contents.of(listOf(Content.ImageBytes(annotatedJpegFile.readBytes()), Content.Text(prompt)))
+                    )
                 }
+                extractFullResponseFromMessage(msg)
             }
-            val resp = if (sendMsgMethod != null && msgObj != null) {
-                sendMsgMethod.invoke(session, msgObj)
-            } else {
-                session.javaClass.methods.firstOrNull {
-                    it.name == "sendMessage" && it.parameterCount == 1 && it.parameterTypes[0] == String::class.java
-                }?.invoke(session, prompt)
+        }
+        val convText = convAttempt.getOrNull()
+        if (!convText.isNullOrBlank()) {
+            return convText
+        }
+        convAttempt.exceptionOrNull()?.let { err ->
+            lastEngineError = "Conversation vision call failed: ${err.message}"
+            Log.w(TAG, "[GEMMA4_VISION] Conversation call failed: ${err.message}", err)
+            onLog("⚠️ Conversation fallback -> trying Session API (${err.message})")
+        }
+
+        // Secondary path: Low-level Session API with InputData.Image + InputData.Text
+        val sessAttempt = runCatching {
+            engine.createSession(
+                SessionConfig(samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.2, seed = 42))
+            ).use { s ->
+                s.generateContent(
+                    listOf(
+                        InputData.Image(annotatedJpegFile.readBytes()),
+                        InputData.Text(prompt)
+                    )
+                )
             }
-            extractTextFromLiteRtResponse(resp)
         }
-    }.onFailure { err ->
-        Log.w(TAG, "[GEMMA4_VISION] Inference error: ${err.message}")
-    }.getOrNull()
-
-    private fun buildMultimodalMessage(imageFile: File, prompt: String): Any? = runCatching {
-        val textClass = Class.forName("com.google.ai.edge.litertlm.Content\$Text")
-        val textContent = textClass.getDeclaredConstructor(String::class.java).newInstance(prompt)
-
-        val imgContent = runCatching {
-            val imgFileClass = Class.forName("com.google.ai.edge.litertlm.Content\$ImageFile")
-            imgFileClass.getDeclaredConstructor(String::class.java).newInstance(imageFile.absolutePath)
-        }.getOrElse {
-            val imgBytesClass = Class.forName("com.google.ai.edge.litertlm.Content\$ImageBytes")
-            imgBytesClass.getDeclaredConstructor(ByteArray::class.java).newInstance(imageFile.readBytes())
+        sessAttempt.exceptionOrNull()?.let { err ->
+            lastEngineError = "Session vision call failed: ${err.message}"
+            Log.w(TAG, "[GEMMA4_VISION] Session call failed: ${err.message}", err)
         }
+        return sessAttempt.getOrNull()
+    }
 
-        val contentList = listOf(imgContent, textContent)
-        val messageClass = Class.forName("com.google.ai.edge.litertlm.Message")
-        val contentClass = Class.forName("com.google.ai.edge.litertlm.Content")
+    private fun queryLiteRtGemmaTextLocked(
+        modelFile: File,
+        prompt: String,
+        onLog: (String) -> Unit
+    ): String? {
+        val engine = ensureLiteRtEngineMountedLocked(modelFile, onLog) ?: return null
+        val convAttempt = runCatching {
+            val cfg = ConversationConfig(
+                samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.35, seed = 42)
+            )
+            engine.createConversation(cfg).use { session ->
+                val msg = session.sendMessage(Contents.of(prompt))
+                extractFullResponseFromMessage(msg)
+            }
+        }
+        val convText = convAttempt.getOrNull()
+        if (!convText.isNullOrBlank()) return convText
 
-        // Support Message.of(vararg Content), Message.of(List<Content>), or Message(List<Content>)
-        val ofList = messageClass.methods.firstOrNull {
-            it.name == "of" && it.parameterCount == 1 && List::class.java.isAssignableFrom(it.parameterTypes[0])
-        }
-        if (ofList != null) return@runCatching ofList.invoke(null, contentList)
+        return runCatching {
+            engine.createSession(SessionConfig()).use { s ->
+                s.generateContent(listOf(InputData.Text(prompt)))
+            }
+        }.onFailure { err ->
+            lastEngineError = "Text inference failed: ${err.message}"
+            Log.w(TAG, "[GEMMA4_VISION] Text inference failed: ${err.message}")
+        }.getOrNull()
+    }
 
-        val ofVararg = messageClass.methods.firstOrNull {
-            it.name == "of" && it.parameterCount == 1 && it.parameterTypes[0].isArray
+    private fun extractFullResponseFromMessage(msg: Message): String {
+        val textBody = msg.contents.contents
+            .mapNotNull { c -> (c as? Content.Text)?.text }
+            .joinToString("\n")
+            .ifBlank { msg.toString() }
+            .trim()
+        val thoughtChannel = (msg.channels["thought"] ?: msg.channels["thinking"]).orEmpty().trim()
+        return if (thoughtChannel.isNotBlank() && !textBody.contains("<thought", ignoreCase = true)) {
+            "<thought>\n$thoughtChannel\n</thought>\n$textBody"
+        } else {
+            textBody
         }
-        if (ofVararg != null) {
-            val arr = java.lang.reflect.Array.newInstance(contentClass, 2)
-            java.lang.reflect.Array.set(arr, 0, imgContent)
-            java.lang.reflect.Array.set(arr, 1, textContent)
-            return@runCatching ofVararg.invoke(null, arr)
-        }
-
-        val ctorList = messageClass.constructors.firstOrNull {
-            it.parameterCount == 1 && List::class.java.isAssignableFrom(it.parameterTypes[0])
-        }
-        ctorList?.newInstance(contentList)
-    }.getOrNull()
-
-    private fun extractTextFromLiteRtResponse(resp: Any?): String? {
-        if (resp == null) return null
-        if (resp is String) return resp
-        val textMethod = resp.javaClass.methods.firstOrNull {
-            it.name in setOf("getText", "text", "getContent") && it.parameterCount == 0
-        }
-        val direct = textMethod?.invoke(resp)?.toString()
-        if (!direct.isNullOrBlank()) return direct
-        return resp.toString()
     }
 
     private fun queryOpenAiVisionEndpoint(
@@ -479,6 +676,25 @@ If a floating/tail-less speech bubble's speaker is ambiguous, set "speaker": "UN
             })
         }.toString()
 
+        return executeOpenAiChatRequest(endpointUrl, payload)
+    }
+
+    private fun queryOpenAiTextEndpoint(endpointUrl: String, prompt: String): String? {
+        val payload = buildJsonObject {
+            put("model", "gemma-4-E2B-it")
+            put("temperature", 0.35)
+            put("max_tokens", 1400)
+            put("messages", buildJsonArray {
+                add(buildJsonObject {
+                    put("role", "user")
+                    put("content", prompt)
+                })
+            })
+        }.toString()
+        return executeOpenAiChatRequest(endpointUrl, payload)
+    }
+
+    private fun executeOpenAiChatRequest(endpointUrl: String, payload: String): String? {
         val req = Request.Builder()
             .url(endpointUrl)
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
@@ -498,7 +714,9 @@ If a floating/tail-less speech bubble's speaker is ambiguous, set "speaker": "UN
     private fun buildOfflineHeuristicAnalysis(
         pageIndex: Int,
         panels: List<MangaNormalizedRect>,
-        existingCharacters: List<MangaCharacterProfile>
+        existingCharacters: List<MangaCharacterProfile>,
+        modelWasInstalled: Boolean,
+        diagnosticReason: String
     ): MangaVisionResponseParser.ParsedPageAnalysis {
         val fallbackChars = if (existingCharacters.isNotEmpty()) {
             existingCharacters.map { it.name }
@@ -511,7 +729,11 @@ If a floating/tail-less speech bubble's speaker is ambiguous, set "speaker": "UN
             MangaVisionResponseParser.DiscoveredPanelSpec(
                 panelIndex = pIdx,
                 sceneMood = "manga_panel",
-                thoughtTrace = "BFS gutter slicer isolated Panel P${pIdx + 1} on page ${pageIndex + 1}; awaiting Gemma 4 E2B OCR or Pre-Production confirmation.",
+                thoughtTrace = if (modelWasInstalled) {
+                    "BFS isolated Panel P${pIdx + 1}; Vision note: $diagnosticReason"
+                } else {
+                    "BFS isolated Panel P${pIdx + 1} on page ${pageIndex + 1}; awaiting Gemma 4 OCR or manual confirmation."
+                },
                 lines = listOf(
                     MangaVisionResponseParser.DiscoveredLineSpec(
                         bubbleIndex = 1,
@@ -523,15 +745,15 @@ If a floating/tail-less speech bubble's speaker is ambiguous, set "speaker": "UN
                         emotion = "neutral",
                         confidence = conf,
                         candidateSpeakers = fallbackChars,
-                        rawText = "Page ${pageIndex + 1}, Panel ${pIdx + 1} line — tap to type or confirm dialogue.",
-                        needsUserDecision = conf < 0.72f,
-                        decisionReason = "Gemma 4 E2B Vision cartridge not installed — confirm speaker & dialogue or install SUB-11V"
+                        rawText = "Page ${pageIndex + 1}, Panel ${pIdx + 1} line — tap to edit or confirm speaker.",
+                        needsUserDecision = conf < 0.55f,
+                        decisionReason = diagnosticReason
                     )
                 )
             )
         }
         return MangaVisionResponseParser.ParsedPageAnalysis(
-            thoughtTrace = "BFS sliced ${panels.size} panel(s) cleanly.",
+            thoughtTrace = "BFS sliced ${panels.size} panel(s) cleanly ($diagnosticReason).",
             storySummary = "Page ${pageIndex + 1} prepared for Pre-Production review.",
             panels = panelsOut
         )
@@ -546,6 +768,6 @@ If a floating/tail-less speech bubble's speaker is ambiguous, set "speaker": "UN
         engineHandle = null
         loadedModelPath = null
         activeBackendLabel = "NONE"
-        Log.i(TAG, "[VRAM_EVICT] Unloaded Gemma 4 E2B LiteRT Vision Engine")
+        Log.i(TAG, "[VRAM_EVICT] Unloaded Gemma 4 LiteRT Vision Engine")
     }
 }

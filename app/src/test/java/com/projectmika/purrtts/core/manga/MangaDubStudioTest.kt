@@ -254,4 +254,106 @@ class MangaDubStudioTest {
         assertEquals("1m 05s", MangaTelemetryUtils.formatDurationShort(65))
         assertEquals("9s", MangaTelemetryUtils.formatDurationShort(9))
     }
+
+    @Test
+    fun `parser accepts 1-based panel aliases, trailing commas, and non-blocking confidence above 55 percent`() {
+        val raw = """
+            <thought>Panel P1 shows Akira speaking; Panel P2 has Aria responding gently.</thought>
+            [
+              {
+                "panel": "P1",
+                "mood": "action",
+                "lines": [
+                  {
+                    "character": "AKIRA",
+                    "confidence": 0.65,
+                    "dialogue": "Hold the gate!",
+                  },
+                ],
+              },
+              {
+                "panel": "P2",
+                "mood": "calm",
+                "lines": [
+                  {
+                    "character": "ARIA",
+                    "confidence": 0.45,
+                    "speech": "Right behind you.",
+                  }
+                ]
+              }
+            ]
+        """.trimIndent()
+
+        val parsed = MangaVisionResponseParser.parsePageAnalysis(
+            rawResponse = raw,
+            panelCount = 2,
+            existingCharacters = emptyList()
+        )
+        assertEquals(2, parsed.panels.size)
+        assertEquals(0, parsed.panels[0].panelIndex)
+        assertEquals(1, parsed.panels[1].panelIndex)
+
+        val l1 = parsed.panels[0].lines.single()
+        assertEquals("AKIRA", l1.speakerName)
+        assertEquals("Hold the gate!", l1.rawText)
+        assertFalse(l1.needsUserDecision)
+
+        val l2 = parsed.panels[1].lines.single()
+        assertEquals("ARIA", l2.speakerName)
+        assertTrue(l2.needsUserDecision)
+    }
+
+    @Test
+    fun `voice design roster parser updates qwen3 prompts speed and pitch while preserving assigned clone`() {
+        val initialRoster = listOf(
+            MangaCharacterProfile(
+                id = "c_veg",
+                name = "VEGETA_X",
+                gender = VoiceGender.MALE,
+                assignedVoiceId = "clone_veg_custom",
+                assignedVoiceLabel = "Vegeta Clone"
+            ),
+            MangaCharacterProfile(
+                id = "c_aria",
+                name = "ARIA",
+                gender = VoiceGender.FEMALE
+            )
+        )
+        val rawCasting = """
+            ```json
+            {
+              "characters": [
+                {
+                  "name": "VEGETA_X",
+                  "gender": "male",
+                  "visual_description": "Proud armored Saiyan warrior",
+                  "voice_design_prompt": "Gravelly medium-low warrior baritone with fierce explosive projection",
+                  "speed_scale": 1.12,
+                  "pitch_scale": 0.94,
+                },
+                {
+                  "name": "ARIA",
+                  "gender": "female",
+                  "visual_description": "Calm navigator with glowing visor",
+                  "voice_design_prompt": "Crisp bright young soprano with calm steady tactical cadence",
+                  "speed_scale": 1.0,
+                  "pitch_scale": 1.04
+                }
+              ]
+            }
+            ```
+        """.trimIndent()
+
+        val updated = MangaVisionResponseParser.parseVoiceDesignRoster(rawCasting, initialRoster)
+        assertEquals(2, updated.size)
+        assertEquals("clone_veg_custom", updated[0].assignedVoiceId)
+        assertTrue(updated[0].voiceDesignPrompt.contains("warrior baritone"))
+        assertEquals(1.12f, updated[0].speedScale, 0.001f)
+        assertEquals(0.94f, updated[0].pitchScale, 0.001f)
+
+        assertTrue(updated[1].voiceDesignPrompt.contains("soprano"))
+        assertEquals(VoiceGender.FEMALE, updated[1].gender)
+        assertEquals(1.04f, updated[1].pitchScale, 0.001f)
+    }
 }
