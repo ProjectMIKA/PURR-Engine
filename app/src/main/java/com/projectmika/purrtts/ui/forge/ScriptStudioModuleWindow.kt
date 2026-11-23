@@ -40,11 +40,11 @@ import com.projectmika.purrtts.core.purr.PurrScriptCastSlot
 import com.projectmika.purrtts.core.purr.PurrScriptParser
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.ui.theme.CyberIconType
-import com.projectmika.purrtts.ui.theme.CyberVoiceSelectorDropdown
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaTagPill
+import com.projectmika.purrtts.ui.theme.MikaVoiceDropdownSelector
 import com.projectmika.purrtts.ui.theme.bringIntoViewWithIme
 import kotlin.math.roundToInt
 
@@ -223,7 +223,7 @@ fun ScriptStudioModuleWindowBody(
                             .padding(8.dp),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        CyberVoiceSelectorDropdown(
+                        MikaVoiceDropdownSelector(
                             label = "CAST_$tag",
                             voices = slottedVoices,
                             selectedVoice = selectedVoice,

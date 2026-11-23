@@ -39,11 +39,11 @@ import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrSrtFormatter
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.ui.theme.CyberIconType
-import com.projectmika.purrtts.ui.theme.CyberVoiceSelectorDropdown
 import com.projectmika.purrtts.ui.theme.MikaColors
 import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaGlowPanel
 import com.projectmika.purrtts.ui.theme.MikaTagPill
+import com.projectmika.purrtts.ui.theme.MikaVoiceDropdownSelector
 import com.projectmika.purrtts.ui.theme.bringIntoViewWithIme
 
 /**
@@ -144,7 +144,7 @@ fun VoiceBenchmarkModuleWindowBody(
 
     // 2. Slot A / Slot B Selectors
     MikaGlowPanel(accent = MikaColors.NeonCyan) {
-        CyberVoiceSelectorDropdown(
+        MikaVoiceDropdownSelector(
             label = "SLOT_A // REFERENCE_VOICE",
             voices = slottedVoices,
             selectedVoice = voiceA,
@@ -153,7 +153,7 @@ fun VoiceBenchmarkModuleWindowBody(
             onSampleVoice = { v -> viewModel.auditionText(promptText, overrideVoice = v) }
         )
         Spacer(modifier = Modifier.height(8.dp))
-        CyberVoiceSelectorDropdown(
+        MikaVoiceDropdownSelector(
             label = "SLOT_B // CHALLENGER_VOICE",
             voices = slottedVoices,
             selectedVoice = voiceB,
