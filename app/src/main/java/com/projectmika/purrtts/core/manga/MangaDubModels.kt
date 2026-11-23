@@ -221,10 +221,18 @@ object MangaTextBender {
             .replace(Regex("\\.{2,}"), ".")
             .replace(Regex("\\s+([,.!?])"), "$1")
 
-        // Acronym Assassin: lowercase 2+ uppercase letter runs unless whitelisted
-        out = Regex("""\b[A-Z]{2,}\b""").replace(out) { m ->
-            val token = m.value
-            if (token in ACRONYM_WHITELIST) token else token.lowercase()
+        // Acronym Assassin: lowercase 2+ uppercase runs & all-caps contractions unless whitelisted
+        out = Regex("""\b([A-Z]+)(?:'([A-Z]+))?\b""").replace(out) { m ->
+            val stem = m.groupValues[1]
+            val suffix = m.groupValues[2]
+            when {
+                suffix.isNotEmpty() -> {
+                    if (stem in ACRONYM_WHITELIST) "$stem'${suffix.lowercase()}"
+                    else "${stem.lowercase()}'${suffix.lowercase()}"
+                }
+                stem.length >= 2 && stem !in ACRONYM_WHITELIST -> stem.lowercase()
+                else -> stem
+            }
         }
 
         // Fix standalone lowercase pronoun "i" and contractions ("i'm", "i'll", "i've", "i'd")
