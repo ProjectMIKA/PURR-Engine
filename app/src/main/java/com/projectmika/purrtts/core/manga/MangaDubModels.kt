@@ -1042,10 +1042,9 @@ object MangaBfsPanelSlicer {
         val hCut = findBestHorizontalCut(luminance, width, height, gutterMed, tolerance, x0, y0, x1, y1)
         val vCut = if (webtoon) null else findBestVerticalCut(luminance, width, height, gutterMed, tolerance, x0, y0, x1, y1)
 
-        // Prioritize clean full-width horizontal row gutters so manga reads in strict
-        // row-first Z-order (Top-Right -> Top-Left before Bottom-Right -> Bottom-Left).
+        // Prioritize horizontal cuts on equal/clean gutters while keeping cleaner vertical column gutters intact
         return when {
-            hCut != null -> {
+            hCut != null && (vCut == null || hCut.score >= vCut.score) -> {
                 val top = sliceRegionRecursive(
                     luminance, width, height, gutterMed, tolerance,
                     x0, y0, x1, hCut.start, depth + 1, maxDepth, rtl, webtoon
@@ -1827,11 +1826,11 @@ object MangaVisionResponseParser {
             val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
                 speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
                 speakerRaw == "?"
-            val needsDecision = ambiguousSpeaker || (!isNarrationBox && tailAmbiguous && conf < 0.82f) || conf < 0.68f
+            val needsDecision = ambiguousSpeaker || (!isNarrationBox && tailAmbiguous && conf < 0.85f) || conf < 0.58f
             val reason = when {
                 ambiguousSpeaker -> "VLM flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
-                !isNarrationBox && tailAmbiguous && conf < 0.82f -> "Bubble tail target unclear in Panel ${pIdx + 1} — verify speaker attribution"
-                conf < 0.68f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
+                !isNarrationBox && tailAmbiguous && conf < 0.85f -> "Bubble tail target unclear in Panel ${pIdx + 1} — verify speaker attribution"
+                conf < 0.58f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
                 else -> ""
             }
             val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)

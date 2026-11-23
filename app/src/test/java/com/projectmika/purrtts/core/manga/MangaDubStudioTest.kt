@@ -1119,7 +1119,7 @@ class MangaDubStudioTest {
         """.trimIndent()
         val updated = MangaVisionResponseParser.parseVoiceDesignRoster(rawCasting, roster)
         assertEquals(1, updated.size)
-        assertTrue(updated[0].voiceDesignPrompt.contains("low-baritone", ignoreCase = true))
+        assertTrue(updated[0].voiceDesignPrompt.contains("low-pitched chest register", ignoreCase = true))
         assertTrue(updated[0].voiceDesignPrompt.contains("Rabbit scientist in lab coat", ignoreCase = true) ||
             updated[0].voiceDesignPrompt.contains("scientist butler", ignoreCase = true))
     }
