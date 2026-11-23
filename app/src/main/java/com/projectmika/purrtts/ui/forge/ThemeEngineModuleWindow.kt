@@ -80,10 +80,16 @@ fun ThemeEngineModuleWindowBody(
 
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         // 1. Mode Switcher
-        MikaGlowPanel(
-            title = "DISPLAY_MODE_SELECTOR",
-            accent = MikaColors.NeonCyan
-        ) {
+        MikaGlowPanel(accent = MikaColors.NeonCyan) {
+            Text(
+                text = "> DISPLAY_MODE_SELECTOR",
+                color = MikaColors.NeonCyan,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
                 text = "// Classic RETRO preserves per-cartridge Cyberdeck colors. NEON GLOW unifies borders & accents around one glowing hue with auto WCAG text contrast.",
                 color = MikaColors.DimText,
@@ -101,7 +107,7 @@ fun ThemeEngineModuleWindowBody(
                     selected = !isNeon,
                     accent = MikaColors.NeonPink,
                     onClick = {
-                        viewModel.updateThemeConfig(cfg.copy(mode = PurrThemeMode.RETRO_CYBERDECK))
+                        viewModel.updateThemeConfig { it.copy(mode = PurrThemeMode.RETRO_CYBERDECK) }
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -111,7 +117,7 @@ fun ThemeEngineModuleWindowBody(
                     selected = isNeon,
                     accent = MikaColors.NeonCyan,
                     onClick = {
-                        viewModel.updateThemeConfig(cfg.copy(mode = PurrThemeMode.NEON_GLOW))
+                        viewModel.updateThemeConfig { it.copy(mode = PurrThemeMode.NEON_GLOW) }
                     },
                     modifier = Modifier.weight(1f)
                 )
@@ -219,10 +225,16 @@ fun ThemeEngineModuleWindowBody(
         }
 
         // 3. Background Color Picker (Default Pure Black)
-        MikaGlowPanel(
-            title = "BACKGROUND_SURFACE (DEFAULT: PURE BLACK)",
-            accent = MikaColors.NeonPurple
-        ) {
+        MikaGlowPanel(accent = MikaColors.NeonPurple) {
+            Text(
+                text = "> BACKGROUND_SURFACE (DEFAULT: PURE BLACK)",
+                color = MikaColors.NeonPurple,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             ColorPresetSwatchRow(
                 presets = PurrThemeEngine.BACKGROUND_PRESETS,
                 selectedArgb = cfg.neonBackgroundHex,
@@ -230,12 +242,12 @@ fun ThemeEngineModuleWindowBody(
                 onSelect = { preset ->
                     bgHexError = null
                     bgHexInput = PurrThemeEngine.formatHexRgb(preset.argb)
-                    viewModel.updateThemeConfig(
-                        cfg.copy(
+                    viewModel.updateThemeConfig {
+                        it.copy(
                             mode = PurrThemeMode.NEON_GLOW,
                             neonBackgroundHex = preset.argb
                         )
-                    )
+                    }
                 }
             )
             Spacer(modifier = Modifier.height(10.dp))
@@ -255,22 +267,28 @@ fun ThemeEngineModuleWindowBody(
                     } else {
                         bgHexError = null
                         bgHexInput = PurrThemeEngine.formatHexRgb(parsed)
-                        viewModel.updateThemeConfig(
-                            cfg.copy(
+                        viewModel.updateThemeConfig {
+                            it.copy(
                                 mode = PurrThemeMode.NEON_GLOW,
                                 neonBackgroundHex = parsed
                             )
-                        )
+                        }
                     }
                 }
             )
         }
 
         // 4. Primary Glow Color Picker (e.g. Cyan)
-        MikaGlowPanel(
-            title = "PRIMARY_GLOW_COLOR (BORDERS & ACCENTS)",
-            accent = MikaColors.NeonCyan
-        ) {
+        MikaGlowPanel(accent = MikaColors.NeonCyan) {
+            Text(
+                text = "> PRIMARY_GLOW_COLOR (BORDERS & ACCENTS)",
+                color = MikaColors.NeonCyan,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp
+            )
+            Spacer(modifier = Modifier.height(8.dp))
             ColorPresetSwatchRow(
                 presets = PurrThemeEngine.GLOW_PRESETS,
                 selectedArgb = cfg.neonPrimaryHex,
@@ -278,12 +296,12 @@ fun ThemeEngineModuleWindowBody(
                 onSelect = { preset ->
                     glowHexError = null
                     glowHexInput = PurrThemeEngine.formatHexRgb(preset.argb)
-                    viewModel.updateThemeConfig(
-                        cfg.copy(
+                    viewModel.updateThemeConfig {
+                        it.copy(
                             mode = PurrThemeMode.NEON_GLOW,
                             neonPrimaryHex = preset.argb
                         )
-                    )
+                    }
                 }
             )
             Spacer(modifier = Modifier.height(10.dp))
@@ -303,31 +321,37 @@ fun ThemeEngineModuleWindowBody(
                     } else {
                         glowHexError = null
                         glowHexInput = PurrThemeEngine.formatHexRgb(parsed)
-                        viewModel.updateThemeConfig(
-                            cfg.copy(
+                        viewModel.updateThemeConfig {
+                            it.copy(
                                 mode = PurrThemeMode.NEON_GLOW,
                                 neonPrimaryHex = parsed
                             )
-                        )
+                        }
                     }
                 }
             )
         }
 
         // 5. Glow Intensity & Reset
-        MikaGlowPanel(
-            title = "NEON_BLOOM_INTENSITY // ${(cfg.glowIntensity * 100f).roundToInt()}%",
-            accent = MikaColors.NeonPink
-        ) {
+        MikaGlowPanel(accent = MikaColors.NeonPink) {
+            Text(
+                text = "> NEON_BLOOM_INTENSITY // ${(cfg.glowIntensity * 100f).roundToInt()}%",
+                color = MikaColors.NeonPink,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.sp,
+                letterSpacing = 0.8.sp
+            )
+            Spacer(modifier = Modifier.height(4.dp))
             Slider(
                 value = cfg.glowIntensity,
                 onValueChange = { next ->
-                    viewModel.updateThemeConfig(
-                        cfg.copy(
+                    viewModel.updateThemeConfig {
+                        it.copy(
                             mode = PurrThemeMode.NEON_GLOW,
                             glowIntensity = next.coerceIn(0.2f, 1.0f)
                         )
-                    )
+                    }
                 },
                 valueRange = 0.2f..1.0f,
                 colors = SliderDefaults.colors(
@@ -360,7 +384,7 @@ fun ThemeEngineModuleWindowBody(
                     onClick = {
                         bgHexError = null
                         glowHexError = null
-                        viewModel.updateThemeConfig(PurrThemeConfig())
+                        viewModel.updateThemeConfig { PurrThemeConfig() }
                     }
                 )
             }

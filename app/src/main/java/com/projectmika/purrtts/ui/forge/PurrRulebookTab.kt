@@ -607,7 +607,7 @@ private fun OsDesktopAppTile(
         )
         Text(
             text = statusNote,
-            color = module.accent,
+            color = moduleAccent,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Bold,
             fontSize = 9.sp,
