@@ -698,7 +698,7 @@ class MangaDubStudioManager(
 
         try {
             for ((pageIdx, page) in ch.pages.withIndex()) {
-                if (!isActive) throw CancellationException("Cancelled")
+                if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
                 val tierNote = proj.preferredVisionModel.shortLabel
                 reportTelemetry(
                     stage = MangaPipelineStage.VISION_SCAN,
@@ -1247,7 +1247,7 @@ class MangaDubStudioManager(
             for (panel in page.panels) {
                 val renderedLines = ArrayList<MangaSpeechLine>(panel.lines.size)
                 for (line in panel.lines) {
-                    if (!isActive) throw CancellationException("Cancelled")
+                    if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
                     linesDone++
                     val textToSpeak = line.sanitizedText.ifBlank { line.rawText }.trim()
                     if (textToSpeak.isEmpty()) {

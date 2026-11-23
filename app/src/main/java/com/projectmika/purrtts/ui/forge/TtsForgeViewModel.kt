@@ -1906,7 +1906,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         burnInSubtitles: Boolean? = null,
         enableAtmosphereFx: Boolean? = null,
         powerUserVisionUrl: String? = null,
-        preferredVisionModel: MangaVisionModelTier? = null
+        preferredVisionModel: MangaVisionModelTier? = null,
+        autoCookFullMp4: Boolean? = null,
+        pauseOnFlaggedDecisions: Boolean? = null
     ) = mangaDubManager.updateProjectConfig(
         projectId = projectId,
         readingOrder = readingOrder,
@@ -1914,7 +1916,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         burnInSubtitles = burnInSubtitles,
         enableAtmosphereFx = enableAtmosphereFx,
         powerUserVisionUrl = powerUserVisionUrl,
-        preferredVisionModel = preferredVisionModel
+        preferredVisionModel = preferredVisionModel,
+        autoCookFullMp4 = autoCookFullMp4,
+        pauseOnFlaggedDecisions = pauseOnFlaggedDecisions
     )
 
     fun reanalyzeMangaChapter(projectId: String, chapterId: String) {
