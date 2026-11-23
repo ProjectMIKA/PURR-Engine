@@ -483,7 +483,8 @@ Output ONLY valid JSON:
                     rawResponse = rawRemote,
                     panelCount = targetPanels.size,
                     existingCharacters = existingCharacters,
-                    includeNonBubbleText = includeNonBubbleText
+                    includeNonBubbleText = includeNonBubbleText,
+                    readingOrder = readingOrder
                 )
                 if (parsed.panels.isNotEmpty()) {
                     return@withContext parsed to "LAN Vision Endpoint"
@@ -554,7 +555,8 @@ Output ONLY valid JSON:
                     rawResponse = rawPanel,
                     panelIndex = panelIdx,
                     existingCharacters = existingCharacters,
-                    includeNonBubbleText = includeNonBubbleText
+                    includeNonBubbleText = includeNonBubbleText,
+                    readingOrder = readingOrder
                 )
                 // If model emitted freeform prose instead of JSON and omitted empty `"lines": []`, try compact JSON repair
                 if (panelSpec.lines.isEmpty() && !rawPanel.contains("\"lines\"") && rawPanel.length > 40 && rawPanel.none { it == '{' }) {
@@ -567,7 +569,8 @@ Output ONLY valid JSON:
                             rawResponse = repairedRaw,
                             panelIndex = panelIdx,
                             existingCharacters = existingCharacters,
-                            includeNonBubbleText = includeNonBubbleText
+                            includeNonBubbleText = includeNonBubbleText,
+                            readingOrder = readingOrder
                         )
                         if (repaired.lines.isNotEmpty()) {
                             panelSpec = repaired
@@ -723,9 +726,19 @@ Output ONLY valid JSON:
             "STRICT SPEECH-BUBBLE-ONLY MODE: ONLY transcribe text enclosed inside distinct speech bubbles, thought clouds, jagged speech bursts belonging to a speaker, or rectangular narration boxes. COMPLETELY IGNORE standalone SFX lettering floating on the artwork (e.g. \"Shaaa\", \"GULP\", \"BWO DO\"), floating background laughs, scanlation credit bars, watermarks, and artist signatures. Do NOT emit entries for ignored non-bubble text."
         }
 
+        val readingPosRule = when (readingOrder) {
+            MangaReadingOrder.RTL_MANGA ->
+                "STRICT MANGA RIGHT-TO-LEFT ORDER: Start with the RIGHTMOST speech bubble first (\"x_pos\" closest to 1.0), then move LEFTWARD toward smaller \"x_pos\" (0.0). Top bubbles precede lower rows."
+            MangaReadingOrder.LTR_COMIC ->
+                "STRICT COMIC LEFT-TO-RIGHT ORDER: Start with the LEFTMOST speech bubble first (\"x_pos\" closest to 0.0), then move RIGHTWARD toward larger \"x_pos\" (1.0). Top bubbles precede lower rows."
+            MangaReadingOrder.WEBTOON_VERTICAL ->
+                "STRICT WEBTOON TOP-TO-BOTTOM ORDER: Start with the TOPMOST bubble first (\"y_pos\" closest to 0.0) and proceed downward toward \"y_pos\" 1.0."
+        }
+
         return """
 You are scanning ONE zoomed comic/manga panel: Page ${pageIndex + 1}, Panel ${panelIndex + 1} of $totalPanelsOnPage.
 ${readingOrder.vlmPromptDirective}
+$readingPosRule
 
 $storyBlock
 
@@ -737,7 +750,7 @@ $contextLines
 
 TASK:
 $bubbleScopeRule
-Order lines strictly by ${readingOrder.label}. Trace bubble tails carefully to identify each speaker (or NARRATOR for boxed captions). If a panel shows the same character wearing a different outfit or twice for comedic motion, reuse the same canonical character name!
+Order lines strictly by ${readingOrder.label} and include normalized bubble center coordinates "x_pos" (0.0=left .. 1.0=right) and "y_pos" (0.0=top .. 1.0=bottom). Trace bubble tails carefully to identify each speaker (or NARRATOR for boxed captions). If a panel shows the same character wearing a different outfit or twice for comedic motion, reuse the same canonical character name!
 
 Output ONLY valid JSON matching this schema:
 {
@@ -746,6 +759,8 @@ Output ONLY valid JSON matching this schema:
   "lines": [
     {
       "bubble": 1,
+      "x_pos": 0.85,
+      "y_pos": 0.22,
       "is_speech_bubble": true,
       "speaker": "CANONICAL_CHARACTER_NAME or NARRATOR",
       "is_new_character": false,
@@ -766,7 +781,7 @@ Only use "speaker": "UNKNOWN" with "confidence": 0.45 when the bubble tail truly
 
     private fun buildCompactSinglePanelRepairPrompt(previousSnippet: String): String = """
 Convert these single-panel manga transcription notes into strict JSON matching:
-{"mood":"action","lines":[{"bubble":1,"is_speech_bubble":true,"speaker":"NARRATOR","is_new_character":false,"gender":"male","emotion":"neutral","confidence":0.85,"text":"Dialogue text"}]}
+{"mood":"action","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.25,"is_speech_bubble":true,"speaker":"NARRATOR","is_new_character":false,"gender":"male","emotion":"neutral","confidence":0.85,"text":"Dialogue text"}]}
 Output JSON ONLY.
 
 Notes:
@@ -806,9 +821,19 @@ $previousSnippet
             "ONLY transcribe enclosed speech bubbles, thought clouds, and boxed narration captions in strict ${readingOrder.label} order. COMPLETELY SKIP floating SFX, scanlation credits, watermarks, and signatures (never include non-bubble SFX lines)."
         }
 
+        val readingPosRule = when (readingOrder) {
+            MangaReadingOrder.RTL_MANGA ->
+                "IMPORTANT: Inside every panel, bubble 1 is the RIGHTMOST bubble (highest \"x_pos\" near 1.0), reading leftward to \"x_pos\" near 0.0."
+            MangaReadingOrder.LTR_COMIC ->
+                "IMPORTANT: Inside every panel, bubble 1 is the LEFTMOST bubble (lowest \"x_pos\" near 0.0), reading rightward to \"x_pos\" near 1.0."
+            MangaReadingOrder.WEBTOON_VERTICAL ->
+                "IMPORTANT: Inside every panel, bubble 1 is the TOPMOST bubble (lowest \"y_pos\" near 0.0), reading downward."
+        }
+
         return """
 You are MIKA's Manga Dubbing & Voice Casting Director scanning Page ${pageIndex + 1} (${readingOrder.label}).
 ${readingOrder.vlmPromptDirective}
+$readingPosRule
 Cyan boxes outline the exact reading-order panels labeled P1..P$panelCount.
 
 $storyBlock
@@ -834,6 +859,8 @@ TASK:
       "lines": [
         {
           "bubble": 1,
+          "x_pos": 0.85,
+          "y_pos": 0.22,
           "is_speech_bubble": true,
           "speaker": "CHARACTER_NAME or NARRATOR",
           "is_new_character": true,

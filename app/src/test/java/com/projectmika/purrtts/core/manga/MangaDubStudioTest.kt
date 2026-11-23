@@ -846,4 +846,121 @@ class MangaDubStudioTest {
         )
         assertEquals(4, split.size)
     }
+
+    @Test
+    fun `border-verified xy-cut slicer avoids bubble over-segmentation caps at 5 panels and preserves RTL guillotine order`() {
+        val w = 120
+        val h = 160
+        // White paper backdrop
+        val lum = IntArray(w * h) { 252 }
+
+        fun drawFramedPanel(x0: Int, y0: Int, x1: Int, y1: Int, interiorLum: Int = 210) {
+            for (y in y0..y1) {
+                for (x in x0..x1) {
+                    val onBorder = (x == x0 || x == x1 || y == y0 || y == y1)
+                    lum[y * w + x] = if (onBorder) 20 else interiorLum
+                }
+            }
+            // Place a bright white interior speech bubble inside the panel so old bubble-fragmenting splitters would choke
+            val bx0 = x0 + (x1 - x0) / 4
+            val bx1 = x1 - (x1 - x0) / 4
+            val by0 = y0 + (y1 - y0) / 5
+            val by1 = y0 + (y1 - y0) * 2 / 4
+            for (y in by0..by1) {
+                for (x in bx0..bx1) {
+                    lum[y * w + x] = 250
+                }
+            }
+        }
+
+        // Dense manga layout: Tall Right panel + 3 Stacked Left panels (Page 1 layout)
+        drawFramedPanel(64, 4, 115, 155, interiorLum = 242)
+        drawFramedPanel(4, 4, 56, 50, interiorLum = 180)
+        drawFramedPanel(4, 56, 56, 102, interiorLum = 180)
+        drawFramedPanel(4, 108, 56, 155, interiorLum = 180)
+
+        val rtlPanels = MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(
+            luminance = lum,
+            width = w,
+            height = h,
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertTrue(rtlPanels.size <= MangaBfsPanelSlicer.MAX_PANELS_PER_PAGE)
+        assertEquals(4, rtlPanels.size)
+        // Must start on tall right panel before descending through LeftTop -> LeftMid -> LeftBot
+        assertTrue(rtlPanels[0].centerX > 0.5f && rtlPanels[0].height > 0.80f)
+        assertTrue(rtlPanels[1].centerX < 0.5f && rtlPanels[1].centerY < 0.35f)
+        assertTrue(rtlPanels[2].centerX < 0.5f && rtlPanels[2].centerY in 0.35f..0.66f)
+        assertTrue(rtlPanels[3].centerX < 0.5f && rtlPanels[3].centerY > 0.66f)
+    }
+
+    @Test
+    fun `expandViewportForPageContext widens tight panel crops to preserve surrounding page context`() {
+        val tightBox = MangaNormalizedRect(0.05f, 0.10f, 0.28f, 0.30f)
+        val portraitExpanded = MangaDeterministicEffectsEngine.expandViewportForPageContext(
+            tightBox,
+            MangaVideoAspect.VERTICAL_9_16
+        )
+        assertTrue(portraitExpanded.width >= 0.679f)
+        assertTrue(portraitExpanded.height >= 0.559f)
+        assertTrue(portraitExpanded.left <= tightBox.left)
+        assertTrue(portraitExpanded.top <= tightBox.top)
+
+        val landscapeExpanded = MangaDeterministicEffectsEngine.expandViewportForPageContext(
+            tightBox,
+            MangaVideoAspect.LANDSCAPE_16_9
+        )
+        assertTrue(landscapeExpanded.width >= 0.619f)
+        assertTrue(landscapeExpanded.height >= 0.499f)
+    }
+
+    @Test
+    fun `parseSinglePanelAnalysis deterministically sorts bubbles by RTL and LTR using x_pos coordinates`() {
+        val backwardsRasterJson = """
+            {
+              "mood": "comedy panic",
+              "lines": [
+                {
+                  "bubble": 1,
+                  "x_pos": 0.18,
+                  "y_pos": 0.25,
+                  "is_speech_bubble": true,
+                  "speaker": "OJOU-SAMA",
+                  "confidence": 0.92,
+                  "text": "Ooh, what nice drinks do we have here?"
+                },
+                {
+                  "bubble": 2,
+                  "x_pos": 0.84,
+                  "y_pos": 0.22,
+                  "is_speech_bubble": true,
+                  "speaker": "OJOU-SAMA",
+                  "confidence": 0.94,
+                  "text": "But wow, am I thirsty."
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val rtlSpec = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = backwardsRasterJson,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertEquals(2, rtlSpec.lines.size)
+        assertEquals("But wow, am I thirsty.", rtlSpec.lines[0].rawText)
+        assertEquals(1, rtlSpec.lines[0].bubbleIndex)
+        assertEquals("Ooh, what nice drinks do we have here?", rtlSpec.lines[1].rawText)
+        assertEquals(2, rtlSpec.lines[1].bubbleIndex)
+
+        val ltrSpec = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = backwardsRasterJson,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            readingOrder = MangaReadingOrder.LTR_COMIC
+        )
+        assertEquals("Ooh, what nice drinks do we have here?", ltrSpec.lines[0].rawText)
+        assertEquals("But wow, am I thirsty.", ltrSpec.lines[1].rawText)
+    }
 }

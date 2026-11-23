@@ -1,3 +1,27 @@
+# 🌌 PURR-TTS v1.9.5 // XY-Cut Panel Slicer (Max 5), Context Framing & Strict RTL Bubble Order
+
+### ✨ What's New since v1.9.4
+
+Fixes over-segmentation into tiny speech-bubble crops, backwards Left-to-Right panel/bubble order on Japanese manga pages, and overly tight camera zooming! 🧠📖🎬
+
+* **✂️ Border-Verified Recursive XY-Cut Panel Slicer (`MangaBfsPanelSlicer`, Max 5 Panels/Page)**:
+  * Replaced pixel-island BFS + low-threshold internal splitting with a **Dual-Half Border-Verified Recursive XY-Cut Gutter Tree** capped at **`MAX_PANELS_PER_PAGE = 5`**.
+  * Open-border panels and bright internal artwork around speech bubbles are no longer shattered into 15–20 tiny bubble boxes; every page slices cleanly into 4–5 true comic panels.
+* **📖 True Right-to-Left Manga Ordering (`partitionByGuillotine` + Intra-Panel Coordinate Sort)**:
+  * Upgraded `orderPanelsForReadingDirection` with **Recursive Guillotine XY-Partitioning** so staggered columns (e.g. a full-height right panel alongside 3 stacked left panels) strictly follow **Right -> Left** before advancing downward.
+  * Added normalized `"x_pos"` / `"y_pos"` bubble coordinates in VLM prompts and transitive row-band sorting inside `MangaVisionResponseParser` so speech bubbles inside every panel also sort strictly **RTL (rightmost first)**, **LTR**, or **Webtoon Vertical**.
+* **🎥 Wider Surrounding-Page Context Framing (`MangaDeterministicEffectsEngine.expandViewportForPageContext`)**:
+  * Expanded playback viewports with generous outer padding (`minWidth = 0.68`, `minHeight = 0.56` in Portrait **9:16**; `0.62 x 0.50` in Landscape **16:9**) and softened `READING_AXIS_PAN` zoom so viewers see full panels and surrounding page art instead of tight speech-bubble closeups.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.5_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `31`).
+2. **`PURR-TTS_V1.9.5.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.4 // Storyboard Context Pass, Toned-Down Motion & Speech-Bubble-Only Filter
 
 ### ✨ What's New since v1.9.3

@@ -651,7 +651,7 @@ object MangaDeterministicEffectsEngine {
         val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
         // Portrait 9:16 uses noticeably gentler zoom/pan than Landscape 16:9 so panels stay steady and readable.
         val motionScale = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 0.55f else 0.85f
-        val maxPanZoom = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 1.16f else 1.25f
+        val maxPanZoom = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 1.08f else 1.14f
 
         return when (resolvedEffect) {
             MangaPanelCameraEffect.READABILITY_HOLD -> {
@@ -664,7 +664,7 @@ object MangaDeterministicEffectsEngine {
             MangaPanelCameraEffect.READING_AXIS_PAN -> {
                 when {
                     panelAspect > stageAspect * 1.15f -> {
-                        val windowW = (rect.width * (1f - 0.14f * motionScale)).coerceIn(rect.width * 0.78f, rect.width)
+                        val windowW = (rect.width * (1f - 0.08f * motionScale)).coerceIn(rect.width * 0.84f, rect.width)
                         val minLeft = rect.left
                         val maxLeft = (rect.right - windowW).coerceAtLeast(rect.left)
                         val startLeft = if (rtl) maxLeft else minLeft
@@ -683,7 +683,7 @@ object MangaDeterministicEffectsEngine {
                         )
                     }
                     panelAspect < stageAspect * 0.85f -> {
-                        val windowH = (rect.height * (1f - 0.14f * motionScale)).coerceIn(rect.height * 0.78f, rect.height)
+                        val windowH = (rect.height * (1f - 0.08f * motionScale)).coerceIn(rect.height * 0.84f, rect.height)
                         val minTop = rect.top
                         val maxTop = (rect.bottom - windowH).coerceAtLeast(rect.top)
                         val curTop = minTop + (maxTop - minTop) * easedT
@@ -794,14 +794,47 @@ object MangaDeterministicEffectsEngine {
             bottom = rect.bottom - dy
         ).clamped()
     }
+
+    /**
+     * Expands a panel camera crop with surrounding page margin so vertical/horizontal frames
+     * show broader panel context rather than zooming tightly into single bubbles or thin strips.
+     */
+    fun expandViewportForPageContext(
+        crop: MangaNormalizedRect,
+        videoAspect: MangaVideoAspect
+    ): MangaNormalizedRect {
+        val c = crop.clamped()
+        val pad = 0.06f
+        val paddedW = (c.width + pad * 2f).coerceAtMost(1f)
+        val paddedH = (c.height + pad * 2f).coerceAtMost(1f)
+        val minW = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 0.68f else 0.62f
+        val minH = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 0.56f else 0.50f
+        val targetW = max(paddedW, minW).coerceAtMost(1f)
+        val targetH = max(paddedH, minH).coerceAtMost(1f)
+        val halfW = targetW * 0.5f
+        val halfH = targetH * 0.5f
+        val cx = c.centerX.coerceIn(halfW, 1f - halfW)
+        val cy = c.centerY.coerceIn(halfH, 1f - halfH)
+        return MangaNormalizedRect(
+            left = cx - halfW,
+            top = cy - halfH,
+            right = cx + halfW,
+            bottom = cy + halfH
+        ).clamped()
+    }
 }
 
 /**
- * ✨ BFS EDGE-CONNECTED MANGA PANEL SLICER (Ported from GachaSwipe `chromaKey.js`) ✨
- * Flood-fills gutters starting from the border ring of the page luminance grid to isolate
- * exact panel regions cleanly in RTL Manga, LTR Comic, or Webtoon vertical reading order.
+ * ✨ BORDER-VERIFIED RECURSIVE XY-CUT MANGA PANEL SLICER ✨
+ * Cuts along dual-half verified inter-panel gutters (up to [MAX_PANELS_PER_PAGE] transitions)
+ * so open-border panels and internal speech-bubble white space never shatter into bubble crops,
+ * and partitions staggered columns cleanly in RTL Manga, LTR Comic, or Webtoon order.
  */
 object MangaBfsPanelSlicer {
+
+    const val MAX_PANELS_PER_PAGE = 5
+
+    private data class GutterCut(val start: Int, val len: Int, val score: Float)
 
     fun slicePanelsFromLuminanceGrid(
         luminance: IntArray,
@@ -813,9 +846,9 @@ object MangaBfsPanelSlicer {
             return listOf(MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f))
         }
 
-        // 1. Sample border ring median luminance to identify white or black manga gutters
+        // 1. Sample outer border ring median luminance to identify white or dark manga gutters
         val margin = max(2, min(width, height) / 50)
-        val samples = ArrayList<Int>(width * margin + height * margin)
+        val samples = ArrayList<Int>(width * margin * 2 + height * margin * 2)
         for (y in 0 until margin) {
             for (x in 0 until width) samples += luminance[y * width + x]
         }
@@ -830,154 +863,37 @@ object MangaBfsPanelSlicer {
         val gutterMed = samples[samples.size / 2]
         val tolerance = 34
 
-        fun isGutterCandidate(lum: Int): Boolean = abs(lum - gutterMed) <= tolerance
+        fun isOuterGutter(v: Int): Boolean = abs(v - gutterMed) <= tolerance || v >= 238
 
-        // 2. Edge-connected BFS flood fill for gutter backdrop
-        val total = width * height
-        val isGutter = BooleanArray(total)
-        val queue = IntArray(total)
-        var head = 0
-        var tail = 0
+        // Trim outer page margins once at root so leaf splits sit tightly on panel borders
+        var rx0 = 0
+        var ry0 = 0
+        var rx1 = width
+        var ry1 = height
+        while (ry0 < ry1 - 6 && countRowGutter(luminance, width, ry0, rx0, rx1, ::isOuterGutter) >= ((rx1 - rx0) * 0.98f).toInt()) ry0++
+        while (ry1 > ry0 + 6 && countRowGutter(luminance, width, ry1 - 1, rx0, rx1, ::isOuterGutter) >= ((rx1 - rx0) * 0.98f).toInt()) ry1--
+        while (rx0 < rx1 - 6 && countColGutter(luminance, width, rx0, ry0, ry1, ::isOuterGutter) >= ((ry1 - ry0) * 0.98f).toInt()) rx0++
+        while (rx1 > rx0 + 6 && countColGutter(luminance, width, rx1 - 1, ry0, ry1, ::isOuterGutter) >= ((ry1 - ry0) * 0.98f).toInt()) rx1--
 
-        fun seedPixel(idx: Int) {
-            if (!isGutter[idx] && isGutterCandidate(luminance[idx])) {
-                isGutter[idx] = true
-                queue[tail++] = idx
-            }
-        }
+        val rawLeaves = sliceRegionRecursive(
+            luminance = luminance,
+            width = width,
+            height = height,
+            gutterMed = gutterMed,
+            tolerance = tolerance,
+            x0 = rx0,
+            y0 = ry0,
+            x1 = rx1,
+            y1 = ry1,
+            depth = 0,
+            maxDepth = 3,
+            rtl = readingOrder == MangaReadingOrder.RTL_MANGA,
+            webtoon = readingOrder == MangaReadingOrder.WEBTOON_VERTICAL
+        )
 
-        for (y in 0 until height) {
-            for (x in 0 until margin) seedPixel(y * width + x)
-            for (x in (width - margin) until width) seedPixel(y * width + x)
-        }
-        for (y in 0 until margin) {
-            for (x in 0 until width) seedPixel(y * width + x)
-        }
-        for (y in (height - margin) until height) {
-            for (x in 0 until width) seedPixel(y * width + x)
-        }
-
-        val dx4 = intArrayOf(1, -1, 0, 0)
-        val dy4 = intArrayOf(0, 0, 1, -1)
-        while (head < tail) {
-            val cur = queue[head++]
-            val cx = cur % width
-            val cy = cur / width
-            for (d in 0 until 4) {
-                val nx = cx + dx4[d]
-                val ny = cy + dy4[d]
-                if (nx in 0 until width && ny in 0 until height) {
-                    val nIdx = ny * width + nx
-                    if (!isGutter[nIdx] && isGutterCandidate(luminance[nIdx])) {
-                        isGutter[nIdx] = true
-                        queue[tail++] = nIdx
-                    }
-                }
-            }
-        }
-
-        // Also treat thin horizontal/vertical continuous gutter bands between panels as gutters
-        // so closed-margin comics still separate rows/columns cleanly.
-        for (y in 0 until height) {
-            var gutterRun = 0
-            for (x in 0 until width) {
-                if (isGutterCandidate(luminance[y * width + x])) gutterRun++
-            }
-            if (gutterRun >= (width * 0.96f).toInt()) {
-                val rowOff = y * width
-                for (x in 0 until width) {
-                    if (isGutterCandidate(luminance[rowOff + x])) isGutter[rowOff + x] = true
-                }
-            }
-        }
-        for (x in 0 until width) {
-            var gutterRun = 0
-            for (y in 0 until height) {
-                if (isGutterCandidate(luminance[y * width + x])) gutterRun++
-            }
-            if (gutterRun >= (height * 0.96f).toInt()) {
-                for (y in 0 until height) {
-                    if (isGutterCandidate(luminance[y * width + x])) isGutter[y * width + x] = true
-                }
-            }
-        }
-
-        // 3. Connected components of non-gutter panel pixels
-        val visited = BooleanArray(total)
-        val rawBoxes = ArrayList<MangaNormalizedRect>()
-        val minAreaPx = (total * 0.035f).toInt().coerceAtLeast(16)
-        val dx8 = intArrayOf(-1, 0, 1, -1, 1, -1, 0, 1)
-        val dy8 = intArrayOf(-1, -1, -1, 0, 0, 1, 1, 1)
-
-        for (startIdx in 0 until total) {
-            if (isGutter[startIdx] || visited[startIdx]) continue
-            var qh = 0
-            var qt = 0
-            visited[startIdx] = true
-            queue[qt++] = startIdx
-            var minX = startIdx % width
-            var maxX = minX
-            var minY = startIdx / width
-            var maxY = minY
-            var pixelCount = 0
-
-            while (qh < qt) {
-                val idx = queue[qh++]
-                pixelCount++
-                val px = idx % width
-                val py = idx / width
-                if (px < minX) minX = px
-                if (px > maxX) maxX = px
-                if (py < minY) minY = py
-                if (py > maxY) maxY = py
-
-                for (k in 0 until 8) {
-                    val nx = px + dx8[k]
-                    val ny = py + dy8[k]
-                    if (nx in 0 until width && ny in 0 until height) {
-                        val nIdx = ny * width + nx
-                        if (!visited[nIdx] && !isGutter[nIdx]) {
-                            visited[nIdx] = true
-                            queue[qt++] = nIdx
-                        }
-                    }
-                }
-            }
-
-            val boxW = maxX - minX + 1
-            val boxH = maxY - minY + 1
-            val boxArea = boxW * boxH
-            if (boxArea >= minAreaPx && pixelCount >= minAreaPx / 4) {
-                val rect = MangaNormalizedRect(
-                    left = (minX.toFloat() / width.toFloat()).coerceIn(0f, 0.98f),
-                    top = (minY.toFloat() / height.toFloat()).coerceIn(0f, 0.98f),
-                    right = ((maxX + 1).toFloat() / width.toFloat()).coerceIn(0.02f, 1f),
-                    bottom = ((maxY + 1).toFloat() / height.toFloat()).coerceIn(0.02f, 1f)
-                ).clamped()
-                rawBoxes += rect
-            }
-        }
-
-        // 4. Deduplicate & drop boxes >=75% contained inside larger boxes
-        val sortedByArea = rawBoxes.sortedByDescending { it.width * it.height }
-        val kept = ArrayList<MangaNormalizedRect>()
-        for (cand in sortedByArea) {
-            val candArea = cand.width * cand.height
-            val dominated = kept.any { outer ->
-                val ix1 = max(cand.left, outer.left)
-                val iy1 = max(cand.top, outer.top)
-                val ix2 = min(cand.right, outer.right)
-                val iy2 = min(cand.bottom, outer.bottom)
-                if (ix2 <= ix1 || iy2 <= iy1) false
-                else ((ix2 - ix1) * (iy2 - iy1)) / candArea >= 0.75f
-            }
-            if (!dominated) kept += cand
-        }
-
-        // Splash page or Webtoon vertical strip fallback
-        if (kept.isEmpty()) {
+        if (rawLeaves.isEmpty()) {
             return if (readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
-                val bands = max(2, min(6, height / max(1, width)))
+                val bands = max(2, min(MAX_PANELS_PER_PAGE, height / max(1, width)))
                 (0 until bands).map { idx ->
                     val t0 = idx.toFloat() / bands.toFloat()
                     val t1 = ((idx + 1).toFloat() / bands.toFloat()).coerceAtMost(1f)
@@ -988,8 +904,8 @@ object MangaBfsPanelSlicer {
             }
         }
 
-        if (kept.size == 1 && readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
-            val bands = max(2, min(6, height / max(1, width)))
+        if (rawLeaves.size == 1 && readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
+            val bands = max(2, min(MAX_PANELS_PER_PAGE, height / max(1, width)))
             return (0 until bands).map { idx ->
                 val t0 = idx.toFloat() / bands.toFloat()
                 val t1 = ((idx + 1).toFloat() / bands.toFloat()).coerceAtMost(1f)
@@ -997,11 +913,8 @@ object MangaBfsPanelSlicer {
             }
         }
 
-        // 4B. Split oversized composite panel boxes that still hide continuous internal gutters
-        val splitPanels = splitCompositePanelBoxes(kept, luminance, gutterMed, tolerance, width, height)
-
-        // 5. Group into reading rows and order deterministically with topological tie-breaking
-        return orderPanelsForReadingDirection(splitPanels, readingOrder)
+        val capped = capToMaxPanels(rawLeaves, MAX_PANELS_PER_PAGE)
+        return orderPanelsForReadingDirection(capped, readingOrder)
     }
 
     fun splitCompositePanelBoxes(
@@ -1013,97 +926,290 @@ object MangaBfsPanelSlicer {
         height: Int
     ): List<MangaNormalizedRect> {
         if (width < 8 || height < 8 || luminance.size < width * height) return boxes
-
-        fun isGutterPx(idx: Int): Boolean =
-            abs(luminance[idx] - gutterMed) <= tolerance || luminance[idx] >= 235
-
-        fun splitRecursive(box: MangaNormalizedRect, depth: Int): List<MangaNormalizedRect> {
-            if (depth >= 4 || (box.width < 0.26f && box.height < 0.26f)) return listOf(box)
+        val split = boxes.flatMap { box ->
             val x0 = (box.left * width).toInt().coerceIn(0, width - 1)
-            val x1 = (box.right * width).toInt().coerceIn(x0 + 1, width)
             val y0 = (box.top * height).toInt().coerceIn(0, height - 1)
+            val x1 = (box.right * width).toInt().coerceIn(x0 + 1, width)
             val y1 = (box.bottom * height).toInt().coerceIn(y0 + 1, height)
-            val bw = x1 - x0
-            val bh = y1 - y0
-            if (bw < 6 || bh < 6) return listOf(box)
-
-            // Try horizontal split across internal gutter band
-            if (box.height >= 0.26f) {
-                val marginY = max(2, (height * 0.11f).toInt())
-                val startY = y0 + marginY
-                val endY = y1 - marginY
-                var runStart = -1
-                var bestStart = -1
-                var bestLen = 0
-                for (y in startY until endY) {
-                    var gCount = 0
-                    val rowOff = y * width
-                    for (x in x0 until x1) {
-                        if (isGutterPx(rowOff + x)) gCount++
-                    }
-                    val isGutterRow = gCount >= (bw * 0.82f).toInt()
-                    if (isGutterRow) {
-                        if (runStart < 0) runStart = y
-                        val len = y - runStart + 1
-                        if (len > bestLen) {
-                            bestLen = len
-                            bestStart = runStart
-                        }
-                    } else {
-                        runStart = -1
-                    }
-                }
-                if (bestLen >= 2 && bestStart >= startY) {
-                    val topFrac = (bestStart.toFloat() / height.toFloat()).coerceIn(box.top + 0.11f, box.bottom - 0.11f)
-                    val botFrac = ((bestStart + bestLen).toFloat() / height.toFloat()).coerceIn(topFrac, box.bottom - 0.11f)
-                    if (topFrac - box.top >= 0.11f && box.bottom - botFrac >= 0.11f) {
-                        val upper = MangaNormalizedRect(box.left, box.top, box.right, topFrac).clamped()
-                        val lower = MangaNormalizedRect(box.left, botFrac, box.right, box.bottom).clamped()
-                        return splitRecursive(upper, depth + 1) + splitRecursive(lower, depth + 1)
-                    }
-                }
-            }
-
-            // Try vertical split across internal gutter band
-            if (box.width >= 0.26f) {
-                val marginX = max(2, (width * 0.11f).toInt())
-                val startX = x0 + marginX
-                val endX = x1 - marginX
-                var runStart = -1
-                var bestStart = -1
-                var bestLen = 0
-                for (x in startX until endX) {
-                    var gCount = 0
-                    for (y in y0 until y1) {
-                        if (isGutterPx(y * width + x)) gCount++
-                    }
-                    val isGutterCol = gCount >= (bh * 0.82f).toInt()
-                    if (isGutterCol) {
-                        if (runStart < 0) runStart = x
-                        val len = x - runStart + 1
-                        if (len > bestLen) {
-                            bestLen = len
-                            bestStart = runStart
-                        }
-                    } else {
-                        runStart = -1
-                    }
-                }
-                if (bestLen >= 2 && bestStart >= startX) {
-                    val leftFrac = (bestStart.toFloat() / width.toFloat()).coerceIn(box.left + 0.11f, box.right - 0.11f)
-                    val rightFrac = ((bestStart + bestLen).toFloat() / width.toFloat()).coerceIn(leftFrac, box.right - 0.11f)
-                    if (leftFrac - box.left >= 0.11f && box.right - rightFrac >= 0.11f) {
-                        val leftBox = MangaNormalizedRect(box.left, box.top, leftFrac, box.bottom).clamped()
-                        val rightBox = MangaNormalizedRect(rightFrac, box.top, box.right, box.bottom).clamped()
-                        return splitRecursive(leftBox, depth + 1) + splitRecursive(rightBox, depth + 1)
-                    }
-                }
-            }
-
-            return listOf(box)
+            sliceRegionRecursive(
+                luminance = luminance,
+                width = width,
+                height = height,
+                gutterMed = gutterMed,
+                tolerance = tolerance,
+                x0 = x0,
+                y0 = y0,
+                x1 = x1,
+                y1 = y1,
+                depth = 0,
+                maxDepth = 3,
+                rtl = false,
+                webtoon = false
+            )
         }
+        return capToMaxPanels(split, MAX_PANELS_PER_PAGE)
+    }
 
-        return boxes.flatMap { splitRecursive(it, 0) }
+    private inline fun countRowGutter(
+        lum: IntArray,
+        width: Int,
+        y: Int,
+        x0: Int,
+        x1: Int,
+        pred: (Int) -> Boolean
+    ): Int {
+        var c = 0
+        val off = y * width
+        for (x in x0 until x1) {
+            if (pred(lum[off + x])) c++
+        }
+        return c
+    }
+
+    private inline fun countColGutter(
+        lum: IntArray,
+        width: Int,
+        x: Int,
+        y0: Int,
+        y1: Int,
+        pred: (Int) -> Boolean
+    ): Int {
+        var c = 0
+        for (y in y0 until y1) {
+            if (pred(lum[y * width + x])) c++
+        }
+        return c
+    }
+
+    private fun sliceRegionRecursive(
+        luminance: IntArray,
+        width: Int,
+        height: Int,
+        gutterMed: Int,
+        tolerance: Int,
+        x0: Int,
+        y0: Int,
+        x1: Int,
+        y1: Int,
+        depth: Int,
+        maxDepth: Int,
+        rtl: Boolean,
+        webtoon: Boolean
+    ): List<MangaNormalizedRect> {
+        val bw = x1 - x0
+        val bh = y1 - y0
+        if (bw < 6 || bh < 6) return emptyList()
+        val boxRect = MangaNormalizedRect(
+            left = (x0.toFloat() / width.toFloat()).coerceIn(0f, 0.98f),
+            top = (y0.toFloat() / height.toFloat()).coerceIn(0f, 0.98f),
+            right = (x1.toFloat() / width.toFloat()).coerceIn(0.02f, 1f),
+            bottom = (y1.toFloat() / height.toFloat()).coerceIn(0.02f, 1f)
+        ).clamped()
+        if (depth >= maxDepth) return listOf(boxRect)
+
+        val hCut = findBestHorizontalCut(luminance, width, height, gutterMed, tolerance, x0, y0, x1, y1)
+        val vCut = if (webtoon) null else findBestVerticalCut(luminance, width, height, gutterMed, tolerance, x0, y0, x1, y1)
+
+        return when {
+            hCut != null && (vCut == null || hCut.score >= vCut.score) -> {
+                val top = sliceRegionRecursive(
+                    luminance, width, height, gutterMed, tolerance,
+                    x0, y0, x1, hCut.start, depth + 1, maxDepth, rtl, webtoon
+                )
+                val bot = sliceRegionRecursive(
+                    luminance, width, height, gutterMed, tolerance,
+                    x0, hCut.start + hCut.len, x1, y1, depth + 1, maxDepth, rtl, webtoon
+                )
+                top + bot
+            }
+            vCut != null -> {
+                val left = sliceRegionRecursive(
+                    luminance, width, height, gutterMed, tolerance,
+                    x0, y0, vCut.start, y1, depth + 1, maxDepth, rtl, webtoon
+                )
+                val right = sliceRegionRecursive(
+                    luminance, width, height, gutterMed, tolerance,
+                    vCut.start + vCut.len, y0, x1, y1, depth + 1, maxDepth, rtl, webtoon
+                )
+                if (rtl) right + left else left + right
+            }
+            else -> listOf(boxRect)
+        }
+    }
+
+    private fun findBestHorizontalCut(
+        luminance: IntArray,
+        width: Int,
+        height: Int,
+        gutterMed: Int,
+        tolerance: Int,
+        x0: Int,
+        y0: Int,
+        x1: Int,
+        y1: Int
+    ): GutterCut? {
+        val bh = y1 - y0
+        val minMargin = max((height * 0.12f).toInt(), (bh * 0.15f).toInt())
+        if (bh < minMargin * 2 + 2) return null
+        val ix0 = min(x1 - 1, x0 + 2)
+        val ix1 = max(x0 + 1, x1 - 2)
+        val ibw = max(2, ix1 - ix0)
+        val midX = ix0 + ibw / 2
+        val w1 = max(1, midX - ix0).toFloat()
+        val w2 = max(1, ix1 - midX).toFloat()
+        val gFrac = FloatArray(bh)
+        val h1Frac = FloatArray(bh)
+        val h2Frac = FloatArray(bh)
+        for (i in 0 until bh) {
+            val rowOff = (y0 + i) * width
+            var c1 = 0
+            var c2 = 0
+            for (x in ix0 until midX) {
+                val v = luminance[rowOff + x]
+                if (abs(v - gutterMed) <= tolerance || v >= 238) c1++
+            }
+            for (x in midX until ix1) {
+                val v = luminance[rowOff + x]
+                if (abs(v - gutterMed) <= tolerance || v >= 238) c2++
+            }
+            h1Frac[i] = c1 / w1
+            h2Frac[i] = c2 / w2
+            gFrac[i] = (c1 + c2).toFloat() / ibw.toFloat()
+        }
+        val cut = findBestGutterCut(bh, minMargin, gFrac, h1Frac, h2Frac) ?: return null
+        return GutterCut(y0 + cut.start, cut.len, cut.score)
+    }
+
+    private fun findBestVerticalCut(
+        luminance: IntArray,
+        width: Int,
+        height: Int,
+        gutterMed: Int,
+        tolerance: Int,
+        x0: Int,
+        y0: Int,
+        x1: Int,
+        y1: Int
+    ): GutterCut? {
+        val bw = x1 - x0
+        val minMargin = max((width * 0.16f).toInt(), (bw * 0.18f).toInt())
+        if (bw < minMargin * 2 + 2) return null
+        val iy0 = min(y1 - 1, y0 + 2)
+        val iy1 = max(y0 + 1, y1 - 2)
+        val ibh = max(2, iy1 - iy0)
+        val midY = iy0 + ibh / 2
+        val h1 = max(1, midY - iy0).toFloat()
+        val h2 = max(1, iy1 - midY).toFloat()
+        val gFrac = FloatArray(bw)
+        val h1Frac = FloatArray(bw)
+        val h2Frac = FloatArray(bw)
+        for (i in 0 until bw) {
+            val x = x0 + i
+            var c1 = 0
+            var c2 = 0
+            for (y in iy0 until midY) {
+                val v = luminance[y * width + x]
+                if (abs(v - gutterMed) <= tolerance || v >= 238) c1++
+            }
+            for (y in midY until iy1) {
+                val v = luminance[y * width + x]
+                if (abs(v - gutterMed) <= tolerance || v >= 238) c2++
+            }
+            h1Frac[i] = c1 / h1
+            h2Frac[i] = c2 / h2
+            gFrac[i] = (c1 + c2).toFloat() / ibh.toFloat()
+        }
+        val cut = findBestGutterCut(bw, minMargin, gFrac, h1Frac, h2Frac) ?: return null
+        return GutterCut(x0 + cut.start, cut.len, cut.score)
+    }
+
+    private fun findBestGutterCut(
+        profileLen: Int,
+        minMargin: Int,
+        gFrac: FloatArray,
+        h1Frac: FloatArray,
+        h2Frac: FloatArray
+    ): GutterCut? {
+        if (profileLen < minMargin * 2 + 2) return null
+        var best: GutterCut? = null
+        var i = minMargin
+        val end = profileLen - minMargin
+        while (i < end) {
+            if (!(gFrac[i] >= 0.90f && h1Frac[i] >= 0.85f && h2Frac[i] >= 0.85f)) {
+                i++
+                continue
+            }
+            val rStart = i
+            while (i < end && gFrac[i] >= 0.90f && h1Frac[i] >= 0.85f && h2Frac[i] >= 0.85f) {
+                i++
+            }
+            val rEnd = i - 1
+            val rLen = rEnd - rStart + 1
+            var peakG = 0f
+            var sumG = 0f
+            var minHalfPeak = 0f
+            for (k in rStart..rEnd) {
+                if (gFrac[k] > peakG) peakG = gFrac[k]
+                sumG += gFrac[k]
+                val mh = min(h1Frac[k], h2Frac[k])
+                if (mh > minHalfPeak) minHalfPeak = mh
+            }
+            val avgG = sumG / rLen.toFloat()
+            var leftMinG = 1f
+            for (k in max(0, rStart - 3) until rStart) {
+                if (gFrac[k] < leftMinG) leftMinG = gFrac[k]
+            }
+            var rightMinG = 1f
+            for (k in (rEnd + 1) until min(profileLen, rEnd + 4)) {
+                if (gFrac[k] < rightMinG) rightMinG = gFrac[k]
+            }
+            val hasLeftBorder = leftMinG <= 0.55f
+            val hasRightBorder = rightMinG <= 0.55f
+            val isWidePure = rLen >= 3 && avgG >= 0.98f
+            val isValid = (hasLeftBorder && hasRightBorder) ||
+                (peakG >= 0.96f && minHalfPeak >= 0.92f && (hasLeftBorder || hasRightBorder)) ||
+                isWidePure
+            if (isValid) {
+                val borderBonus = (if (hasLeftBorder) 1.5f else 0f) + (if (hasRightBorder) 1.5f else 0f)
+                val score = (peakG + minHalfPeak) * 2.0f + borderBonus + min(rLen, 6) * 0.25f
+                if (best == null || score > best.score) {
+                    best = GutterCut(rStart, rLen, score)
+                }
+            }
+        }
+        return best
+    }
+
+    private fun capToMaxPanels(
+        panels: List<MangaNormalizedRect>,
+        maxPanels: Int
+    ): List<MangaNormalizedRect> {
+        if (panels.size <= maxPanels) return panels
+        val list = panels.toMutableList()
+        while (list.size > maxPanels && list.size >= 2) {
+            var bestIdx = 0
+            var bestArea = Float.MAX_VALUE
+            for (idx in 0 until list.size - 1) {
+                val a = list[idx]
+                val b = list[idx + 1]
+                val uW = max(a.right, b.right) - min(a.left, b.left)
+                val uH = max(a.bottom, b.bottom) - min(a.top, b.top)
+                val unionArea = uW * uH
+                if (unionArea < bestArea) {
+                    bestArea = unionArea
+                    bestIdx = idx
+                }
+            }
+            val a = list[bestIdx]
+            val b = list.removeAt(bestIdx + 1)
+            list[bestIdx] = MangaNormalizedRect(
+                left = min(a.left, b.left),
+                top = min(a.top, b.top),
+                right = max(a.right, b.right),
+                bottom = max(a.bottom, b.bottom)
+            ).clamped()
+        }
+        return list
     }
 
     fun orderPanelsForReadingDirection(
@@ -1114,8 +1220,41 @@ object MangaBfsPanelSlicer {
         if (readingOrder == MangaReadingOrder.WEBTOON_VERTICAL) {
             return boxes.sortedWith(compareBy<MangaNormalizedRect>({ it.top }, { it.centerX }))
         }
+        return partitionByGuillotine(boxes, rtl = readingOrder == MangaReadingOrder.RTL_MANGA)
+    }
 
-        val orderedByTop = boxes.sortedBy { it.top }
+    private fun partitionByGuillotine(
+        pool: List<MangaNormalizedRect>,
+        rtl: Boolean
+    ): List<MangaNormalizedRect> {
+        if (pool.size <= 1) return pool
+
+        // 1. Clean horizontal row guillotine cut (guarantees upper row always precedes lower row)
+        val yCandidates = pool.flatMap { listOf(it.bottom, it.top) }.distinct().sorted()
+        for (y in yCandidates) {
+            val upper = pool.filter { it.bottom <= y + 0.025f }
+            val lower = pool.filter { it.top >= y - 0.025f && it !in upper }
+            if (upper.isNotEmpty() && lower.isNotEmpty() && upper.size + lower.size == pool.size) {
+                return partitionByGuillotine(upper, rtl) + partitionByGuillotine(lower, rtl)
+            }
+        }
+
+        // 2. Clean vertical column guillotine cut (guarantees staggered right column finishes before left column in RTL)
+        val xCandidates = pool.flatMap { listOf(it.right, it.left) }.distinct().sorted()
+        for (x in xCandidates) {
+            val left = pool.filter { it.right <= x + 0.025f }
+            val right = pool.filter { it.left >= x - 0.025f && it !in left }
+            if (left.isNotEmpty() && right.isNotEmpty() && left.size + right.size == pool.size) {
+                return if (rtl) {
+                    partitionByGuillotine(right, rtl) + partitionByGuillotine(left, rtl)
+                } else {
+                    partitionByGuillotine(left, rtl) + partitionByGuillotine(right, rtl)
+                }
+            }
+        }
+
+        // 3. Fallback topological row sort for interlocking non-guillotine panels
+        val orderedByTop = pool.sortedBy { it.top }
         val rows = ArrayList<MutableList<MangaNormalizedRect>>()
         for (box in orderedByTop) {
             val targetRow = rows.firstOrNull { row ->
@@ -1136,16 +1275,12 @@ object MangaBfsPanelSlicer {
         }
 
         rows.sortBy { row -> row.minOf { it.top } }
-        val result = ArrayList<MangaNormalizedRect>(boxes.size)
-        val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
-
+        val result = ArrayList<MangaNormalizedRect>(pool.size)
         for (row in rows) {
             if (row.size <= 1) {
                 result += row
                 continue
             }
-            // Kahn's topological sort inside the row guarantees stacked panels in the same column
-            // always sort top-to-bottom while horizontally distinct panels sort strictly by RTL / LTR.
             val n = row.size
             val indegree = IntArray(n)
             val adj = Array(n) { ArrayList<Int>() }
@@ -1181,8 +1316,8 @@ object MangaBfsPanelSlicer {
             val done = BooleanArray(n)
             repeat(n) {
                 val ready = (0 until n).filter { !done[it] && indegree[it] == 0 }
-                val pool = ready.ifEmpty { (0 until n).filter { !done[it] } }
-                val pick = pool.minWith(
+                val poolReady = ready.ifEmpty { (0 until n).filter { !done[it] } }
+                val pick = poolReady.minWith(
                     compareBy<Int>(
                         { row[it].top },
                         { if (rtl) -row[it].centerX else row[it].centerX }
@@ -1260,7 +1395,9 @@ object MangaVisionResponseParser {
         val candidateSpeakers: List<String>,
         val rawText: String,
         val needsUserDecision: Boolean,
-        val decisionReason: String
+        val decisionReason: String,
+        val xPos: Float? = null,
+        val yPos: Float? = null
     )
 
     data class DiscoveredPanelSpec(
@@ -1343,7 +1480,8 @@ object MangaVisionResponseParser {
         rawResponse: String,
         panelCount: Int,
         existingCharacters: List<MangaCharacterProfile>,
-        includeNonBubbleText: Boolean = false
+        includeNonBubbleText: Boolean = false,
+        readingOrder: MangaReadingOrder = MangaReadingOrder.RTL_MANGA
     ): ParsedPageAnalysis {
         var thoughtTrace = ""
         var cleaned = rawResponse.trim()
@@ -1400,7 +1538,7 @@ object MangaVisionResponseParser {
                     val mood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                     val panelThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                     val linesArr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: JsonArray(emptyList())
-                    val parsedLines = parseLineSpecArray(linesArr, pIdx, knownNames, includeNonBubbleText)
+                    val parsedLines = parseLineSpecArray(linesArr, pIdx, knownNames, includeNonBubbleText, readingOrder)
                     DiscoveredPanelSpec(
                         panelIndex = pIdx,
                         sceneMood = mood,
@@ -1435,7 +1573,8 @@ object MangaVisionResponseParser {
         rawResponse: String,
         panelIndex: Int,
         existingCharacters: List<MangaCharacterProfile>,
-        includeNonBubbleText: Boolean = false
+        includeNonBubbleText: Boolean = false,
+        readingOrder: MangaReadingOrder = MangaReadingOrder.RTL_MANGA
     ): DiscoveredPanelSpec {
         var thoughtTrace = ""
         var cleaned = rawResponse.trim()
@@ -1481,7 +1620,7 @@ object MangaVisionResponseParser {
                         parsedThought = (elem["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                         val directLines = (elem["lines"] ?: elem["dialogue"]) as? JsonArray
                         if (directLines != null) {
-                            parsedLines = parseLineSpecArray(directLines, panelIndex, knownNames, includeNonBubbleText)
+                            parsedLines = parseLineSpecArray(directLines, panelIndex, knownNames, includeNonBubbleText, readingOrder)
                         } else {
                             val panelsArr = elem["panels"] as? JsonArray
                             if (panelsArr != null) {
@@ -1495,7 +1634,7 @@ object MangaVisionResponseParser {
                                         parsedThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                                     }
                                     val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
-                                    combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText)
+                                    combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText, readingOrder)
                                 }
                                 parsedLines = combined
                             }
@@ -1513,11 +1652,11 @@ object MangaVisionResponseParser {
                                     parsedMood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                                 }
                                 val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
-                                combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText)
+                                combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText, readingOrder)
                             }
                             parsedLines = combined
                         } else {
-                            parsedLines = parseLineSpecArray(elem, panelIndex, knownNames, includeNonBubbleText)
+                            parsedLines = parseLineSpecArray(elem, panelIndex, knownNames, includeNonBubbleText, readingOrder)
                         }
                     }
                     else -> Unit
@@ -1550,61 +1689,116 @@ object MangaVisionResponseParser {
         linesArr: JsonArray,
         pIdx: Int,
         knownNames: List<String>,
-        includeNonBubbleText: Boolean = false
-    ): List<DiscoveredLineSpec> = linesArr.mapIndexedNotNull { lIdx, lElem ->
-        val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
-        val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
-            ?.contentOrNull.orEmpty().trim()
-        if (rawText.isEmpty()) return@mapIndexedNotNull null
-        val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
-            ?.contentOrNull.orEmpty().trim()
-            .ifEmpty { "UNKNOWN" }
-        val isSpeechBubble = (lObj["is_speech_bubble"] as? JsonPrimitive)?.booleanOrNull ?: true
-        if (!includeNonBubbleText && (!isSpeechBubble || MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText))) {
-            return@mapIndexedNotNull null
-        }
-        val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
-        val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
-        val gender = when {
-            genderStr.startsWith("f") -> VoiceGender.FEMALE
-            genderStr.startsWith("m") -> VoiceGender.MALE
-            else -> VoiceGender.ANDROGYNOUS
-        }
-        val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-        val designPrompt = ((lObj["voice_design_prompt"] ?: lObj["voice_prompt"]) as? JsonPrimitive)
-            ?.contentOrNull.orEmpty().trim()
-        val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-            .ifEmpty { "neutral" }
-        val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.88f
-        val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
-        val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
-            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
-            .orEmpty()
-        val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
-            speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
-            speakerRaw == "?"
-        val needsDecision = ambiguousSpeaker || conf < 0.55f
-        val reason = when {
-            ambiguousSpeaker -> "VLM flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
-            conf < 0.55f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
-            else -> ""
-        }
-        val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
+        includeNonBubbleText: Boolean = false,
+        readingOrder: MangaReadingOrder = MangaReadingOrder.RTL_MANGA
+    ): List<DiscoveredLineSpec> {
+        val rawList = linesArr.mapIndexedNotNull { lIdx, lElem ->
+            val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
+            val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
+                ?.contentOrNull.orEmpty().trim()
+            if (rawText.isEmpty()) return@mapIndexedNotNull null
+            val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
+                ?.contentOrNull.orEmpty().trim()
+                .ifEmpty { "UNKNOWN" }
+            val isSpeechBubble = (lObj["is_speech_bubble"] as? JsonPrimitive)?.booleanOrNull ?: true
+            if (!includeNonBubbleText && (!isSpeechBubble || MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText))) {
+                return@mapIndexedNotNull null
+            }
+            val xPos = ((lObj["x_pos"] ?: lObj["x"] ?: lObj["cx"]) as? JsonPrimitive)?.floatOrNull?.let { v ->
+                if (v > 1.5f) (v / 1000f).coerceIn(0f, 1f) else v.coerceIn(0f, 1f)
+            }
+            val yPos = ((lObj["y_pos"] ?: lObj["y"] ?: lObj["cy"]) as? JsonPrimitive)?.floatOrNull?.let { v ->
+                if (v > 1.5f) (v / 1000f).coerceIn(0f, 1f) else v.coerceIn(0f, 1f)
+            }
+            val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
+            val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
+            val gender = when {
+                genderStr.startsWith("f") -> VoiceGender.FEMALE
+                genderStr.startsWith("m") -> VoiceGender.MALE
+                else -> VoiceGender.ANDROGYNOUS
+            }
+            val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            val designPrompt = ((lObj["voice_design_prompt"] ?: lObj["voice_prompt"]) as? JsonPrimitive)
+                ?.contentOrNull.orEmpty().trim()
+            val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                .ifEmpty { "neutral" }
+            val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.88f
+            val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
+            val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
+                .orEmpty()
+            val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
+                speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
+                speakerRaw == "?"
+            val needsDecision = ambiguousSpeaker || conf < 0.55f
+            val reason = when {
+                ambiguousSpeaker -> "VLM flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
+                conf < 0.55f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
+                else -> ""
+            }
+            val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
 
-        DiscoveredLineSpec(
-            bubbleIndex = bubbleNum,
-            speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
-            isNewCharacter = isNew && !ambiguousSpeaker,
-            gender = gender,
-            visualDescription = visualDesc,
-            voiceDesignPrompt = designPrompt,
-            emotion = emotion,
-            confidence = conf,
-            candidateSpeakers = mergedCandidates,
-            rawText = rawText,
-            needsUserDecision = needsDecision,
-            decisionReason = reason
-        )
+            DiscoveredLineSpec(
+                bubbleIndex = bubbleNum,
+                speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
+                isNewCharacter = isNew && !ambiguousSpeaker,
+                gender = gender,
+                visualDescription = visualDesc,
+                voiceDesignPrompt = designPrompt,
+                emotion = emotion,
+                confidence = conf,
+                candidateSpeakers = mergedCandidates,
+                rawText = rawText,
+                needsUserDecision = needsDecision,
+                decisionReason = reason,
+                xPos = xPos,
+                yPos = yPos
+            )
+        }
+        return sortLinesByReadingOrder(rawList, readingOrder)
+    }
+
+    private fun sortLinesByReadingOrder(
+        lines: List<DiscoveredLineSpec>,
+        readingOrder: MangaReadingOrder
+    ): List<DiscoveredLineSpec> {
+        if (lines.size <= 1) return lines
+        val coordCount = lines.count { it.xPos != null }
+        if (coordCount < 2) return lines
+
+        if (readingOrder == MangaReadingOrder.WEBTOON_VERTICAL) {
+            return lines.sortedWith(
+                compareBy<DiscoveredLineSpec>(
+                    { it.yPos ?: 0.5f },
+                    { it.xPos ?: 0.5f },
+                    { it.bubbleIndex }
+                )
+            ).mapIndexed { idx, item -> item.copy(bubbleIndex = idx + 1) }
+        }
+
+        val byY = lines.sortedBy { it.yPos ?: 0.5f }
+        val bands = ArrayList<MutableList<DiscoveredLineSpec>>()
+        var bandAnchorY = -1f
+        for (item in byY) {
+            val y = item.yPos ?: 0.5f
+            if (bands.isEmpty() || (y - bandAnchorY) > 0.35f) {
+                bands += mutableListOf(item)
+                bandAnchorY = y
+            } else {
+                bands.last() += item
+            }
+        }
+        val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
+        val sorted = bands.flatMap { band ->
+            band.sortedWith(
+                compareBy<DiscoveredLineSpec>(
+                    { if (rtl) -(it.xPos ?: 0.5f) else (it.xPos ?: 0.5f) },
+                    { it.yPos ?: 0.5f },
+                    { it.bubbleIndex }
+                )
+            )
+        }
+        return sorted.mapIndexed { idx, item -> item.copy(bubbleIndex = idx + 1) }
     }
 
     fun parseVoiceDesignRoster(

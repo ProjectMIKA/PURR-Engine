@@ -194,12 +194,16 @@ object MangaMotionVideoMuxer {
                     stageAspect = stageAspect
                 )
 
+                val transitionTargetRect = MangaDeterministicEffectsEngine.expandViewportForPageContext(
+                    entryState.sourceCropRect,
+                    aspect
+                )
                 shots += PanTransitionShot(
                     startMs = cursorMs,
                     endMs = cursorMs + PAN_TRANSITION_MS,
                     page = page,
                     fromRect = prevRect,
-                    toRect = entryState.sourceCropRect,
+                    toRect = transitionTargetRect,
                     atmosphere = atmo
                 )
                 audioSpans += AudioSpan(cursorMs, PAN_TRANSITION_MS, null)
@@ -244,7 +248,10 @@ object MangaMotionVideoMuxer {
                     cameraEffect = camEffect,
                     lines = timedLines
                 )
-                prevRect = exitState.sourceCropRect
+                prevRect = MangaDeterministicEffectsEngine.expandViewportForPageContext(
+                    exitState.sourceCropRect,
+                    aspect
+                )
             }
         }
 
@@ -556,7 +563,10 @@ object MangaMotionVideoMuxer {
                     stageAspect = stageAspect
                 )
                 camState = state
-                viewportNorm = state.sourceCropRect
+                viewportNorm = MangaDeterministicEffectsEngine.expandViewportForPageContext(
+                    state.sourceCropRect,
+                    aspect
+                )
                 atmosphere = shot.atmosphere
                 activeDialogue = shot.lines.firstOrNull { timeMs in it.startMs until it.endMs }?.line
                     ?: shot.lines.lastOrNull { timeMs >= it.startMs }?.takeIf { timeMs <= it.endMs + 450L }?.line
