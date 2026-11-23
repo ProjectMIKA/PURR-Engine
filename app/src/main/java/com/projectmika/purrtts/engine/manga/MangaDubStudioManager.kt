@@ -1754,7 +1754,7 @@ class MangaDubStudioManager(
                     family = family,
                     gender = ch.gender,
                     referenceWavPath = seedFile.absolutePath,
-                    referenceText = seedTranscript,
+                    referenceTranscript = seedTranscript,
                     tags = listOf("manga", "autoclone", targetCloneEngineId),
                     cloneEngineId = targetCloneEngineId
                 )
