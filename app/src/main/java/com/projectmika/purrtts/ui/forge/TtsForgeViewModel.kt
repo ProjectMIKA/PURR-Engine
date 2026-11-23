@@ -1808,6 +1808,20 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         showToast("Cleared all manga projects")
     }
 
+    val selectedMangaVisionModel: StateFlow<MangaVisionModelTier>
+        get() = mangaDubManager.selectedVisionModel
+
+    val selectedMangaReadingOrder: StateFlow<MangaReadingOrder>
+        get() = mangaDubManager.selectedReadingOrder
+
+    fun selectMangaVisionModel(tier: MangaVisionModelTier) {
+        mangaDubManager.setSelectedVisionModel(tier)
+    }
+
+    fun selectMangaReadingOrder(order: MangaReadingOrder) {
+        mangaDubManager.setSelectedReadingOrder(order)
+    }
+
     fun importMangaCbz(
         uri: Uri,
         targetProjectId: String?,
@@ -1817,7 +1831,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         pauseOnFlags: Boolean = true,
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
-        videoQuality: MangaVideoQuality? = null
+        videoQuality: MangaVideoQuality? = null,
+        preferredVisionModel: MangaVisionModelTier? = null
     ) {
         mangaDubManager.importCbzChapter(
             uri = uri,
@@ -1828,7 +1843,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             pauseOnFlags = pauseOnFlags,
             videoAspect = videoAspect,
             burnInSubtitles = burnInSubtitles,
-            videoQuality = videoQuality
+            videoQuality = videoQuality,
+            preferredVisionModel = preferredVisionModel
         ) { msg ->
             showToast(msg)
         }

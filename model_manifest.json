@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAtUtc": "2026-11-23T06:13:51Z",
+  "generatedAtUtc": "2026-11-23T08:35:39Z",
   "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
   "assets": {
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
@@ -150,6 +150,22 @@
     "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-gpu.litertlm": {
       "sha256": "ea168f5a601b543e02712f9381f26b06ddc7d4cbe2406410387c82d69b995a60",
       "sizeBytes": 3310938740
+    },
+    "https://huggingface.co/litert-community/Qwen3.5-2B/resolve/main/Qwen3.5-2B-VL_int8.litertlm": {
+      "sha256": "90ece8de37537b757ef21075a7d17c14bc11ac29793dada058a5be7c3fe03ccc",
+      "sizeBytes": 3152429056
+    },
+    "https://huggingface.co/litert-community/LFM2.5-VL-3B/resolve/main/LFM2.5-VL-3B_int4.litertlm": {
+      "sha256": "20884a412471e4b1f4b8e064ad6596289411e8b9273717dc0740120ad4ae875d",
+      "sizeBytes": 2352152576
+    },
+    "https://huggingface.co/litert-community/Qwen3.5-0.8B/resolve/main/Qwen3.5-0.8B-VL_int8.litertlm": {
+      "sha256": "7413f51eafb82e7cf0b707fa506eddfc76c10433b26fa8f0dc2f051970d2feb5",
+      "sizeBytes": 1303724032
+    },
+    "https://huggingface.co/litert-community/InternVL3-1B/resolve/main/InternVL3-1B.litertlm": {
+      "sha256": "6ab8028669a549823fca784a622f980c36bd4414242af86ee96409344f597e26",
+      "sizeBytes": 738902016
     }
   }
 }

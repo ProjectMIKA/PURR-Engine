@@ -134,9 +134,8 @@ fun MangaDubStudioModuleWindowBody(
 
     var seriesTitleInput by remember { mutableStateOf("") }
     var importIntoCurrentSeries by remember(activeProject?.id) { mutableStateOf(false) }
-    var selectedReadingOrder by remember(activeProject?.id) {
-        mutableStateOf(activeProject?.readingOrder ?: MangaReadingOrder.RTL_MANGA)
-    }
+    val globalReadingOrder by viewModel.selectedMangaReadingOrder.collectAsState()
+    val selectedReadingOrder = activeProject?.readingOrder ?: globalReadingOrder
     var selectedVideoAspect by remember(activeProject?.id, activeProject?.videoAspect) {
         mutableStateOf(activeProject?.videoAspect ?: MangaVideoAspect.VERTICAL_9_16)
     }
@@ -146,9 +145,7 @@ fun MangaDubStudioModuleWindowBody(
     var selectedVideoQuality by remember(activeProject?.id, activeProject?.videoQuality) {
         mutableStateOf(activeProject?.videoQuality ?: MangaVideoQuality.HD_720P)
     }
-    var selectedVisionTier by remember(activeProject?.id, activeProject?.preferredVisionModel) {
-        mutableStateOf(activeProject?.preferredVisionModel ?: MangaVisionModelTier.AUTO)
-    }
+    val selectedVisionTier by viewModel.selectedMangaVisionModel.collectAsState()
     var autoCookFullMp4 by remember(activeProject?.id) {
         mutableStateOf(activeProject?.autoCookFullMp4 ?: true)
     }
@@ -164,24 +161,24 @@ fun MangaDubStudioModuleWindowBody(
     var pendingDeleteChapter by remember { mutableStateOf<Pair<String, MangaChapterEntry>?>(null) }
     var pendingClearAllProjects by remember { mutableStateOf(false) }
 
-    val gemmaE2bSpec = remember(viewModel.modelCatalog) {
-        viewModel.modelCatalog.firstOrNull { it.id == LiteRtGemmaVisionEngine.GEMMA_E2B_SPEC_ID }
-    }
-    val gemmaE4bSpec = remember(viewModel.modelCatalog) {
-        viewModel.modelCatalog.firstOrNull { it.id == LiteRtGemmaVisionEngine.GEMMA_E4B_SPEC_ID }
+    val visionSpecsByTier = remember(viewModel.modelCatalog) {
+        MangaVisionModelTier.entries.associateWith { tier ->
+            viewModel.modelCatalog.firstOrNull { it.id == tier.specId }
+        }
     }
     val qwenDesignSpec = remember(viewModel.modelCatalog) {
         viewModel.modelCatalog.firstOrNull { it.id == Qwen3TtsEngine.SPEC_DESIGN_17B }
     }
 
-    val gemmaE2bState = forgeState.modelStates[LiteRtGemmaVisionEngine.GEMMA_E2B_SPEC_ID]
-    val gemmaE4bState = forgeState.modelStates[LiteRtGemmaVisionEngine.GEMMA_E4B_SPEC_ID]
+    val visionStatesByTier = MangaVisionModelTier.entries.associateWith { tier ->
+        forgeState.modelStates[tier.specId]
+    }
     val qwenDesignState = forgeState.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]
 
-    val hasAnyVisionModel = gemmaE2bState?.state == DownloadState.INSTALLED ||
-        gemmaE4bState?.state == DownloadState.INSTALLED
+    val hasAnyVisionModel = visionStatesByTier.values.any { it?.state == DownloadState.INSTALLED }
+    val selectedVisionInstalled = visionStatesByTier[selectedVisionTier]?.state == DownloadState.INSTALLED
     val hasQwenDesign = qwenDesignState?.state == DownloadState.INSTALLED
-    var expandEngineDeck by remember(hasAnyVisionModel, hasQwenDesign) {
+    var expandEngineDeck by remember(hasAnyVisionModel) {
         mutableStateOf(!hasAnyVisionModel)
     }
 
@@ -199,7 +196,8 @@ fun MangaDubStudioModuleWindowBody(
                 pauseOnFlags = pauseOnFlags,
                 videoAspect = selectedVideoAspect,
                 burnInSubtitles = selectedBurnSubtitles,
-                videoQuality = selectedVideoQuality
+                videoQuality = selectedVideoQuality,
+                preferredVisionModel = selectedVisionTier
             )
         }
     }
@@ -312,7 +310,7 @@ fun MangaDubStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Import your .CBZ chapter and enter a series title. Gemma 4 scans every panel, discovers the cast, prompts Qwen3 1.7B VoiceDesign for custom character voices, and renders a dubbed motion-comic .MP4 automatically.",
+            text = "Pick your reading direction and Vision LLM, enter a series title, and import your .CBZ chapter. Your selected VLM scans zoomed panels individually for sharp speech bubbles, casts Qwen3 VoiceDesign voices, and renders a synchronized .MP4 automatically.",
             color = MikaColors.CyanWhite.copy(alpha = 0.80f),
             fontFamily = FontFamily.Monospace,
             fontSize = 9.5.sp,
@@ -320,7 +318,7 @@ fun MangaDubStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Compact AI Readiness Strip (expandable to switch E2B/E4B & install VoiceDesign)
+        // Compact AI Readiness Strip (expandable to switch Vision LLMs & install VoiceDesign)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -328,7 +326,7 @@ fun MangaDubStudioModuleWindowBody(
                 .background(MikaColors.DeepWellBg)
                 .border(
                     1.dp,
-                    if (hasAnyVisionModel) MikaColors.TerminalGreen.copy(alpha = 0.55f) else MikaColors.NeonCyan.copy(alpha = 0.65f),
+                    if (selectedVisionInstalled) MikaColors.TerminalGreen.copy(alpha = 0.55f) else MikaColors.NeonCyan.copy(alpha = 0.65f),
                     RoundedCornerShape(6.dp)
                 )
                 .padding(9.dp),
@@ -341,17 +339,16 @@ fun MangaDubStudioModuleWindowBody(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val activeBrainText = when {
-                    gemmaE4bState?.state == DownloadState.INSTALLED && selectedVisionTier == MangaVisionModelTier.GEMMA4_E4B -> "GEMMA 4 E4B [READY]"
-                    gemmaE2bState?.state == DownloadState.INSTALLED -> "GEMMA 4 E2B [READY]"
-                    gemmaE4bState?.state == DownloadState.INSTALLED -> "GEMMA 4 E4B [READY]"
-                    else -> "INSTALL GEMMA 4 VISION"
+                val activeBrainText = if (selectedVisionInstalled) {
+                    "${selectedVisionTier.shortLabel} [READY]"
+                } else {
+                    "${selectedVisionTier.shortLabel} [INSTALL BELOW]"
                 }
                 val voiceDeckText = if (hasQwenDesign) "QWEN3 1.7B DESIGN [READY]" else "VOICEDESIGN OPTIONAL"
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "AI DIRECTOR: $activeBrainText • $voiceDeckText",
-                        color = if (hasAnyVisionModel) MikaColors.TerminalGreen else MikaColors.SsrGold,
+                        text = "VISION LLM: $activeBrainText • $voiceDeckText",
+                        color = if (selectedVisionInstalled) MikaColors.TerminalGreen else MikaColors.SsrGold,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
                         fontSize = 8.8.sp,
@@ -359,7 +356,11 @@ fun MangaDubStudioModuleWindowBody(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (expandEngineDeck) "Tap to collapse model selector" else "Tap to switch E2B [Rec] / E4B [Pro] or install VoiceDesign",
+                        text = if (expandEngineDeck) {
+                            "Tap to collapse 6-model VLM switcher"
+                        } else {
+                            "Tap to switch across Gemma 4 E2B/E4B, Qwen 3.5 VL, LFM 2.5 VL & InternVL3"
+                        },
                         color = MikaColors.DimText,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 7.8.sp
@@ -380,43 +381,30 @@ fun MangaDubStudioModuleWindowBody(
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         MangaVisionModelTier.entries.forEach { tier ->
-                            val pillLabel = if (tier == MangaVisionModelTier.GEMMA4_E2B) {
-                                "GEMMA 4 E2B [RECOMMENDED]"
-                            } else {
-                                tier.shortLabel
-                            }
+                            val isInst = visionStatesByTier[tier]?.state == DownloadState.INSTALLED
+                            val pillLabel = if (isInst) "${tier.shortLabel} ✓" else tier.shortLabel
                             MikaTagPill(
                                 label = pillLabel,
                                 selected = selectedVisionTier == tier,
-                                activeColor = if (tier.isRecommended) MikaColors.SsrGold else MikaColors.NeonPurple,
-                                onClick = {
-                                    selectedVisionTier = tier
-                                    activeProject?.let { viewModel.updateMangaProjectConfig(it.id, preferredVisionModel = tier) }
-                                }
+                                activeColor = if (isInst) MikaColors.NeonCyan else MikaColors.NeonPurple,
+                                onClick = { viewModel.selectMangaVisionModel(tier) }
                             )
                         }
                     }
-                    if (gemmaE2bSpec != null) {
-                        MangaVisionModelInstallRow(
-                            spec = gemmaE2bSpec,
-                            bundleState = gemmaE2bState,
-                            badgeLabel = "[RECOMMENDED]",
-                            badgeColor = MikaColors.SsrGold,
-                            accent = MikaColors.NeonCyan,
-                            onDownload = { viewModel.startModelDownload(gemmaE2bSpec) },
-                            onPause = { viewModel.pauseModelDownload(gemmaE2bSpec.id) }
-                        )
-                    }
-                    if (gemmaE4bSpec != null) {
-                        MangaVisionModelInstallRow(
-                            spec = gemmaE4bSpec,
-                            bundleState = gemmaE4bState,
-                            badgeLabel = "[PRO 4B • 8GB+]",
-                            badgeColor = MikaColors.NeonPurple,
-                            accent = MikaColors.NeonPurple,
-                            onDownload = { viewModel.startModelDownload(gemmaE4bSpec) },
-                            onPause = { viewModel.pauseModelDownload(gemmaE4bSpec.id) }
-                        )
+                    MangaVisionModelTier.entries.forEach { tier ->
+                        val spec = visionSpecsByTier[tier]
+                        val bundleState = visionStatesByTier[tier]
+                        if (spec != null) {
+                            MangaVisionModelInstallRow(
+                                spec = spec,
+                                bundleState = bundleState,
+                                badgeLabel = if (selectedVisionTier == tier) "[SELECTED • ${spec.romCode}]" else "[${spec.romCode}]",
+                                badgeColor = if (selectedVisionTier == tier) MikaColors.TerminalGreen else MikaColors.NeonPurple,
+                                accent = if (selectedVisionTier == tier) MikaColors.NeonCyan else MikaColors.NeonPurple,
+                                onDownload = { viewModel.startModelDownload(spec) },
+                                onPause = { viewModel.pauseModelDownload(spec.id) }
+                            )
+                        }
                     }
                     if (qwenDesignSpec != null) {
                         MangaVisionModelInstallRow(
@@ -514,7 +502,7 @@ fun MangaDubStudioModuleWindowBody(
         }
         Spacer(modifier = Modifier.height(6.dp))
 
-        // Front-Surface Output Controls: Aspect Ratio (Portrait default), Subtitles (On/Off), Quality (480p / 720p default / 1080p)
+        // Front-Surface Reading Direction & Output Controls: Reading Direction (Manga R->L default), Aspect Ratio, Subtitles, Quality
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -524,6 +512,41 @@ fun MangaDubStudioModuleWindowBody(
                 .padding(8.dp),
             verticalArrangement = Arrangement.spacedBy(5.dp)
         ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "READING:",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    modifier = Modifier.width(62.dp)
+                )
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    MangaReadingOrder.entries.forEach { order ->
+                        MikaTagPill(
+                            label = order.shortLabel,
+                            selected = selectedReadingOrder == order,
+                            activeColor = MikaColors.NeonPink,
+                            onClick = { viewModel.selectMangaReadingOrder(order) }
+                        )
+                    }
+                }
+            }
+            Text(
+                text = "ℹ️ ${selectedReadingOrder.instructionHint}",
+                color = MikaColors.CyanWhite.copy(alpha = 0.85f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 7.8.sp,
+                lineHeight = 11.sp
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -874,10 +897,7 @@ fun MangaDubStudioModuleWindowBody(
                             label = order.label,
                             selected = selectedReadingOrder == order,
                             activeColor = MikaColors.NeonCyan,
-                            onClick = {
-                                selectedReadingOrder = order
-                                viewModel.updateMangaProjectConfig(activeProject.id, readingOrder = order)
-                            }
+                            onClick = { viewModel.selectMangaReadingOrder(order) }
                         )
                     }
                 }

@@ -76,6 +76,7 @@ class MangaDubStudioManager(
     private val repository: PurrProfileRepository,
     private val backendRouter: TtsBackendRouter
 ) {
+    private val prefs = context.getSharedPreferences("purr_manga_studio_prefs", Context.MODE_PRIVATE)
     private val projectsRoot = File(context.filesDir, "manga_projects").apply { mkdirs() }
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     val visionEngine = LiteRtGemmaVisionEngine(context)
@@ -85,6 +86,18 @@ class MangaDubStudioManager(
         ignoreUnknownKeys = true
         encodeDefaults = true
     }
+
+    private val _selectedVisionModel = MutableStateFlow(
+        MangaVisionModelTier.fromNameOrDefault(prefs.getString("selected_vision_model", null))
+    )
+    val selectedVisionModel: StateFlow<MangaVisionModelTier> = _selectedVisionModel.asStateFlow()
+
+    private val _selectedReadingOrder = MutableStateFlow(
+        MangaReadingOrder.entries.firstOrNull {
+            it.name.equals(prefs.getString("selected_reading_order", null), ignoreCase = true)
+        } ?: MangaReadingOrder.RTL_MANGA
+    )
+    val selectedReadingOrder: StateFlow<MangaReadingOrder> = _selectedReadingOrder.asStateFlow()
 
     private val _projects = MutableStateFlow<List<MangaSeriesProject>>(emptyList())
     val projects: StateFlow<List<MangaSeriesProject>> = _projects.asStateFlow()
@@ -113,6 +126,22 @@ class MangaDubStudioManager(
         reloadAllProjects()
     }
 
+    fun setSelectedVisionModel(tier: MangaVisionModelTier) {
+        prefs.edit().putString("selected_vision_model", tier.name).apply()
+        _selectedVisionModel.value = tier
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(pid, preferredVisionModel = tier)
+        }
+    }
+
+    fun setSelectedReadingOrder(order: MangaReadingOrder) {
+        prefs.edit().putString("selected_reading_order", order.name).apply()
+        _selectedReadingOrder.value = order
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(pid, readingOrder = order)
+        }
+    }
+
     private fun appendLog(entry: String) {
         val elapsedSec = if (activeJobStartMs > 0L) {
             ((System.currentTimeMillis() - activeJobStartMs) / 1000L).toInt().coerceAtLeast(0)
@@ -127,10 +156,9 @@ class MangaDubStudioManager(
         }
     }
 
-    private fun customVisionPaths(): List<String> = listOfNotNull(
-        repository.state.value.modelStates[LiteRtGemmaVisionEngine.GEMMA_E2B_SPEC_ID]?.localPath,
-        repository.state.value.modelStates[LiteRtGemmaVisionEngine.GEMMA_E4B_SPEC_ID]?.localPath
-    )
+    private fun customVisionPaths(): List<String> = MangaVisionModelTier.entries.mapNotNull { tier ->
+        repository.state.value.modelStates[tier.specId]?.localPath
+    }
 
     private fun startTelemetryTicker(stage: MangaPipelineStage, detail: String, itemTotal: Int = 0) {
         telemetryTickerJob?.cancel()
@@ -217,7 +245,12 @@ class MangaDubStudioManager(
                 val f = File(dir, "project.json")
                 if (!f.exists()) return@mapNotNull null
                 runCatching {
-                    val decoded = json.decodeFromString<MangaSeriesProject>(f.readText())
+                    val origRaw = f.readText()
+                    val sanitizedRaw = origRaw.replace(
+                        Regex("\"preferredVisionModel\"\\s*:\\s*\"AUTO\""),
+                        "\"preferredVisionModel\":\"GEMMA4_E2B\""
+                    )
+                    val decoded = json.decodeFromString<MangaSeriesProject>(sanitizedRaw)
                     val healedChapters = decoded.chapters.map { ch ->
                         if (ch.status in setOf(
                                 MangaChapterStatus.ANALYZING_VISION,
@@ -230,7 +263,7 @@ class MangaDubStudioManager(
                             ch
                         }
                     }
-                    if (healedChapters != decoded.chapters) {
+                    if (healedChapters != decoded.chapters || sanitizedRaw != f.readText()) {
                         val updated = decoded.copy(chapters = healedChapters)
                         persistProject(updated)
                         updated
@@ -319,12 +352,21 @@ class MangaDubStudioManager(
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
+        preferredVisionModel: MangaVisionModelTier? = null,
         onComplete: (String) -> Unit
     ) {
         if (_isBusy.value) {
             onComplete("Manga Studio task already running!")
             return
         }
+        val effectiveVisionTier = preferredVisionModel ?: _selectedVisionModel.value
+        prefs.edit()
+            .putString("selected_vision_model", effectiveVisionTier.name)
+            .putString("selected_reading_order", readingOrder.name)
+            .apply()
+        _selectedVisionModel.value = effectiveVisionTier
+        _selectedReadingOrder.value = readingOrder
+
         activeJob = scope.launch {
             _isBusy.value = true
             _overallProgress.value = 0.02f
@@ -358,6 +400,7 @@ class MangaDubStudioManager(
                     videoAspect = videoAspect ?: existingProject.videoAspect,
                     burnInSubtitles = burnInSubtitles ?: existingProject.burnInSubtitles,
                     videoQuality = videoQuality ?: existingProject.videoQuality,
+                    preferredVisionModel = effectiveVisionTier,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
                 ) ?: MangaSeriesProject(
@@ -369,6 +412,7 @@ class MangaDubStudioManager(
                     videoAspect = videoAspect ?: MangaVideoAspect.VERTICAL_9_16,
                     burnInSubtitles = burnInSubtitles ?: true,
                     videoQuality = videoQuality ?: MangaVideoQuality.HD_720P,
+                    preferredVisionModel = effectiveVisionTier,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
                 )
@@ -708,12 +752,16 @@ class MangaDubStudioManager(
         val castingSpan = progressSpan * 0.22f
 
         try {
+            val activeVisionTier = _selectedVisionModel.value
+            if (proj.id == _activeProjectId.value && proj.preferredVisionModel != activeVisionTier) {
+                proj = proj.copy(preferredVisionModel = activeVisionTier)
+            }
             for ((pageIdx, page) in ch.pages.withIndex()) {
                 if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
                 val tierNote = proj.preferredVisionModel.shortLabel
                 reportTelemetry(
                     stage = MangaPipelineStage.VISION_SCAN,
-                    detail = "🧠 GEMMA 4 [$tierNote] SCANNING PAGE ${pageIdx + 1}/${ch.pages.size}...",
+                    detail = "🧠 $tierNote SCANNING PAGE ${pageIdx + 1}/${ch.pages.size} (${ch.readingOrder.shortLabel})...",
                     progress = progressOffset + pageScanSpan * (pageIdx.toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
                     itemCurrent = pageIdx + 1,
                     itemTotal = ch.pages.size,
@@ -732,7 +780,18 @@ class MangaDubStudioManager(
                         powerUserVisionUrl = proj.powerUserVisionUrl,
                         preferredVisionModel = proj.preferredVisionModel,
                         customModelPaths = modelPaths,
-                        onLog = { msg -> appendLog(msg) }
+                        onLog = { msg -> appendLog(msg) },
+                        onPanelProgress = { panDone, panTotal, bubbleNote ->
+                            val panFrac = (pageIdx.toFloat() + (panDone.toFloat() / panTotal.coerceAtLeast(1).toFloat())) / ch.pages.size.coerceAtLeast(1).toFloat()
+                            reportTelemetry(
+                                stage = MangaPipelineStage.VISION_SCAN,
+                                detail = "🧠 $tierNote // P${pageIdx + 1}/${ch.pages.size} PANEL $panDone/$panTotal ($bubbleNote)",
+                                progress = progressOffset + pageScanSpan * panFrac,
+                                itemCurrent = pageIdx + 1,
+                                itemTotal = ch.pages.size,
+                                addLog = false
+                            )
+                        }
                     )
                     val thoughtPreview = analysis.thoughtTrace.replace('\n', ' ').trim().take(90)
                     if (thoughtPreview.isNotBlank()) {
@@ -1120,10 +1179,42 @@ class MangaDubStudioManager(
         autoCookFullMp4: Boolean? = null,
         pauseOnFlaggedDecisions: Boolean? = null
     ) {
+        if (readingOrder != null) {
+            prefs.edit().putString("selected_reading_order", readingOrder.name).apply()
+            _selectedReadingOrder.value = readingOrder
+        }
         mutateProject(projectId) { proj ->
+            val nextOrder = readingOrder ?: proj.readingOrder
+            val updatedChapters = if (readingOrder != null && readingOrder != proj.readingOrder) {
+                proj.chapters.map { ch ->
+                    ch.copy(
+                        readingOrder = nextOrder,
+                        pages = ch.pages.map { pg ->
+                            if (pg.panels.isEmpty()) {
+                                pg
+                            } else {
+                                val orderedRects = MangaBfsPanelSlicer.orderPanelsForReadingDirection(
+                                    boxes = pg.panels.map { it.panelRect },
+                                    readingOrder = nextOrder
+                                )
+                                val pool = pg.panels.toMutableList()
+                                val reordered = orderedRects.mapIndexed { newIdx, rect ->
+                                    val pickIdx = pool.indexOfFirst { it.panelRect == rect }.takeIf { it >= 0 } ?: 0
+                                    val orig = pool.removeAt(pickIdx)
+                                    val (cs, ce) = MangaBfsPanelSlicer.computeKenBurnsPair(orig.panelRect, nextOrder)
+                                    orig.copy(panelIndex = newIdx, cameraStartRect = cs, cameraEndRect = ce)
+                                }
+                                pg.copy(panels = reordered)
+                            }
+                        }
+                    )
+                }
+            } else {
+                proj.chapters
+            }
             proj.copy(
                 updatedAtEpochMs = System.currentTimeMillis(),
-                readingOrder = readingOrder ?: proj.readingOrder,
+                readingOrder = nextOrder,
                 videoAspect = videoAspect ?: proj.videoAspect,
                 burnInSubtitles = burnInSubtitles ?: proj.burnInSubtitles,
                 videoQuality = videoQuality ?: proj.videoQuality,
@@ -1131,7 +1222,8 @@ class MangaDubStudioManager(
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
                 preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
                 autoCookFullMp4 = autoCookFullMp4 ?: proj.autoCookFullMp4,
-                pauseOnFlaggedDecisions = pauseOnFlaggedDecisions ?: proj.pauseOnFlaggedDecisions
+                pauseOnFlaggedDecisions = pauseOnFlaggedDecisions ?: proj.pauseOnFlaggedDecisions,
+                chapters = updatedChapters
             )
         }
     }

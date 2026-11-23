@@ -220,11 +220,19 @@ class MangaDubStudioTest {
     }
 
     @Test
-    fun `gemma4 vision tier defaults to AUTO and deserializes legacy project json cleanly`() {
-        assertTrue(MangaVisionModelTier.GEMMA4_E2B.isRecommended)
-        assertFalse(MangaVisionModelTier.GEMMA4_E4B.isRecommended)
+    fun `vision model catalog exposes 6 models, drops AUTO, and migrates legacy AUTO safely`() {
+        assertEquals(6, MangaVisionModelTier.entries.size)
         assertEquals("sub_gemma4_e2b_vision", MangaVisionModelTier.GEMMA4_E2B.specId)
         assertEquals("sub_gemma4_e4b_vision", MangaVisionModelTier.GEMMA4_E4B.specId)
+        assertEquals("sub_qwen35_vl_2b_vision", MangaVisionModelTier.QWEN35_VL_2B.specId)
+        assertEquals("sub_lfm25_vl_3b_vision", MangaVisionModelTier.LFM25_VL_3B.specId)
+        assertEquals("sub_qwen35_vl_08b_vision", MangaVisionModelTier.QWEN35_VL_08B.specId)
+        assertEquals("sub_internvl3_1b_vision", MangaVisionModelTier.INTERNVL3_1B.specId)
+
+        assertEquals(MangaVisionModelTier.GEMMA4_E2B, MangaVisionModelTier.fromNameOrDefault("AUTO"))
+        assertEquals(MangaVisionModelTier.GEMMA4_E2B, MangaVisionModelTier.fromNameOrDefault(null))
+        assertEquals(MangaVisionModelTier.GEMMA4_E4B, MangaVisionModelTier.fromNameOrDefault("GEMMA4_E4B"))
+        assertEquals(MangaVisionModelTier.QWEN35_VL_2B, MangaVisionModelTier.fromNameOrDefault("QWEN35_VL_2B"))
 
         val legacyJson = """
             {
@@ -236,10 +244,10 @@ class MangaDubStudioTest {
         """.trimIndent()
         val parser = Json { ignoreUnknownKeys = true; encodeDefaults = true }
         val decoded = parser.decodeFromString<MangaSeriesProject>(legacyJson)
-        assertEquals(MangaVisionModelTier.AUTO, decoded.preferredVisionModel)
+        assertEquals(MangaVisionModelTier.GEMMA4_E2B, decoded.preferredVisionModel)
 
-        val encoded = parser.encodeToString(decoded.copy(preferredVisionModel = MangaVisionModelTier.GEMMA4_E4B))
-        assertEquals(MangaVisionModelTier.GEMMA4_E4B, parser.decodeFromString<MangaSeriesProject>(encoded).preferredVisionModel)
+        val encoded = parser.encodeToString(decoded.copy(preferredVisionModel = MangaVisionModelTier.LFM25_VL_3B))
+        assertEquals(MangaVisionModelTier.LFM25_VL_3B, parser.decodeFromString<MangaSeriesProject>(encoded).preferredVisionModel)
     }
 
     @Test
@@ -531,5 +539,118 @@ class MangaDubStudioTest {
             stageAspect = 0.65f
         )
         assertTrue(ltrStart.sourceCropRect.centerX < ltrEnd.sourceCropRect.centerX)
+    }
+
+    @Test
+    fun `reading order defaults to RTL_MANGA with clear user hints and vlm prompt directives`() {
+        val defProj = MangaSeriesProject(
+            id = "p_dir",
+            seriesTitle = "Dir Test",
+            createdAtEpochMs = 1L,
+            updatedAtEpochMs = 2L
+        )
+        assertEquals(MangaReadingOrder.RTL_MANGA, defProj.readingOrder)
+        assertTrue(MangaReadingOrder.RTL_MANGA.shortLabel.contains("R -> L"))
+        assertTrue(MangaReadingOrder.RTL_MANGA.instructionHint.contains("RIGHT -> LEFT"))
+        assertTrue(MangaReadingOrder.RTL_MANGA.vlmPromptDirective.contains("RIGHT-TO-LEFT"))
+        assertTrue(MangaReadingOrder.LTR_COMIC.vlmPromptDirective.contains("LEFT-TO-RIGHT"))
+        assertTrue(MangaReadingOrder.WEBTOON_VERTICAL.vlmPromptDirective.contains("TOP-TO-BOTTOM"))
+    }
+
+    @Test
+    fun `parseSinglePanelAnalysis locks exact panel index and extracts multi-bubble dialogue`() {
+        val rawSingle = """
+            <thought>Right bubble belongs to KAEL, left bubble belongs to VEGETA_X.</thought>
+            ```json
+            {
+              "mood": "tense standoff",
+              "lines": [
+                {
+                  "bubble": 1,
+                  "speaker": "KAEL",
+                  "gender": "male",
+                  "emotion": "calm",
+                  "confidence": 0.92,
+                  "text": "WAIT RIGHT THERE!"
+                },
+                {
+                  "bubble": 2,
+                  "speaker": "VEGETA_X",
+                  "gender": "male",
+                  "emotion": "anger",
+                  "confidence": 0.95,
+                  "text": "STEP ASIDE!"
+                }
+              ]
+            }
+            ```
+        """.trimIndent()
+
+        val spec = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = rawSingle,
+            panelIndex = 3,
+            existingCharacters = emptyList()
+        )
+        assertEquals(3, spec.panelIndex)
+        assertEquals("tense standoff", spec.sceneMood)
+        assertEquals(2, spec.lines.size)
+        assertEquals("KAEL", spec.lines[0].speakerName)
+        assertEquals("WAIT RIGHT THERE!", spec.lines[0].rawText)
+        assertEquals("VEGETA_X", spec.lines[1].speakerName)
+        assertEquals("STEP ASIDE!", spec.lines[1].rawText)
+
+        // Direct JSON array of lines also binds cleanly to locked panelIndex
+        val rawArr = """[{"speaker":"ARIA","confidence":0.89,"text":"Watch out!"}]"""
+        val arrSpec = MangaVisionResponseParser.parseSinglePanelAnalysis(rawArr, panelIndex = 5, existingCharacters = emptyList())
+        assertEquals(5, arrSpec.panelIndex)
+        assertEquals(1, arrSpec.lines.size)
+        assertEquals("ARIA", arrSpec.lines.single().speakerName)
+    }
+
+    @Test
+    fun `bfs slicer topological order and composite splitter handle staggered columns and internal gutters`() {
+        // Staggered layout: tall right panel + two stacked left panels (should read RightTall -> LeftTop -> LeftBot in RTL)
+        val leftTop = MangaNormalizedRect(0.05f, 0.05f, 0.45f, 0.45f)
+        val leftBot = MangaNormalizedRect(0.05f, 0.50f, 0.45f, 0.90f)
+        val rightTall = MangaNormalizedRect(0.50f, 0.05f, 0.95f, 0.90f)
+
+        val rtlOrdered = MangaBfsPanelSlicer.orderPanelsForReadingDirection(
+            boxes = listOf(leftBot, rightTall, leftTop),
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertEquals(listOf(rightTall, leftTop, leftBot), rtlOrdered)
+
+        // Mirrored LTR layout: tall left panel + two stacked right panels (LeftTall -> RightTop -> RightBot)
+        val leftTall = MangaNormalizedRect(0.05f, 0.05f, 0.45f, 0.90f)
+        val rightTop = MangaNormalizedRect(0.50f, 0.05f, 0.95f, 0.45f)
+        val rightBot = MangaNormalizedRect(0.50f, 0.50f, 0.95f, 0.90f)
+        val ltrOrdered = MangaBfsPanelSlicer.orderPanelsForReadingDirection(
+            boxes = listOf(rightBot, leftTall, rightTop),
+            readingOrder = MangaReadingOrder.LTR_COMIC
+        )
+        assertEquals(listOf(leftTall, rightTop, rightBot), ltrOrdered)
+
+        // Composite splitter separates a single merged full-page box along an internal white horizontal gutter
+        val w = 100
+        val h = 100
+        val lum = IntArray(w * h) { 40 }
+        // Paint a 4px white horizontal gutter band around y = 48..51
+        for (y in 48..51) {
+            for (x in 0 until w) {
+                lum[y * w + x] = 250
+            }
+        }
+        val mergedBox = MangaNormalizedRect(0.04f, 0.04f, 0.96f, 0.96f)
+        val split = MangaBfsPanelSlicer.splitCompositePanelBoxes(
+            boxes = listOf(mergedBox),
+            luminance = lum,
+            gutterMed = 250,
+            tolerance = 34,
+            width = w,
+            height = h
+        )
+        assertEquals(2, split.size)
+        assertTrue(split[0].bottom <= 0.50f)
+        assertTrue(split[1].top >= 0.50f)
     }
 }

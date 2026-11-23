@@ -1,3 +1,30 @@
+# 🌌 PURR-TTS v1.9.3 // Sticky Vision Model Picker, 6 VLMs, Per-Panel Crop OCR & Reading Direction UI
+
+### ✨ What's New since v1.9.2
+
+Makes your selected Vision LLM and Reading Direction stick reliably, upgrades OCR accuracy & panel dubbing alignment via **Zoomed Per-Panel Crop Scanning**, expands the Vision catalog to **6 official LiteRT-LM models**, and refines panel camera transitions! 🧠📖🎬
+
+* **🎛️ Sticky Vision Model Selection (Removed `[RECOMMENDED]` & `AUTO`)**:
+  * Removed the `AUTO` selector and `[RECOMMENDED]` badge so **Gemma 4 E2B**, **Gemma 4 E4B**, and 4 new Vision LLMs are explicit, persistent choices saved in app preferences across chapters, imports, and screen switches.
+* **🤖 4 New Official LiteRT-LM Vision LLMs Added (6 Total)**:
+  * Added **`SUB-11Q` Qwen 3.5 VL 2B** (24-layer high-res ViT OCR specialist), **`SUB-11L` LiquidAI LFM 2.5 VL 3B** (SigLIP2 + fast hybrid decoder), **`SUB-11F` Qwen 3.5 VL 0.8B** (lightweight fast OCR), and **`SUB-11I` InternVL3 1B** (compact 705 MB InternViT) alongside Gemma 4 E2B & E4B.
+* **🔍 Zoomed Per-Panel Crop OCR & Topological Slicing (`LiteRtGemmaVisionEngine` / `MangaBfsPanelSlicer`)**:
+  * Instead of shrinking an entire page to 1024px where bubbles become tiny, each BFS-detected panel is cropped individually (`<=960px` zoomed) and transcribed in its own focused pass, locking every speech bubble deterministically to its exact panel index.
+  * Added internal composite gutter splitting (`splitCompositePanelBoxes`) and 2D topological column/row sorting so staggered panels stay in true reading order.
+* **📖 Front-Surface Reading Direction Control & Explicit VLM Instructions**:
+  * Surfaced **READING DIRECTION** right on the front panel (**`MANGA (R -> L)`** default, **`COMIC (L -> R)`**, **`WEBTOON (TOP -> DOWN)`**) with an explicit visual guidance caption and matching geometric ordering instructions injected directly into Vision prompts.
+* **🎥 Smoother Panel Transitions (`MangaMotionVideoMuxer`)**:
+  * Added a 10% midpoint zoom-bridge arc (`lerpRectWithZoomArc`) across 380ms panel pans and tightened silent panel holds (`950ms`) for snappier pacing.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `29`).
+2. **`PURR-TTS_V1.9.3.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.2 // Synchronized Panel Pacing, Crisp Quality & Deterministic FX Engine
 
 ### ✨ What's New since v1.9.1

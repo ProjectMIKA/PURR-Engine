@@ -36,10 +36,30 @@ import org.apache.commons.compress.archivers.zip.ZipFile as CommonsZipFile
  */
 
 @Serializable
-enum class MangaReadingOrder(val label: String) {
-    RTL_MANGA("MANGA (Right -> Left)"),
-    LTR_COMIC("COMIC / MANHWA (Left -> Right)"),
-    WEBTOON_VERTICAL("WEBTOON (Vertical Scroll)")
+enum class MangaReadingOrder(
+    val label: String,
+    val shortLabel: String,
+    val instructionHint: String,
+    val vlmPromptDirective: String
+) {
+    RTL_MANGA(
+        label = "MANGA (Right -> Left)",
+        shortLabel = "MANGA (R -> L)",
+        instructionHint = "Japanese Manga (Default): Panels & speech bubbles read RIGHT -> LEFT, TOP -> BOTTOM. Rightmost bubble speaks first.",
+        vlmPromptDirective = "CRITICAL MANGA READING DIRECTION (RIGHT-TO-LEFT): Read panels and speech bubbles from TOP-RIGHT toward BOTTOM-LEFT. When two speech bubbles are side-by-side, the RIGHT bubble is spoken FIRST and the LEFT bubble is spoken SECOND. When bubbles are stacked on the right before a left bubble, order them Top-Right -> Bottom-Right -> Left."
+    ),
+    LTR_COMIC(
+        label = "COMIC / MANHWA (Left -> Right)",
+        shortLabel = "COMIC (L -> R)",
+        instructionHint = "Western Comic / Manhwa: Panels & speech bubbles read LEFT -> RIGHT, TOP -> BOTTOM. Leftmost bubble speaks first.",
+        vlmPromptDirective = "CRITICAL COMIC READING DIRECTION (LEFT-TO-RIGHT): Read panels and speech bubbles from TOP-LEFT toward BOTTOM-RIGHT. When two speech bubbles are side-by-side, the LEFT bubble is spoken FIRST and the RIGHT bubble is spoken SECOND."
+    ),
+    WEBTOON_VERTICAL(
+        label = "WEBTOON (Vertical Scroll)",
+        shortLabel = "WEBTOON (TOP -> DOWN)",
+        instructionHint = "Vertical Webtoon: Panels & speech bubbles read strictly TOP -> BOTTOM in vertical scroll order.",
+        vlmPromptDirective = "CRITICAL WEBTOON READING DIRECTION (TOP-TO-BOTTOM): Read speech bubbles strictly from TOP to BOTTOM in vertical order."
+    )
 }
 
 @Serializable
@@ -215,38 +235,79 @@ enum class MangaVisionModelTier(
     val shortLabel: String,
     val displayTitle: String,
     val sizeNote: String,
-    val isRecommended: Boolean = false
+    val supportsThinking: Boolean = false,
+    val maxContextTokens: Int = 4096
 ) {
-    AUTO(
-        specId = "sub_gemma4_e2b_vision",
-        fileName = "gemma-4-E2B-it-gpu.litertlm",
-        shortLabel = "AUTO (E2B REC.)",
-        displayTitle = "Auto — Prefer Gemma 4 E2B [Recommended]",
-        sizeNote = "Auto-picks installed E2B (Recommended) or E4B",
-        isRecommended = true
-    ),
     GEMMA4_E2B(
         specId = "sub_gemma4_e2b_vision",
         fileName = "gemma-4-E2B-it-gpu.litertlm",
         shortLabel = "GEMMA 4 E2B",
-        displayTitle = "Gemma 4 E2B LiteRT [RECOMMENDED]",
-        sizeNote = "2.2 GB • Fastest Vision + Thinking",
-        isRecommended = true
+        displayTitle = "Gemma 4 E2B LiteRT (2.2 GB)",
+        sizeNote = "2.2 GB • Vision + Thinking",
+        supportsThinking = true,
+        maxContextTokens = 4096
     ),
     GEMMA4_E4B(
         specId = "sub_gemma4_e4b_vision",
         fileName = "gemma-4-E4B-it-gpu.litertlm",
         shortLabel = "GEMMA 4 E4B",
-        displayTitle = "Gemma 4 E4B LiteRT [PRO 4B]",
-        sizeNote = "3.1 GB • Higher Accuracy (8GB+ RAM)",
-        isRecommended = false
-    )
+        displayTitle = "Gemma 4 E4B LiteRT (3.1 GB)",
+        sizeNote = "3.1 GB • 4B Vision + Thinking",
+        supportsThinking = true,
+        maxContextTokens = 4096
+    ),
+    QWEN35_VL_2B(
+        specId = "sub_qwen35_vl_2b_vision",
+        fileName = "Qwen3.5-2B-VL_int8.litertlm",
+        shortLabel = "QWEN 3.5 VL 2B",
+        displayTitle = "Qwen 3.5 VL 2B LiteRT (3.0 GB)",
+        sizeNote = "3.0 GB • 24-Layer ViT Manga OCR",
+        supportsThinking = false,
+        maxContextTokens = 4096
+    ),
+    LFM25_VL_3B(
+        specId = "sub_lfm25_vl_3b_vision",
+        fileName = "LFM2.5-VL-3B_int4.litertlm",
+        shortLabel = "LFM 2.5 VL 3B",
+        displayTitle = "Liquid LFM 2.5 VL 3B LiteRT (2.2 GB)",
+        sizeNote = "2.2 GB • SigLIP2 Hybrid VLM",
+        supportsThinking = false,
+        maxContextTokens = 4096
+    ),
+    QWEN35_VL_08B(
+        specId = "sub_qwen35_vl_08b_vision",
+        fileName = "Qwen3.5-0.8B-VL_int8.litertlm",
+        shortLabel = "QWEN 3.5 VL 0.8B",
+        displayTitle = "Qwen 3.5 VL 0.8B LiteRT (1.2 GB)",
+        sizeNote = "1.2 GB • Fast Lightweight OCR",
+        supportsThinking = false,
+        maxContextTokens = 4096
+    ),
+    INTERNVL3_1B(
+        specId = "sub_internvl3_1b_vision",
+        fileName = "InternVL3-1B.litertlm",
+        shortLabel = "INTERNVL3 1B",
+        displayTitle = "InternVL3 1B LiteRT (705 MB)",
+        sizeNote = "705 MB • Ultra-Light InternViT",
+        supportsThinking = false,
+        maxContextTokens = 2048
+    );
+
+    companion object {
+        fun fromNameOrDefault(raw: String?): MangaVisionModelTier {
+            val cleaned = raw?.trim().orEmpty()
+            if (cleaned.isEmpty() || cleaned.equals("AUTO", ignoreCase = true)) {
+                return GEMMA4_E2B
+            }
+            return entries.firstOrNull { it.name.equals(cleaned, ignoreCase = true) } ?: GEMMA4_E2B
+        }
+    }
 }
 
 enum class MangaPipelineStage(val stepNum: Int, val label: String) {
     IDLE(0, "IDLE"),
     EXTRACT_AND_SLICE(1, "1/5 UNPACK & SLICE"),
-    VISION_SCAN(2, "2/5 GEMMA VISION OCR"),
+    VISION_SCAN(2, "2/5 VLM PANEL OCR"),
     VOICE_CASTING(3, "3/5 QWEN VOICEDESIGN CAST"),
     VOICE_FORGE(4, "4/5 VOICE SYNTHESIS"),
     VIDEO_MUX(5, "5/5 MOTION .MP4 MUX")
@@ -274,7 +335,7 @@ data class MangaSeriesProject(
     val videoQuality: MangaVideoQuality = MangaVideoQuality.HD_720P,
     val enableAtmosphereFx: Boolean = true,
     val powerUserVisionUrl: String = "",
-    val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO,
+    val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
     val autoCookFullMp4: Boolean = true,
     val pauseOnFlaggedDecisions: Boolean = true,
     val storyContextSummary: String = "",
@@ -877,8 +938,124 @@ object MangaBfsPanelSlicer {
             }
         }
 
-        // 5. Group into reading rows and order by RTL Manga / LTR Comic / Vertical
-        val orderedByTop = kept.sortedBy { it.top }
+        // 4B. Split oversized composite panel boxes that still hide continuous internal gutters
+        val splitPanels = splitCompositePanelBoxes(kept, luminance, gutterMed, tolerance, width, height)
+
+        // 5. Group into reading rows and order deterministically with topological tie-breaking
+        return orderPanelsForReadingDirection(splitPanels, readingOrder)
+    }
+
+    fun splitCompositePanelBoxes(
+        boxes: List<MangaNormalizedRect>,
+        luminance: IntArray,
+        gutterMed: Int,
+        tolerance: Int,
+        width: Int,
+        height: Int
+    ): List<MangaNormalizedRect> {
+        if (width < 8 || height < 8 || luminance.size < width * height) return boxes
+
+        fun isGutterPx(idx: Int): Boolean = abs(luminance[idx] - gutterMed) <= tolerance
+
+        fun splitRecursive(box: MangaNormalizedRect, depth: Int): List<MangaNormalizedRect> {
+            if (depth >= 2 || (box.width < 0.42f && box.height < 0.42f)) return listOf(box)
+            val x0 = (box.left * width).toInt().coerceIn(0, width - 1)
+            val x1 = (box.right * width).toInt().coerceIn(x0 + 1, width)
+            val y0 = (box.top * height).toInt().coerceIn(0, height - 1)
+            val y1 = (box.bottom * height).toInt().coerceIn(y0 + 1, height)
+            val bw = x1 - x0
+            val bh = y1 - y0
+            if (bw < 6 || bh < 6) return listOf(box)
+
+            // Try horizontal split across internal gutter band
+            if (box.height >= 0.42f) {
+                val marginY = max(2, (height * 0.14f).toInt())
+                val startY = y0 + marginY
+                val endY = y1 - marginY
+                var runStart = -1
+                var bestStart = -1
+                var bestLen = 0
+                for (y in startY until endY) {
+                    var gCount = 0
+                    val rowOff = y * width
+                    for (x in x0 until x1) {
+                        if (isGutterPx(rowOff + x)) gCount++
+                    }
+                    val isGutterRow = gCount >= (bw * 0.88f).toInt()
+                    if (isGutterRow) {
+                        if (runStart < 0) runStart = y
+                        val len = y - runStart + 1
+                        if (len > bestLen) {
+                            bestLen = len
+                            bestStart = runStart
+                        }
+                    } else {
+                        runStart = -1
+                    }
+                }
+                if (bestLen >= 2 && bestStart >= startY) {
+                    val topFrac = (bestStart.toFloat() / height.toFloat()).coerceIn(box.top + 0.14f, box.bottom - 0.14f)
+                    val botFrac = ((bestStart + bestLen).toFloat() / height.toFloat()).coerceIn(topFrac, box.bottom - 0.14f)
+                    if (topFrac - box.top >= 0.14f && box.bottom - botFrac >= 0.14f) {
+                        val upper = MangaNormalizedRect(box.left, box.top, box.right, topFrac).clamped()
+                        val lower = MangaNormalizedRect(box.left, botFrac, box.right, box.bottom).clamped()
+                        return splitRecursive(upper, depth + 1) + splitRecursive(lower, depth + 1)
+                    }
+                }
+            }
+
+            // Try vertical split across internal gutter band
+            if (box.width >= 0.42f) {
+                val marginX = max(2, (width * 0.14f).toInt())
+                val startX = x0 + marginX
+                val endX = x1 - marginX
+                var runStart = -1
+                var bestStart = -1
+                var bestLen = 0
+                for (x in startX until endX) {
+                    var gCount = 0
+                    for (y in y0 until y1) {
+                        if (isGutterPx(y * width + x)) gCount++
+                    }
+                    val isGutterCol = gCount >= (bh * 0.88f).toInt()
+                    if (isGutterCol) {
+                        if (runStart < 0) runStart = x
+                        val len = x - runStart + 1
+                        if (len > bestLen) {
+                            bestLen = len
+                            bestStart = runStart
+                        }
+                    } else {
+                        runStart = -1
+                    }
+                }
+                if (bestLen >= 2 && bestStart >= startX) {
+                    val leftFrac = (bestStart.toFloat() / width.toFloat()).coerceIn(box.left + 0.14f, box.right - 0.14f)
+                    val rightFrac = ((bestStart + bestLen).toFloat() / width.toFloat()).coerceIn(leftFrac, box.right - 0.14f)
+                    if (leftFrac - box.left >= 0.14f && box.right - rightFrac >= 0.14f) {
+                        val leftBox = MangaNormalizedRect(box.left, box.top, leftFrac, box.bottom).clamped()
+                        val rightBox = MangaNormalizedRect(rightFrac, box.top, box.right, box.bottom).clamped()
+                        return splitRecursive(leftBox, depth + 1) + splitRecursive(rightBox, depth + 1)
+                    }
+                }
+            }
+
+            return listOf(box)
+        }
+
+        return boxes.flatMap { splitRecursive(it, 0) }
+    }
+
+    fun orderPanelsForReadingDirection(
+        boxes: List<MangaNormalizedRect>,
+        readingOrder: MangaReadingOrder
+    ): List<MangaNormalizedRect> {
+        if (boxes.size <= 1) return boxes
+        if (readingOrder == MangaReadingOrder.WEBTOON_VERTICAL) {
+            return boxes.sortedWith(compareBy<MangaNormalizedRect>({ it.top }, { it.centerX }))
+        }
+
+        val orderedByTop = boxes.sortedBy { it.top }
         val rows = ArrayList<MutableList<MangaNormalizedRect>>()
         for (box in orderedByTop) {
             val targetRow = rows.firstOrNull { row ->
@@ -886,8 +1063,9 @@ object MangaBfsPanelSlicer {
                     val overlapTop = max(existing.top, box.top)
                     val overlapBot = min(existing.bottom, box.bottom)
                     val overlapH = (overlapBot - overlapTop).coerceAtLeast(0f)
+                    val maxH = max(existing.height, box.height).coerceAtLeast(0.01f)
                     val minH = min(existing.height, box.height).coerceAtLeast(0.01f)
-                    (overlapH / minH) >= 0.35f || abs(existing.centerY - box.centerY) < minH * 0.40f
+                    (overlapH / maxH) >= 0.45f || abs(existing.centerY - box.centerY) < minH * 0.35f
                 }
             }
             if (targetRow != null) {
@@ -898,14 +1076,64 @@ object MangaBfsPanelSlicer {
         }
 
         rows.sortBy { row -> row.minOf { it.top } }
-        val result = ArrayList<MangaNormalizedRect>(kept.size)
+        val result = ArrayList<MangaNormalizedRect>(boxes.size)
+        val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
+
         for (row in rows) {
-            when (readingOrder) {
-                MangaReadingOrder.RTL_MANGA -> row.sortByDescending { it.centerX }
-                MangaReadingOrder.LTR_COMIC,
-                MangaReadingOrder.WEBTOON_VERTICAL -> row.sortBy { it.centerX }
+            if (row.size <= 1) {
+                result += row
+                continue
             }
-            result += row
+            // Kahn's topological sort inside the row guarantees stacked panels in the same column
+            // always sort top-to-bottom while horizontally distinct panels sort strictly by RTL / LTR.
+            val n = row.size
+            val indegree = IntArray(n)
+            val adj = Array(n) { ArrayList<Int>() }
+            for (i in 0 until n) {
+                for (j in i + 1 until n) {
+                    val a = row[i]
+                    val b = row[j]
+                    val overlapW = (min(a.right, b.right) - max(a.left, b.left)).coerceAtLeast(0f)
+                    val minW = min(a.width, b.width).coerceAtLeast(0.01f)
+                    val minH = min(a.height, b.height).coerceAtLeast(0.01f)
+                    val sameColumn = (overlapW / minW) >= 0.35f && abs(a.centerY - b.centerY) > minH * 0.25f
+                    if (sameColumn) {
+                        if (a.top <= b.top) {
+                            adj[i] += j; indegree[j]++
+                        } else {
+                            adj[j] += i; indegree[i]++
+                        }
+                    } else if (rtl) {
+                        if (a.centerX >= b.centerX) {
+                            adj[i] += j; indegree[j]++
+                        } else {
+                            adj[j] += i; indegree[i]++
+                        }
+                    } else {
+                        if (a.centerX <= b.centerX) {
+                            adj[i] += j; indegree[j]++
+                        } else {
+                            adj[j] += i; indegree[i]++
+                        }
+                    }
+                }
+            }
+            val done = BooleanArray(n)
+            repeat(n) {
+                val ready = (0 until n).filter { !done[it] && indegree[it] == 0 }
+                val pool = ready.ifEmpty { (0 until n).filter { !done[it] } }
+                val pick = pool.minWith(
+                    compareBy<Int>(
+                        { row[it].top },
+                        { if (rtl) -row[it].centerX else row[it].centerX }
+                    )
+                )
+                done[pick] = true
+                result += row[pick]
+                for (nxt in adj[pick]) {
+                    indegree[nxt] = (indegree[nxt] - 1).coerceAtLeast(0)
+                }
+            }
         }
         return result
     }
@@ -1050,58 +1278,7 @@ object MangaVisionResponseParser {
                     val mood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                     val panelThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                     val linesArr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: JsonArray(emptyList())
-
-                    val parsedLines = linesArr.mapIndexedNotNull { lIdx, lElem ->
-                        val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
-                        val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
-                            ?.contentOrNull.orEmpty().trim()
-                        if (rawText.isEmpty()) return@mapIndexedNotNull null
-                        val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
-                            ?.contentOrNull.orEmpty().trim()
-                            .ifEmpty { "UNKNOWN" }
-                        val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
-                        val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
-                        val gender = when {
-                            genderStr.startsWith("f") -> VoiceGender.FEMALE
-                            genderStr.startsWith("m") -> VoiceGender.MALE
-                            else -> VoiceGender.ANDROGYNOUS
-                        }
-                        val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                        val designPrompt = ((lObj["voice_design_prompt"] ?: lObj["voice_prompt"]) as? JsonPrimitive)
-                            ?.contentOrNull.orEmpty().trim()
-                        val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                            .ifEmpty { "neutral" }
-                        val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.88f
-                        val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
-                        val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
-                            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
-                            .orEmpty()
-                        val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
-                            speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
-                            speakerRaw == "?"
-                        val needsDecision = ambiguousSpeaker || conf < 0.55f
-                        val reason = when {
-                            ambiguousSpeaker -> "Gemma flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
-                            conf < 0.55f -> "Low Gemma confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
-                            else -> ""
-                        }
-                        val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
-
-                        DiscoveredLineSpec(
-                            bubbleIndex = bubbleNum,
-                            speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
-                            isNewCharacter = isNew && !ambiguousSpeaker,
-                            gender = gender,
-                            visualDescription = visualDesc,
-                            voiceDesignPrompt = designPrompt,
-                            emotion = emotion,
-                            confidence = conf,
-                            candidateSpeakers = mergedCandidates,
-                            rawText = rawText,
-                            needsUserDecision = needsDecision,
-                            decisionReason = reason
-                        )
-                    }
+                    val parsedLines = parseLineSpecArray(linesArr, pIdx, knownNames)
                     DiscoveredPanelSpec(
                         panelIndex = pIdx,
                         sceneMood = mood,
@@ -1120,6 +1297,174 @@ object MangaVisionResponseParser {
         // Structured plain-text fallback if Gemma responded outside JSON
         val textFallback = parseStructuredTextFallback(cleaned, panelCount, existingCharacters, thoughtTrace)
         return textFallback ?: ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
+    }
+
+    /**
+     * Parses a focused single-panel VLM response, locking all discovered dialogue lines to [panelIndex]
+     * so bubbles never drift across panels even when scanning busy spreads panel-by-panel.
+     */
+    fun parseSinglePanelAnalysis(
+        rawResponse: String,
+        panelIndex: Int,
+        existingCharacters: List<MangaCharacterProfile>
+    ): DiscoveredPanelSpec {
+        var thoughtTrace = ""
+        var cleaned = rawResponse.trim()
+
+        val thoughtMatch = Regex("""<(?:thought|thinking)>([\s\S]*?)</(?:thought|thinking)>""", RegexOption.IGNORE_CASE)
+            .find(cleaned)
+        if (thoughtMatch != null) {
+            thoughtTrace = thoughtMatch.groupValues[1].trim()
+            cleaned = cleaned.replaceRange(thoughtMatch.range, "").trim()
+        }
+
+        cleaned = cleaned
+            .replace(Regex("""```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace("```", "")
+            .trim()
+
+        val objStart = cleaned.indexOf('{')
+        val objEnd = cleaned.lastIndexOf('}')
+        val arrStart = cleaned.indexOf('[')
+        val arrEnd = cleaned.lastIndexOf(']')
+        val knownNames = existingCharacters.map { it.name }.distinct()
+
+        val jsonCandidate: String? = when {
+            arrStart >= 0 && arrEnd > arrStart && (objStart < 0 || arrStart < objStart) ->
+                cleaned.substring(arrStart, arrEnd + 1)
+            objStart >= 0 && objEnd > objStart ->
+                cleaned.substring(objStart, objEnd + 1)
+            arrStart >= 0 && arrEnd > arrStart ->
+                cleaned.substring(arrStart, arrEnd + 1)
+            else -> null
+        }
+
+        var parsedMood = ""
+        var parsedThought = ""
+        var parsedLines: List<DiscoveredLineSpec> = emptyList()
+
+        if (jsonCandidate != null) {
+            val sanitized = cleanupTrailingCommas(jsonCandidate)
+            runCatching {
+                when (val elem = lenientJson.parseToJsonElement(sanitized)) {
+                    is JsonObject -> {
+                        parsedMood = ((elem["scene_mood"] ?: elem["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                        parsedThought = (elem["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                        val directLines = (elem["lines"] ?: elem["dialogue"]) as? JsonArray
+                        if (directLines != null) {
+                            parsedLines = parseLineSpecArray(directLines, panelIndex, knownNames)
+                        } else {
+                            val panelsArr = elem["panels"] as? JsonArray
+                            if (panelsArr != null) {
+                                val combined = ArrayList<DiscoveredLineSpec>()
+                                for (pElem in panelsArr) {
+                                    val pObj = pElem as? JsonObject ?: continue
+                                    if (parsedMood.isEmpty()) {
+                                        parsedMood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                                    }
+                                    if (parsedThought.isEmpty()) {
+                                        parsedThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                                    }
+                                    val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
+                                    combined += parseLineSpecArray(arr, panelIndex, knownNames)
+                                }
+                                parsedLines = combined
+                            }
+                        }
+                    }
+                    is JsonArray -> {
+                        val firstObj = elem.firstOrNull() as? JsonObject
+                        if (firstObj != null && (firstObj.containsKey("lines") || firstObj.containsKey("dialogue")) &&
+                            !firstObj.containsKey("text") && !firstObj.containsKey("speech")
+                        ) {
+                            val combined = ArrayList<DiscoveredLineSpec>()
+                            for (pElem in elem) {
+                                val pObj = pElem as? JsonObject ?: continue
+                                if (parsedMood.isEmpty()) {
+                                    parsedMood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                                }
+                                val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
+                                combined += parseLineSpecArray(arr, panelIndex, knownNames)
+                            }
+                            parsedLines = combined
+                        } else {
+                            parsedLines = parseLineSpecArray(elem, panelIndex, knownNames)
+                        }
+                    }
+                    else -> Unit
+                }
+            }
+        }
+
+        if (parsedLines.isEmpty()) {
+            val textFallback = parseStructuredTextFallback(cleaned, panelCount = 1, existingCharacters, thoughtTrace)
+            if (textFallback != null) {
+                parsedLines = textFallback.panels.flatMap { it.lines }
+            }
+        }
+
+        return DiscoveredPanelSpec(
+            panelIndex = panelIndex,
+            sceneMood = parsedMood.ifBlank { "manga_panel" },
+            thoughtTrace = parsedThought.ifBlank { thoughtTrace },
+            lines = parsedLines
+        )
+    }
+
+    private fun parseLineSpecArray(
+        linesArr: JsonArray,
+        pIdx: Int,
+        knownNames: List<String>
+    ): List<DiscoveredLineSpec> = linesArr.mapIndexedNotNull { lIdx, lElem ->
+        val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
+        val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
+            ?.contentOrNull.orEmpty().trim()
+        if (rawText.isEmpty()) return@mapIndexedNotNull null
+        val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
+            ?.contentOrNull.orEmpty().trim()
+            .ifEmpty { "UNKNOWN" }
+        val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
+        val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
+        val gender = when {
+            genderStr.startsWith("f") -> VoiceGender.FEMALE
+            genderStr.startsWith("m") -> VoiceGender.MALE
+            else -> VoiceGender.ANDROGYNOUS
+        }
+        val visualDesc = (lObj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+        val designPrompt = ((lObj["voice_design_prompt"] ?: lObj["voice_prompt"]) as? JsonPrimitive)
+            ?.contentOrNull.orEmpty().trim()
+        val emotion = (lObj["emotion"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            .ifEmpty { "neutral" }
+        val conf = (lObj["confidence"] as? JsonPrimitive)?.floatOrNull?.coerceIn(0f, 1f) ?: 0.88f
+        val bubbleNum = (lObj["bubble"] as? JsonPrimitive)?.intOrNull ?: (lIdx + 1)
+        val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
+            .orEmpty()
+        val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
+            speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
+            speakerRaw == "?"
+        val needsDecision = ambiguousSpeaker || conf < 0.55f
+        val reason = when {
+            ambiguousSpeaker -> "VLM flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
+            conf < 0.55f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
+            else -> ""
+        }
+        val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
+
+        DiscoveredLineSpec(
+            bubbleIndex = bubbleNum,
+            speakerName = if (ambiguousSpeaker) "UNKNOWN" else speakerRaw,
+            isNewCharacter = isNew && !ambiguousSpeaker,
+            gender = gender,
+            visualDescription = visualDesc,
+            voiceDesignPrompt = designPrompt,
+            emotion = emotion,
+            confidence = conf,
+            candidateSpeakers = mergedCandidates,
+            rawText = rawText,
+            needsUserDecision = needsDecision,
+            decisionReason = reason
+        )
     }
 
     fun parseVoiceDesignRoster(

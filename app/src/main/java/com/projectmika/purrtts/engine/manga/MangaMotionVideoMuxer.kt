@@ -70,8 +70,8 @@ object MangaMotionVideoMuxer {
 
     private const val TAG = "MangaMotionVideoMuxer"
     private const val FPS = 24
-    private const val ESTABLISH_HOLD_MS = 500L
-    private const val PAN_TRANSITION_MS = 320L
+    private const val ESTABLISH_HOLD_MS = 420L
+    private const val PAN_TRANSITION_MS = 380L
     private const val EGL_RECORDABLE_ANDROID = 0x3142
 
     data class RenderResult(
@@ -208,7 +208,7 @@ object MangaMotionVideoMuxer {
                 val panelStartMs = cursorMs
                 val timedLines = ArrayList<TimedDialogueSpan>(panel.lines.size)
                 if (panel.lines.isEmpty()) {
-                    val silentHold = 1800L
+                    val silentHold = 950L
                     audioSpans += AudioSpan(cursorMs, silentHold, null)
                     cursorMs += silentHold
                 } else {
@@ -540,8 +540,7 @@ object MangaMotionVideoMuxer {
             }
             is PanTransitionShot -> {
                 val rawT = ((timeMs - shot.startMs).toFloat() / (shot.endMs - shot.startMs).coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
-                val eased = easeInOutCubic(rawT)
-                viewportNorm = lerpRect(shot.fromRect, shot.toRect, eased)
+                viewportNorm = lerpRectWithZoomArc(shot.fromRect, shot.toRect, rawT)
                 atmosphere = shot.atmosphere
                 activeDialogue = null
                 camState = null
@@ -1026,6 +1025,27 @@ object MangaMotionVideoMuxer {
             right = a.right + (b.right - a.right) * t,
             bottom = a.bottom + (b.bottom - a.bottom) * t
         ).clamped()
+
+    private fun lerpRectWithZoomArc(
+        from: MangaNormalizedRect,
+        to: MangaNormalizedRect,
+        rawT: Float
+    ): MangaNormalizedRect {
+        val clampedT = rawT.coerceIn(0f, 1f)
+        val t = easeInOutCubic(clampedT)
+        val cx = from.centerX + (to.centerX - from.centerX) * t
+        val cy = from.centerY + (to.centerY - from.centerY) * t
+        val baseW = from.width + (to.width - from.width) * t
+        val baseH = from.height + (to.height - from.height) * t
+        val arcExpand = 1f + sin(clampedT * PI.toFloat()) * 0.10f
+        val halfW = (baseW * arcExpand) * 0.5f
+        val halfH = (baseH * arcExpand) * 0.5f
+        val l = (cx - halfW).coerceIn(0f, 0.98f)
+        val top = (cy - halfH).coerceIn(0f, 0.98f)
+        val r = (cx + halfW).coerceIn(l + 0.02f, 1f)
+        val b = (cy + halfH).coerceIn(top + 0.02f, 1f)
+        return MangaNormalizedRect(l, top, r, b).clamped()
+    }
 
     private fun publishMp4ToDownloads(context: Context, sourceFile: File, fileName: String): String = runCatching {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {

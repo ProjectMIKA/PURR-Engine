@@ -68,7 +68,7 @@ class PurrPremiumCatalogTest {
         val gemmaE2b = catalog.first { it.id == "sub_gemma4_e2b_vision" }
         assertTrue(gemmaE2b.isSubCartridge)
         assertEquals("tool_manga_dub_studio", gemmaE2b.parentCartridgeId)
-        assertEquals("RECOMMENDED", gemmaE2b.badge)
+        assertEquals("GEMMA4_E2B", gemmaE2b.badge)
         assertEquals(BackendType.LITERT_NPU_GPU, gemmaE2b.backend)
         assertTrue(gemmaE2b.downloadUrl.contains("gemma-4-E2B-it-gpu.litertlm"))
 
@@ -79,6 +79,19 @@ class PurrPremiumCatalogTest {
         assertEquals(3158, gemmaE4b.approximateSizeMb)
         assertEquals(BackendType.LITERT_NPU_GPU, gemmaE4b.backend)
         assertTrue(gemmaE4b.downloadUrl.contains("gemma-4-E4B-it-gpu.litertlm"))
+
+        val extraVisionIds = listOf(
+            "sub_qwen35_vl_2b_vision",
+            "sub_lfm25_vl_3b_vision",
+            "sub_qwen35_vl_08b_vision",
+            "sub_internvl3_1b_vision"
+        )
+        extraVisionIds.forEach { vid ->
+            val vSpec = catalog.first { it.id == vid }
+            assertTrue(vSpec.isSubCartridge)
+            assertEquals("tool_manga_dub_studio", vSpec.parentCartridgeId)
+            assertEquals(BackendType.LITERT_NPU_GPU, vSpec.backend)
+        }
     }
 
     @Test
