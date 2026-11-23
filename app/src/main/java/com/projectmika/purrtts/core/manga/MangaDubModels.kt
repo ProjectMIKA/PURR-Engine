@@ -1037,6 +1037,9 @@ object MangaBfsPanelSlicer {
         }
     }
 
+    private fun isGutterPixel(lum: Int, gutterMed: Int, tolerance: Int): Boolean =
+        abs(lum - gutterMed) <= tolerance || lum >= 238
+
     private fun findBestHorizontalCut(
         luminance: IntArray,
         width: Int,
@@ -1048,15 +1051,13 @@ object MangaBfsPanelSlicer {
         x1: Int,
         y1: Int
     ): GutterCut? {
+        val bw = x1 - x0
         val bh = y1 - y0
         val minMargin = max((height * 0.12f).toInt(), (bh * 0.15f).toInt())
-        if (bh < minMargin * 2 + 2) return null
-        val ix0 = min(x1 - 1, x0 + 2)
-        val ix1 = max(x0 + 1, x1 - 2)
-        val ibw = max(2, ix1 - ix0)
-        val midX = ix0 + ibw / 2
-        val w1 = max(1, midX - ix0).toFloat()
-        val w2 = max(1, ix1 - midX).toFloat()
+        if (bw < 4 || bh < minMargin * 2 + 2) return null
+        val midX = x0 + bw / 2
+        val w1 = max(1, midX - x0).toFloat()
+        val w2 = max(1, x1 - midX).toFloat()
         val gFrac = FloatArray(bh)
         val h1Frac = FloatArray(bh)
         val h2Frac = FloatArray(bh)
@@ -1064,19 +1065,26 @@ object MangaBfsPanelSlicer {
             val rowOff = (y0 + i) * width
             var c1 = 0
             var c2 = 0
-            for (x in ix0 until midX) {
-                val v = luminance[rowOff + x]
-                if (abs(v - gutterMed) <= tolerance || v >= 238) c1++
+            for (x in x0 until midX) {
+                if (isGutterPixel(luminance[rowOff + x], gutterMed, tolerance)) c1++
             }
-            for (x in midX until ix1) {
-                val v = luminance[rowOff + x]
-                if (abs(v - gutterMed) <= tolerance || v >= 238) c2++
+            for (x in midX until x1) {
+                if (isGutterPixel(luminance[rowOff + x], gutterMed, tolerance)) c2++
             }
             h1Frac[i] = c1 / w1
             h2Frac[i] = c2 / w2
-            gFrac[i] = (c1 + c2).toFloat() / ibw.toFloat()
+            gFrac[i] = (c1 + c2).toFloat() / bw.toFloat()
         }
         val cut = findBestGutterCut(bh, minMargin, gFrac, h1Frac, h2Frac) ?: return null
+        val cutsBothSideBorders = (0 until cut.len).any { k ->
+            val rowOff = (y0 + cut.start + k) * width
+            val leftDark = !isGutterPixel(luminance[rowOff + x0], gutterMed, tolerance) ||
+                (x0 + 1 < x1 && !isGutterPixel(luminance[rowOff + x0 + 1], gutterMed, tolerance))
+            val rightDark = !isGutterPixel(luminance[rowOff + x1 - 1], gutterMed, tolerance) ||
+                (x1 - 2 >= x0 && !isGutterPixel(luminance[rowOff + x1 - 2], gutterMed, tolerance))
+            leftDark && rightDark
+        }
+        if (cutsBothSideBorders) return null
         return GutterCut(y0 + cut.start, cut.len, cut.score)
     }
 
@@ -1092,14 +1100,12 @@ object MangaBfsPanelSlicer {
         y1: Int
     ): GutterCut? {
         val bw = x1 - x0
+        val bh = y1 - y0
         val minMargin = max((width * 0.16f).toInt(), (bw * 0.18f).toInt())
-        if (bw < minMargin * 2 + 2) return null
-        val iy0 = min(y1 - 1, y0 + 2)
-        val iy1 = max(y0 + 1, y1 - 2)
-        val ibh = max(2, iy1 - iy0)
-        val midY = iy0 + ibh / 2
-        val h1 = max(1, midY - iy0).toFloat()
-        val h2 = max(1, iy1 - midY).toFloat()
+        if (bh < 4 || bw < minMargin * 2 + 2) return null
+        val midY = y0 + bh / 2
+        val h1 = max(1, midY - y0).toFloat()
+        val h2 = max(1, y1 - midY).toFloat()
         val gFrac = FloatArray(bw)
         val h1Frac = FloatArray(bw)
         val h2Frac = FloatArray(bw)
@@ -1107,19 +1113,26 @@ object MangaBfsPanelSlicer {
             val x = x0 + i
             var c1 = 0
             var c2 = 0
-            for (y in iy0 until midY) {
-                val v = luminance[y * width + x]
-                if (abs(v - gutterMed) <= tolerance || v >= 238) c1++
+            for (y in y0 until midY) {
+                if (isGutterPixel(luminance[y * width + x], gutterMed, tolerance)) c1++
             }
-            for (y in midY until iy1) {
-                val v = luminance[y * width + x]
-                if (abs(v - gutterMed) <= tolerance || v >= 238) c2++
+            for (y in midY until y1) {
+                if (isGutterPixel(luminance[y * width + x], gutterMed, tolerance)) c2++
             }
             h1Frac[i] = c1 / h1
             h2Frac[i] = c2 / h2
-            gFrac[i] = (c1 + c2).toFloat() / ibh.toFloat()
+            gFrac[i] = (c1 + c2).toFloat() / bh.toFloat()
         }
         val cut = findBestGutterCut(bw, minMargin, gFrac, h1Frac, h2Frac) ?: return null
+        val cutsBothEndBorders = (0 until cut.len).any { k ->
+            val cx = x0 + cut.start + k
+            val topDark = !isGutterPixel(luminance[y0 * width + cx], gutterMed, tolerance) ||
+                (y0 + 1 < y1 && !isGutterPixel(luminance[(y0 + 1) * width + cx], gutterMed, tolerance))
+            val botDark = !isGutterPixel(luminance[(y1 - 1) * width + cx], gutterMed, tolerance) ||
+                (y1 - 2 >= y0 && !isGutterPixel(luminance[(y1 - 2) * width + cx], gutterMed, tolerance))
+            topDark && botDark
+        }
+        if (cutsBothEndBorders) return null
         return GutterCut(x0 + cut.start, cut.len, cut.score)
     }
 
@@ -1165,7 +1178,7 @@ object MangaBfsPanelSlicer {
             }
             val hasLeftBorder = leftMinG <= 0.55f
             val hasRightBorder = rightMinG <= 0.55f
-            val isWidePure = rLen >= 3 && avgG >= 0.98f
+            val isWidePure = rLen >= 3 && avgG >= 0.985f && (hasLeftBorder || hasRightBorder || avgG >= 0.995f)
             val isValid = (hasLeftBorder && hasRightBorder) ||
                 (peakG >= 0.96f && minHalfPeak >= 0.92f && (hasLeftBorder || hasRightBorder)) ||
                 isWidePure
