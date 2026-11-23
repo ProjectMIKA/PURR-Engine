@@ -99,6 +99,11 @@ class MangaDubStudioManager(
     )
     val selectedReadingOrder: StateFlow<MangaReadingOrder> = _selectedReadingOrder.asStateFlow()
 
+    private val _includeNonBubbleText = MutableStateFlow(
+        prefs.getBoolean("include_non_bubble_text", false)
+    )
+    val includeNonBubbleText: StateFlow<Boolean> = _includeNonBubbleText.asStateFlow()
+
     private val _projects = MutableStateFlow<List<MangaSeriesProject>>(emptyList())
     val projects: StateFlow<List<MangaSeriesProject>> = _projects.asStateFlow()
 
@@ -139,6 +144,14 @@ class MangaDubStudioManager(
         _selectedReadingOrder.value = order
         _activeProjectId.value?.let { pid ->
             updateProjectConfig(pid, readingOrder = order)
+        }
+    }
+
+    fun setIncludeNonBubbleText(include: Boolean) {
+        prefs.edit().putBoolean("include_non_bubble_text", include).apply()
+        _includeNonBubbleText.value = include
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(pid, includeNonBubbleText = include)
         }
     }
 
@@ -352,6 +365,7 @@ class MangaDubStudioManager(
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
+        includeNonBubbleText: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         onComplete: (String) -> Unit
     ) {
@@ -360,12 +374,15 @@ class MangaDubStudioManager(
             return
         }
         val effectiveVisionTier = preferredVisionModel ?: _selectedVisionModel.value
+        val effectiveIncludeNonBubble = includeNonBubbleText ?: _includeNonBubbleText.value
         prefs.edit()
             .putString("selected_vision_model", effectiveVisionTier.name)
             .putString("selected_reading_order", readingOrder.name)
+            .putBoolean("include_non_bubble_text", effectiveIncludeNonBubble)
             .apply()
         _selectedVisionModel.value = effectiveVisionTier
         _selectedReadingOrder.value = readingOrder
+        _includeNonBubbleText.value = effectiveIncludeNonBubble
 
         activeJob = scope.launch {
             _isBusy.value = true
@@ -400,6 +417,7 @@ class MangaDubStudioManager(
                     videoAspect = videoAspect ?: existingProject.videoAspect,
                     burnInSubtitles = burnInSubtitles ?: existingProject.burnInSubtitles,
                     videoQuality = videoQuality ?: existingProject.videoQuality,
+                    includeNonBubbleText = effectiveIncludeNonBubble,
                     preferredVisionModel = effectiveVisionTier,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
@@ -412,6 +430,7 @@ class MangaDubStudioManager(
                     videoAspect = videoAspect ?: MangaVideoAspect.VERTICAL_9_16,
                     burnInSubtitles = burnInSubtitles ?: true,
                     videoQuality = videoQuality ?: MangaVideoQuality.HD_720P,
+                    includeNonBubbleText = effectiveIncludeNonBubble,
                     preferredVisionModel = effectiveVisionTier,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
@@ -747,8 +766,10 @@ class MangaDubStudioManager(
         val updatedPages = ArrayList<MangaPageEntry>(ch.pages.size)
         val modelPaths = customVisionPaths()
 
-        val pageScanSpan = progressSpan * 0.78f
-        val castingOffset = progressOffset + pageScanSpan
+        val storyboardSpan = progressSpan * 0.08f
+        val pageScanOffset = progressOffset + storyboardSpan
+        val pageScanSpan = progressSpan * 0.70f
+        val castingOffset = pageScanOffset + pageScanSpan
         val castingSpan = progressSpan * 0.22f
 
         try {
@@ -756,13 +777,83 @@ class MangaDubStudioManager(
             if (proj.id == _activeProjectId.value && proj.preferredVisionModel != activeVisionTier) {
                 proj = proj.copy(preferredVisionModel = activeVisionTier)
             }
+            val effectiveIncludeNonBubble = proj.includeNonBubbleText
+
+            // Step 2A: Fast Storyboard Context Pass across chapter pages before zoomed panel OCR
+            val pageFiles = ch.pages.mapNotNull { pg ->
+                File(pg.localImagePath).takeIf { it.isFile }
+            }
+            var pageSynopses = emptyMap<Int, String>()
+            if (pageFiles.isNotEmpty()) {
+                reportTelemetry(
+                    stage = MangaPipelineStage.VISION_SCAN,
+                    detail = "🗺️ ${proj.preferredVisionModel.shortLabel} BUILDING CHAPTER STORYBOARD CONTEXT (${pageFiles.size} pg)...",
+                    progress = progressOffset + storyboardSpan * 0.35f,
+                    itemCurrent = 0,
+                    itemTotal = ch.pages.size,
+                    addLog = true
+                )
+                val bible = visionEngine.runChapterStoryboardPass(
+                    seriesTitle = proj.seriesTitle,
+                    pageFiles = pageFiles,
+                    readingOrder = ch.readingOrder,
+                    existingCharacters = roster,
+                    powerUserVisionUrl = proj.powerUserVisionUrl,
+                    preferredVisionModel = proj.preferredVisionModel,
+                    customModelPaths = modelPaths,
+                    onLog = { msg -> appendLog(msg) }
+                )
+                if (bible != null) {
+                    if (bible.storySummary.isNotBlank()) {
+                        proj = proj.copy(storyContextSummary = bible.storySummary)
+                        appendLog("🗺️ Storyboard: ${bible.storySummary.take(100)}")
+                    }
+                    pageSynopses = bible.pageSynopses
+                    val fallbackPageFile = pageFiles.firstOrNull()
+                    bible.characters.forEach { sbChar ->
+                        val canonicalName = sbChar.name.trim().uppercase()
+                        if (canonicalName.isNotEmpty() && roster.none { it.name.equals(canonicalName, ignoreCase = true) }) {
+                            val newCharId = "char_${sanitizeSlug(canonicalName)}_${roster.size + 1}"
+                            val avatarFile = File(charsDir, "$newCharId.jpg")
+                            if (fallbackPageFile != null) {
+                                cropPortraitFromPage(
+                                    fallbackPageFile,
+                                    MangaNormalizedRect(0.15f, 0.12f, 0.85f, 0.78f),
+                                    avatarFile
+                                )
+                            }
+                            val seeded = MangaCharacterProfile(
+                                id = newCharId,
+                                name = canonicalName,
+                                gender = sbChar.gender,
+                                visualDescription = sbChar.visualDescription.ifBlank { "Discovered in chapter storyboard" },
+                                avatarCropPath = if (avatarFile.isFile) avatarFile.absolutePath else "",
+                                voiceDesignPrompt = sbChar.voiceDesignPrompt.ifBlank {
+                                    "Expressive ${sbChar.gender.tag} anime character voice, clear dialogue pacing"
+                                }
+                            )
+                            roster += seeded
+                            appendLog("🗺️ Storyboard cast seeded: ${seeded.name} (${seeded.gender.tag})")
+                        }
+                    }
+                }
+            }
+
+            appendLog(
+                if (effectiveIncludeNonBubble) {
+                    "🧪 Experimental bubble filter OFF — processing SFX & non-bubble text too"
+                } else {
+                    "💬 Speech-bubble-only filter ON — skipping SFX, credits & signatures"
+                }
+            )
+
             for ((pageIdx, page) in ch.pages.withIndex()) {
                 if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
                 val tierNote = proj.preferredVisionModel.shortLabel
                 reportTelemetry(
                     stage = MangaPipelineStage.VISION_SCAN,
                     detail = "🧠 $tierNote SCANNING PAGE ${pageIdx + 1}/${ch.pages.size} (${ch.readingOrder.shortLabel})...",
-                    progress = progressOffset + pageScanSpan * (pageIdx.toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
+                    progress = pageScanOffset + pageScanSpan * (pageIdx.toFloat() / ch.pages.size.coerceAtLeast(1).toFloat()),
                     itemCurrent = pageIdx + 1,
                     itemTotal = ch.pages.size,
                     addLog = true
@@ -780,13 +871,16 @@ class MangaDubStudioManager(
                         powerUserVisionUrl = proj.powerUserVisionUrl,
                         preferredVisionModel = proj.preferredVisionModel,
                         customModelPaths = modelPaths,
+                        storySummary = proj.storyContextSummary,
+                        pageSynopsis = pageSynopses[pageIdx].orEmpty(),
+                        includeNonBubbleText = effectiveIncludeNonBubble,
                         onLog = { msg -> appendLog(msg) },
                         onPanelProgress = { panDone, panTotal, bubbleNote ->
                             val panFrac = (pageIdx.toFloat() + (panDone.toFloat() / panTotal.coerceAtLeast(1).toFloat())) / ch.pages.size.coerceAtLeast(1).toFloat()
                             reportTelemetry(
                                 stage = MangaPipelineStage.VISION_SCAN,
                                 detail = "🧠 $tierNote // P${pageIdx + 1}/${ch.pages.size} PANEL $panDone/$panTotal ($bubbleNote)",
-                                progress = progressOffset + pageScanSpan * panFrac,
+                                progress = pageScanOffset + pageScanSpan * panFrac,
                                 itemCurrent = pageIdx + 1,
                                 itemTotal = ch.pages.size,
                                 addLog = false
@@ -1174,6 +1268,7 @@ class MangaDubStudioManager(
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
         enableAtmosphereFx: Boolean? = null,
+        includeNonBubbleText: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         autoCookFullMp4: Boolean? = null,
@@ -1182,6 +1277,10 @@ class MangaDubStudioManager(
         if (readingOrder != null) {
             prefs.edit().putString("selected_reading_order", readingOrder.name).apply()
             _selectedReadingOrder.value = readingOrder
+        }
+        if (includeNonBubbleText != null) {
+            prefs.edit().putBoolean("include_non_bubble_text", includeNonBubbleText).apply()
+            _includeNonBubbleText.value = includeNonBubbleText
         }
         mutateProject(projectId) { proj ->
             val nextOrder = readingOrder ?: proj.readingOrder
@@ -1219,6 +1318,7 @@ class MangaDubStudioManager(
                 burnInSubtitles = burnInSubtitles ?: proj.burnInSubtitles,
                 videoQuality = videoQuality ?: proj.videoQuality,
                 enableAtmosphereFx = enableAtmosphereFx ?: proj.enableAtmosphereFx,
+                includeNonBubbleText = includeNonBubbleText ?: proj.includeNonBubbleText,
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
                 preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
                 autoCookFullMp4 = autoCookFullMp4 ?: proj.autoCookFullMp4,

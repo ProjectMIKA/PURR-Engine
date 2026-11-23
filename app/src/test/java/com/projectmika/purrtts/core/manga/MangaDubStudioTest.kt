@@ -653,4 +653,197 @@ class MangaDubStudioTest {
         assertTrue(split[0].bottom <= 0.50f)
         assertTrue(split[1].top >= 0.50f)
     }
+
+    @Test
+    fun `vertical aspect applies calmer zoom and pan motion scale than landscape and tightens wide pan trigger`() {
+        val defaultProj = MangaSeriesProject(
+            id = "p_motion",
+            seriesTitle = "Motion Scale Test",
+            createdAtEpochMs = 1L,
+            updatedAtEpochMs = 2L
+        )
+        assertFalse(defaultProj.includeNonBubbleText)
+
+        // Moderately wide box (1.67 aspect, width 0.60) should NOT trigger READING_AXIS_PAN in Vertical 9:16
+        val moderatePanel = MangaPanelNode(
+            id = "p_mod",
+            pageIndex = 0,
+            panelIndex = 0,
+            panelRect = MangaNormalizedRect(0.10f, 0.10f, 0.70f, 0.46f),
+            cameraStartRect = MangaNormalizedRect(0.10f, 0.10f, 0.70f, 0.46f),
+            cameraEndRect = MangaNormalizedRect(0.10f, 0.10f, 0.70f, 0.46f)
+        )
+        val modEffect = MangaDeterministicEffectsEngine.resolveCameraEffect(
+            moderatePanel,
+            totalPanelsOnPage = 3,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16
+        )
+        assertTrue(modEffect != MangaPanelCameraEffect.READING_AXIS_PAN)
+
+        val wideStrip = MangaPanelNode(
+            id = "p_strip",
+            pageIndex = 0,
+            panelIndex = 0,
+            panelRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            cameraStartRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            cameraEndRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f)
+        )
+        val portraitPush = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = wideStrip,
+            effect = MangaPanelCameraEffect.DRAMATIC_PUSH_IN,
+            progress = 1.0f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.5625f
+        )
+        val landscapePush = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = wideStrip,
+            effect = MangaPanelCameraEffect.DRAMATIC_PUSH_IN,
+            progress = 1.0f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.LANDSCAPE_16_9,
+            stageAspect = 1.7778f
+        )
+        assertTrue(portraitPush.zoomScale < landscapePush.zoomScale)
+        assertTrue(portraitPush.zoomScale <= 1.02f)
+
+        val portraitPan = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = wideStrip,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 0.5f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.5625f
+        )
+        val landscapePan = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = wideStrip,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 0.5f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.LANDSCAPE_16_9,
+            stageAspect = 0.65f
+        )
+        assertTrue(portraitPan.zoomScale < landscapePan.zoomScale)
+        assertTrue(portraitPan.zoomScale <= 1.16f)
+    }
+
+    @Test
+    fun `non-bubble SFX credits and signatures are filtered by default and preserved when experimental toggle enabled`() {
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("SFX", "Shaaa"))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "GULP"))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "BWO DO"))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("NARRATOR", "Scanlation by: JasmineTea, Dead-chan"))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "karateさんへ"))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("PROTAGONIST", "[SFX] CRASH!"))
+
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "One."))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "In two."))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("OJOU-SAMA", "Huh? Why?"))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("OJOU-SAMA", "A week?!"))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "So you did drink them all. You're crazy."))
+
+        val mixedPayload = """
+            {
+              "mood": "comedy panic",
+              "lines": [
+                {"bubble": 1, "is_speech_bubble": false, "speaker": "UNKNOWN", "text": "OH-HO HO HO"},
+                {"bubble": 2, "is_speech_bubble": true, "speaker": "SFX", "text": "BWO DO"},
+                {"bubble": 3, "is_speech_bubble": true, "speaker": "NARRATOR", "text": "Scanlation by: JasmineTea, Dead-chan"},
+                {"bubble": 4, "is_speech_bubble": true, "speaker": "UNKNOWN", "text": "karateさんへ"},
+                {"bubble": 5, "is_speech_bubble": true, "speaker": "SEBASTIAN", "gender": "male", "confidence": 0.94, "text": "The delayed-onset test items have all been emptied out, huh."}
+              ]
+            }
+        """.trimIndent()
+
+        val defaultFiltered = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = mixedPayload,
+            panelIndex = 2,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false
+        )
+        assertEquals(1, defaultFiltered.lines.size)
+        assertEquals("SEBASTIAN", defaultFiltered.lines.single().speakerName)
+        assertEquals(
+            "The delayed-onset test items have all been emptied out, huh.",
+            defaultFiltered.lines.single().rawText
+        )
+
+        val experimentalAll = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = mixedPayload,
+            panelIndex = 2,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = true
+        )
+        assertEquals(5, experimentalAll.lines.size)
+    }
+
+    @Test
+    fun `parseStoryboardPass extracts canonical cast and page synopses across multi-page sheet`() {
+        val storyboardJson = """
+            <thought>Page 1 towel girl is the same character named OJOU-SAMA on Page 2; rabbit butler is SEBASTIAN.</thought>
+            ```json
+            {
+              "story_summary": "Ojou-sama steps out of the bath, chugs delayed-onset test potions, and suddenly grows gigantic while Sebastian counts down.",
+              "characters": [
+                {
+                  "name": "ojou-sama",
+                  "gender": "female",
+                  "visual_description": "Young woman wearing a bath towel on Page 1 and dark skirt suit on Page 2",
+                  "voice_design_prompt": "Haughty playful anime ojou-sama soprano, cheerful laugh, sharp startled shriek"
+                },
+                {
+                  "name": "SEBASTIAN",
+                  "gender": "male",
+                  "visual_description": "White rabbit butler in lab coat and tie with spectacles",
+                  "voice_design_prompt": "Composed deadpan English-style butler baritone, dry understated delivery"
+                }
+              ],
+              "page_synopses": [
+                {"page": 1, "synopsis": "Ojou-sama exits the bath and drinks all test bottles before Sebastian notices."},
+                {"page": 2, "synopsis": "Sebastian counts to three and Ojou-sama balloons into a giant."}
+              ]
+            }
+            ```
+        """.trimIndent()
+
+        val bible = MangaVisionResponseParser.parseStoryboardPass(storyboardJson)
+        assertNotNull(bible)
+        assertTrue(bible!!.storySummary.contains("Ojou-sama"))
+        assertEquals(2, bible.characters.size)
+        assertEquals("OJOU-SAMA", bible.characters[0].name)
+        assertEquals(VoiceGender.FEMALE, bible.characters[0].gender)
+        assertEquals("SEBASTIAN", bible.characters[1].name)
+        assertEquals(VoiceGender.MALE, bible.characters[1].gender)
+        assertEquals(2, bible.pageSynopses.size)
+        assertTrue(bible.pageSynopses[0].orEmpty().contains("exits the bath"))
+        assertTrue(bible.pageSynopses[1].orEmpty().contains("giant"))
+    }
+
+    @Test
+    fun `splitCompositePanelBoxes recursively splits multi-level dense stacked panels`() {
+        val w = 120
+        val h = 120
+        val lum = IntArray(w * h) { 40 }
+        // Vertical gutter splitting left half from tall right splash panel (x = 58..61)
+        for (y in 0 until h) {
+            for (x in 58..61) {
+                lum[y * w + x] = 248
+            }
+        }
+        // Two horizontal gutters inside left half splitting 3 stacked panels (y = 38..40, y = 78..80)
+        for (x in 0..57) {
+            for (y in 38..40) lum[y * w + x] = 248
+            for (y in 78..80) lum[y * w + x] = 248
+        }
+        val mergedBox = MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f)
+        val split = MangaBfsPanelSlicer.splitCompositePanelBoxes(
+            boxes = listOf(mergedBox),
+            luminance = lum,
+            gutterMed = 248,
+            tolerance = 28,
+            width = w,
+            height = h
+        )
+        assertEquals(4, split.size)
+    }
 }

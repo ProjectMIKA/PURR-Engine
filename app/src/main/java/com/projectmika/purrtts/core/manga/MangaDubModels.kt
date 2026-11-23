@@ -334,6 +334,7 @@ data class MangaSeriesProject(
     val burnInSubtitles: Boolean = true,
     val videoQuality: MangaVideoQuality = MangaVideoQuality.HD_720P,
     val enableAtmosphereFx: Boolean = true,
+    val includeNonBubbleText: Boolean = false,
     val powerUserVisionUrl: String = "",
     val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
     val autoCookFullMp4: Boolean = true,
@@ -424,6 +425,61 @@ object MangaTextBender {
             out += "."
         }
         return out
+    }
+
+    private val NON_DIALOGUE_SPEAKERS = setOf(
+        "SFX", "SOUND", "SOUND EFFECT", "SOUND_EFFECT", "ONOMATOPOEIA",
+        "CREDIT", "CREDITS", "SCANLATION", "WATERMARK", "SIGN",
+        "BACKGROUND", "BG_TEXT", "FLOATING_TEXT", "SIGNATURE"
+    )
+
+    private val PURE_SFX_TOKENS = setOf(
+        "gulp", "bam", "pow", "wham", "crash", "smash", "thud", "thump",
+        "whoosh", "fwoosh", "swoosh", "splash", "clang", "clatter", "snap",
+        "rustle", "rumble", "menacing", "gasp", "pant", "puff", "huff",
+        "shiver", "tremble", "boing", "bonk", "splat", "squish", "slurp",
+        "munch", "chomp", "sfx", "clink", "clack", "creak", "crack",
+        "boom", "bang", "zip", "zap", "zing", "bwo", "bwodo"
+    )
+
+    /**
+     * Returns true when a raw OCR candidate is clearly a floating SFX, scanlation credit bar,
+     * URL watermark, or handwritten artist signature rather than spoken bubble dialogue.
+     */
+    fun isNonBubbleOrCreditNoise(speaker: String, rawText: String): Boolean {
+        val spNorm = speaker.trim().uppercase(Locale.ROOT)
+        if (spNorm in NON_DIALOGUE_SPEAKERS) return true
+        val t = rawText.trim()
+        if (t.isEmpty()) return true
+        val lower = t.lowercase(Locale.ROOT)
+
+        if (lower.startsWith("[sfx") || lower.startsWith("(sfx") ||
+            lower.startsWith("sfx:") || lower.startsWith("fx:") ||
+            lower.startsWith("*sfx") || lower.startsWith("tl:") ||
+            lower.startsWith("t/n:")
+        ) return true
+
+        if (listOf(
+                "scanlation", "scanlated", "typeset", "redraw",
+                "translated by", "cleaned by", "proofread by",
+                "brought to you by", "read more at", "https://", "http://"
+            ).any { it in lower }
+        ) return true
+
+        val hasKana = t.any { ch -> ch in '\u3040'..'\u309F' || ch in '\u30A0'..'\u30FF' }
+        val asciiLetters = t.count { it in 'a'..'z' || it in 'A'..'Z' }
+        if (lower.contains("さんへ") || (hasKana && asciiLetters <= 8)) return true
+
+        val stripped = lower.replace(Regex("[*\\[\\]()~—–\\-!?.…,\"']"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (stripped.isEmpty()) return true
+        val words = stripped.split(' ')
+        val isElongatedSfx = Regex("""^(?:sh+a+|f+w+o+s+h+|b+w+o+(?:\s+d+o+)?|k+r+a+k+|z+a+p+|g+r+r+|s+h+h+)$""")
+            .matches(stripped)
+        if (isElongatedSfx) return true
+        if (words.size <= 2 && words.all { it in PURE_SFX_TOKENS }) return true
+        return false
     }
 }
 
@@ -541,11 +597,11 @@ object MangaDeterministicEffectsEngine {
         }
 
         val wideInPortrait = videoAspect == MangaVideoAspect.VERTICAL_9_16 &&
-            panelAspect >= 1.35f &&
-            rect.width >= 0.50f
+            panelAspect >= 2.10f &&
+            rect.width >= 0.65f
         val tallInLandscape = videoAspect == MangaVideoAspect.LANDSCAPE_16_9 &&
-            panelAspect <= 0.70f &&
-            rect.height >= 0.50f
+            ((panelAspect <= 0.62f && rect.height >= 0.55f) ||
+                (panelAspect >= 2.35f && rect.width >= 0.72f))
         if (wideInPortrait || tallInLandscape) {
             return MangaPanelCameraEffect.READING_AXIS_PAN
         }
@@ -593,6 +649,9 @@ object MangaDeterministicEffectsEngine {
         val rect = panel.panelRect.clamped()
         val panelAspect = rect.width / rect.height.coerceAtLeast(0.05f)
         val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
+        // Portrait 9:16 uses noticeably gentler zoom/pan than Landscape 16:9 so panels stay steady and readable.
+        val motionScale = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 0.55f else 0.85f
+        val maxPanZoom = if (videoAspect == MangaVideoAspect.VERTICAL_9_16) 1.16f else 1.25f
 
         return when (resolvedEffect) {
             MangaPanelCameraEffect.READABILITY_HOLD -> {
@@ -605,7 +664,7 @@ object MangaDeterministicEffectsEngine {
             MangaPanelCameraEffect.READING_AXIS_PAN -> {
                 when {
                     panelAspect > stageAspect * 1.15f -> {
-                        val windowW = (rect.width * 0.72f).coerceIn(rect.width * 0.55f, rect.width)
+                        val windowW = (rect.width * (1f - 0.14f * motionScale)).coerceIn(rect.width * 0.78f, rect.width)
                         val minLeft = rect.left
                         val maxLeft = (rect.right - windowW).coerceAtLeast(rect.left)
                         val startLeft = if (rtl) maxLeft else minLeft
@@ -619,12 +678,12 @@ object MangaDeterministicEffectsEngine {
                         ).clamped()
                         PanelCameraFrameState(
                             sourceCropRect = crop,
-                            zoomScale = (rect.width / windowW).coerceIn(1.0f, 1.85f),
+                            zoomScale = (rect.width / windowW).coerceIn(1.0f, maxPanZoom),
                             panOffsetXFrac = ((crop.centerX - rect.centerX) / rect.width.coerceAtLeast(0.01f))
                         )
                     }
                     panelAspect < stageAspect * 0.85f -> {
-                        val windowH = (rect.height * 0.72f).coerceIn(rect.height * 0.55f, rect.height)
+                        val windowH = (rect.height * (1f - 0.14f * motionScale)).coerceIn(rect.height * 0.78f, rect.height)
                         val minTop = rect.top
                         val maxTop = (rect.bottom - windowH).coerceAtLeast(rect.top)
                         val curTop = minTop + (maxTop - minTop) * easedT
@@ -636,12 +695,12 @@ object MangaDeterministicEffectsEngine {
                         ).clamped()
                         PanelCameraFrameState(
                             sourceCropRect = crop,
-                            zoomScale = (rect.height / windowH).coerceIn(1.0f, 1.85f),
+                            zoomScale = (rect.height / windowH).coerceIn(1.0f, maxPanZoom),
                             panOffsetYFrac = ((crop.centerY - rect.centerY) / rect.height.coerceAtLeast(0.01f))
                         )
                     }
                     else -> {
-                        val dx = rect.width * 0.025f
+                        val dx = rect.width * (0.015f * motionScale)
                         val startL = if (rtl) rect.left + dx else rect.left
                         val endL = if (rtl) rect.left else rect.left + dx
                         val curL = startL + (endL - startL) * easedT
@@ -652,39 +711,39 @@ object MangaDeterministicEffectsEngine {
                                 right = curL + (rect.width - dx),
                                 bottom = rect.bottom
                             ).clamped(),
-                            zoomScale = 1.03f,
-                            panOffsetXFrac = if (rtl) 0.02f - 0.04f * easedT else -0.02f + 0.04f * easedT
+                            zoomScale = 1.0f + 0.018f * motionScale,
+                            panOffsetXFrac = if (rtl) (0.01f - 0.02f * easedT) * motionScale else (-0.01f + 0.02f * easedT) * motionScale
                         )
                     }
                 }
             }
 
             MangaPanelCameraEffect.DRAMATIC_PUSH_IN -> {
-                val insetFrac = 0.032f * easedT
+                val insetFrac = 0.018f * motionScale * easedT
                 PanelCameraFrameState(
                     sourceCropRect = insetRect(rect, insetFrac),
-                    zoomScale = 1.0f + 0.04f * easedT
+                    zoomScale = 1.0f + 0.024f * motionScale * easedT
                 )
             }
 
             MangaPanelCameraEffect.REVEAL_PULL_BACK -> {
-                val insetFrac = 0.045f * (1f - easedT)
+                val insetFrac = 0.024f * motionScale * (1f - easedT)
                 PanelCameraFrameState(
                     sourceCropRect = insetRect(rect, insetFrac),
-                    zoomScale = 1.06f - 0.06f * easedT
+                    zoomScale = 1.0f + 0.032f * motionScale * (1f - easedT)
                 )
             }
 
             MangaPanelCameraEffect.IMPACT_SHAKE_ZOOM -> {
                 val activeShake = rawT in 0f..0.28f
                 val decay = if (activeShake) kotlin.math.exp(-rawT * 9.0f) else 0f
-                val shakeX = if (activeShake) kotlin.math.sin(rawT * 52f) * 0.012f * decay else 0f
-                val shakeY = if (activeShake) kotlin.math.cos(rawT * 43f) * 0.009f * decay else 0f
+                val shakeX = if (activeShake) kotlin.math.sin(rawT * 52f) * (0.009f * motionScale) * decay else 0f
+                val shakeY = if (activeShake) kotlin.math.cos(rawT * 43f) * (0.007f * motionScale) * decay else 0f
                 val flash = if (rawT < 0.09f) (1f - rawT / 0.09f) * 0.25f else 0f
-                val microInset = 0.018f * (1f - easedT)
+                val microInset = 0.012f * motionScale * (1f - easedT)
                 PanelCameraFrameState(
                     sourceCropRect = insetRect(rect, microInset),
-                    zoomScale = if (activeShake) 1.04f else 1.01f,
+                    zoomScale = if (activeShake) 1.0f + 0.025f * motionScale else 1.0f + 0.008f * motionScale,
                     shakeOffsetXFrac = shakeX,
                     shakeOffsetYFrac = shakeY,
                     impactFlashAlpha = flash,
@@ -694,8 +753,8 @@ object MangaDeterministicEffectsEngine {
 
             MangaPanelCameraEffect.DIAGONAL_DRIFT,
             MangaPanelCameraEffect.AUTO -> {
-                val sx = rect.width * 0.015f
-                val sy = rect.height * 0.015f
+                val sx = rect.width * (0.009f * motionScale)
+                val sy = rect.height * (0.009f * motionScale)
                 val startRect = MangaNormalizedRect(
                     left = rect.left + if (rtl) sx * 0.8f else sx * 0.2f,
                     top = rect.top + sy * 0.2f,
@@ -716,9 +775,9 @@ object MangaDeterministicEffectsEngine {
                 ).clamped()
                 PanelCameraFrameState(
                     sourceCropRect = curCrop,
-                    zoomScale = 1.02f,
-                    panOffsetXFrac = if (rtl) 0.01f - 0.02f * easedT else -0.01f + 0.02f * easedT,
-                    panOffsetYFrac = -0.01f + 0.02f * easedT
+                    zoomScale = 1.0f + 0.014f * motionScale,
+                    panOffsetXFrac = (if (rtl) 0.006f - 0.012f * easedT else -0.006f + 0.012f * easedT) * motionScale,
+                    panOffsetYFrac = (-0.006f + 0.012f * easedT) * motionScale
                 )
             }
         }
@@ -955,10 +1014,11 @@ object MangaBfsPanelSlicer {
     ): List<MangaNormalizedRect> {
         if (width < 8 || height < 8 || luminance.size < width * height) return boxes
 
-        fun isGutterPx(idx: Int): Boolean = abs(luminance[idx] - gutterMed) <= tolerance
+        fun isGutterPx(idx: Int): Boolean =
+            abs(luminance[idx] - gutterMed) <= tolerance || luminance[idx] >= 235
 
         fun splitRecursive(box: MangaNormalizedRect, depth: Int): List<MangaNormalizedRect> {
-            if (depth >= 2 || (box.width < 0.42f && box.height < 0.42f)) return listOf(box)
+            if (depth >= 4 || (box.width < 0.26f && box.height < 0.26f)) return listOf(box)
             val x0 = (box.left * width).toInt().coerceIn(0, width - 1)
             val x1 = (box.right * width).toInt().coerceIn(x0 + 1, width)
             val y0 = (box.top * height).toInt().coerceIn(0, height - 1)
@@ -968,8 +1028,8 @@ object MangaBfsPanelSlicer {
             if (bw < 6 || bh < 6) return listOf(box)
 
             // Try horizontal split across internal gutter band
-            if (box.height >= 0.42f) {
-                val marginY = max(2, (height * 0.14f).toInt())
+            if (box.height >= 0.26f) {
+                val marginY = max(2, (height * 0.11f).toInt())
                 val startY = y0 + marginY
                 val endY = y1 - marginY
                 var runStart = -1
@@ -981,7 +1041,7 @@ object MangaBfsPanelSlicer {
                     for (x in x0 until x1) {
                         if (isGutterPx(rowOff + x)) gCount++
                     }
-                    val isGutterRow = gCount >= (bw * 0.88f).toInt()
+                    val isGutterRow = gCount >= (bw * 0.82f).toInt()
                     if (isGutterRow) {
                         if (runStart < 0) runStart = y
                         val len = y - runStart + 1
@@ -994,9 +1054,9 @@ object MangaBfsPanelSlicer {
                     }
                 }
                 if (bestLen >= 2 && bestStart >= startY) {
-                    val topFrac = (bestStart.toFloat() / height.toFloat()).coerceIn(box.top + 0.14f, box.bottom - 0.14f)
-                    val botFrac = ((bestStart + bestLen).toFloat() / height.toFloat()).coerceIn(topFrac, box.bottom - 0.14f)
-                    if (topFrac - box.top >= 0.14f && box.bottom - botFrac >= 0.14f) {
+                    val topFrac = (bestStart.toFloat() / height.toFloat()).coerceIn(box.top + 0.11f, box.bottom - 0.11f)
+                    val botFrac = ((bestStart + bestLen).toFloat() / height.toFloat()).coerceIn(topFrac, box.bottom - 0.11f)
+                    if (topFrac - box.top >= 0.11f && box.bottom - botFrac >= 0.11f) {
                         val upper = MangaNormalizedRect(box.left, box.top, box.right, topFrac).clamped()
                         val lower = MangaNormalizedRect(box.left, botFrac, box.right, box.bottom).clamped()
                         return splitRecursive(upper, depth + 1) + splitRecursive(lower, depth + 1)
@@ -1005,8 +1065,8 @@ object MangaBfsPanelSlicer {
             }
 
             // Try vertical split across internal gutter band
-            if (box.width >= 0.42f) {
-                val marginX = max(2, (width * 0.14f).toInt())
+            if (box.width >= 0.26f) {
+                val marginX = max(2, (width * 0.11f).toInt())
                 val startX = x0 + marginX
                 val endX = x1 - marginX
                 var runStart = -1
@@ -1017,7 +1077,7 @@ object MangaBfsPanelSlicer {
                     for (y in y0 until y1) {
                         if (isGutterPx(y * width + x)) gCount++
                     }
-                    val isGutterCol = gCount >= (bh * 0.88f).toInt()
+                    val isGutterCol = gCount >= (bh * 0.82f).toInt()
                     if (isGutterCol) {
                         if (runStart < 0) runStart = x
                         val len = x - runStart + 1
@@ -1030,9 +1090,9 @@ object MangaBfsPanelSlicer {
                     }
                 }
                 if (bestLen >= 2 && bestStart >= startX) {
-                    val leftFrac = (bestStart.toFloat() / width.toFloat()).coerceIn(box.left + 0.14f, box.right - 0.14f)
-                    val rightFrac = ((bestStart + bestLen).toFloat() / width.toFloat()).coerceIn(leftFrac, box.right - 0.14f)
-                    if (leftFrac - box.left >= 0.14f && box.right - rightFrac >= 0.14f) {
+                    val leftFrac = (bestStart.toFloat() / width.toFloat()).coerceIn(box.left + 0.11f, box.right - 0.11f)
+                    val rightFrac = ((bestStart + bestLen).toFloat() / width.toFloat()).coerceIn(leftFrac, box.right - 0.11f)
+                    if (leftFrac - box.left >= 0.11f && box.right - rightFrac >= 0.11f) {
                         val leftBox = MangaNormalizedRect(box.left, box.top, leftFrac, box.bottom).clamped()
                         val rightBox = MangaNormalizedRect(rightFrac, box.top, box.right, box.bottom).clamped()
                         return splitRecursive(leftBox, depth + 1) + splitRecursive(rightBox, depth + 1)
@@ -1216,12 +1276,74 @@ object MangaVisionResponseParser {
         val panels: List<DiscoveredPanelSpec>
     )
 
+    data class ParsedStoryboardCharacter(
+        val name: String,
+        val gender: VoiceGender,
+        val visualDescription: String,
+        val voiceDesignPrompt: String
+    )
+
+    data class ParsedStoryboardBible(
+        val storySummary: String,
+        val characters: List<ParsedStoryboardCharacter>,
+        val pageSynopses: Map<Int, String>
+    )
+
     private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun parseStoryboardPass(rawResponse: String): ParsedStoryboardBible? {
+        var cleaned = rawResponse.trim()
+            .replace(Regex("""<(?:thought|thinking)>[\s\S]*?</(?:thought|thinking)>""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace("```", "")
+            .trim()
+        val objStart = cleaned.indexOf('{')
+        val objEnd = cleaned.lastIndexOf('}')
+        if (objStart < 0 || objEnd <= objStart) return null
+        val jsonSlice = cleanupTrailingCommas(cleaned.substring(objStart, objEnd + 1))
+
+        return runCatching {
+            val root = lenientJson.parseToJsonElement(jsonSlice) as? JsonObject ?: return@runCatching null
+            val summary = (root["story_summary"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            val chars = (root["characters"] as? JsonArray).orEmpty().mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                val rawName = ((obj["name"] ?: obj["speaker"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                if (rawName.isEmpty() || rawName.equals("UNKNOWN", ignoreCase = true)) return@mapNotNull null
+                val genderStr = (obj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase(Locale.ROOT)
+                val gender = when {
+                    genderStr.startsWith("f") -> VoiceGender.FEMALE
+                    genderStr.startsWith("m") -> VoiceGender.MALE
+                    else -> VoiceGender.ANDROGYNOUS
+                }
+                val vis = (obj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                val voicePrompt = ((obj["voice_design_prompt"] ?: obj["voice_prompt"]) as? JsonPrimitive)
+                    ?.contentOrNull.orEmpty().trim()
+                ParsedStoryboardCharacter(
+                    name = rawName.uppercase(Locale.ROOT),
+                    gender = gender,
+                    visualDescription = vis,
+                    voiceDesignPrompt = voicePrompt
+                )
+            }
+            val synopses = LinkedHashMap<Int, String>()
+            (root["page_synopses"] as? JsonArray).orEmpty().forEach { elem ->
+                val obj = elem as? JsonObject ?: return@forEach
+                val pageNum = parsePanelNumber(obj["page"] ?: obj["page_number"]) ?: return@forEach
+                val syn = ((obj["synopsis"] ?: obj["summary"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                if (pageNum >= 1 && syn.isNotEmpty()) {
+                    synopses[pageNum - 1] = syn
+                }
+            }
+            if (summary.isBlank() && chars.isEmpty() && synopses.isEmpty()) null
+            else ParsedStoryboardBible(storySummary = summary, characters = chars, pageSynopses = synopses)
+        }.getOrNull()
+    }
 
     fun parsePageAnalysis(
         rawResponse: String,
         panelCount: Int,
-        existingCharacters: List<MangaCharacterProfile>
+        existingCharacters: List<MangaCharacterProfile>,
+        includeNonBubbleText: Boolean = false
     ): ParsedPageAnalysis {
         var thoughtTrace = ""
         var cleaned = rawResponse.trim()
@@ -1278,7 +1400,7 @@ object MangaVisionResponseParser {
                     val mood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                     val panelThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                     val linesArr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: JsonArray(emptyList())
-                    val parsedLines = parseLineSpecArray(linesArr, pIdx, knownNames)
+                    val parsedLines = parseLineSpecArray(linesArr, pIdx, knownNames, includeNonBubbleText)
                     DiscoveredPanelSpec(
                         panelIndex = pIdx,
                         sceneMood = mood,
@@ -1295,7 +1417,13 @@ object MangaVisionResponseParser {
         }
 
         // Structured plain-text fallback if Gemma responded outside JSON
-        val textFallback = parseStructuredTextFallback(cleaned, panelCount, existingCharacters, thoughtTrace)
+        val textFallback = parseStructuredTextFallback(
+            body = cleaned,
+            panelCount = panelCount,
+            existingCharacters = existingCharacters,
+            thoughtTrace = thoughtTrace,
+            includeNonBubbleText = includeNonBubbleText
+        )
         return textFallback ?: ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
     }
 
@@ -1306,7 +1434,8 @@ object MangaVisionResponseParser {
     fun parseSinglePanelAnalysis(
         rawResponse: String,
         panelIndex: Int,
-        existingCharacters: List<MangaCharacterProfile>
+        existingCharacters: List<MangaCharacterProfile>,
+        includeNonBubbleText: Boolean = false
     ): DiscoveredPanelSpec {
         var thoughtTrace = ""
         var cleaned = rawResponse.trim()
@@ -1352,7 +1481,7 @@ object MangaVisionResponseParser {
                         parsedThought = (elem["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                         val directLines = (elem["lines"] ?: elem["dialogue"]) as? JsonArray
                         if (directLines != null) {
-                            parsedLines = parseLineSpecArray(directLines, panelIndex, knownNames)
+                            parsedLines = parseLineSpecArray(directLines, panelIndex, knownNames, includeNonBubbleText)
                         } else {
                             val panelsArr = elem["panels"] as? JsonArray
                             if (panelsArr != null) {
@@ -1366,7 +1495,7 @@ object MangaVisionResponseParser {
                                         parsedThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                                     }
                                     val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
-                                    combined += parseLineSpecArray(arr, panelIndex, knownNames)
+                                    combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText)
                                 }
                                 parsedLines = combined
                             }
@@ -1384,11 +1513,11 @@ object MangaVisionResponseParser {
                                     parsedMood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                                 }
                                 val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
-                                combined += parseLineSpecArray(arr, panelIndex, knownNames)
+                                combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText)
                             }
                             parsedLines = combined
                         } else {
-                            parsedLines = parseLineSpecArray(elem, panelIndex, knownNames)
+                            parsedLines = parseLineSpecArray(elem, panelIndex, knownNames, includeNonBubbleText)
                         }
                     }
                     else -> Unit
@@ -1397,7 +1526,13 @@ object MangaVisionResponseParser {
         }
 
         if (parsedLines.isEmpty()) {
-            val textFallback = parseStructuredTextFallback(cleaned, panelCount = 1, existingCharacters, thoughtTrace)
+            val textFallback = parseStructuredTextFallback(
+                body = cleaned,
+                panelCount = 1,
+                existingCharacters = existingCharacters,
+                thoughtTrace = thoughtTrace,
+                includeNonBubbleText = includeNonBubbleText
+            )
             if (textFallback != null) {
                 parsedLines = textFallback.panels.flatMap { it.lines }
             }
@@ -1414,7 +1549,8 @@ object MangaVisionResponseParser {
     private fun parseLineSpecArray(
         linesArr: JsonArray,
         pIdx: Int,
-        knownNames: List<String>
+        knownNames: List<String>,
+        includeNonBubbleText: Boolean = false
     ): List<DiscoveredLineSpec> = linesArr.mapIndexedNotNull { lIdx, lElem ->
         val lObj = lElem as? JsonObject ?: return@mapIndexedNotNull null
         val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
@@ -1423,6 +1559,10 @@ object MangaVisionResponseParser {
         val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
             ?.contentOrNull.orEmpty().trim()
             .ifEmpty { "UNKNOWN" }
+        val isSpeechBubble = (lObj["is_speech_bubble"] as? JsonPrimitive)?.booleanOrNull ?: true
+        if (!includeNonBubbleText && (!isSpeechBubble || MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText))) {
+            return@mapIndexedNotNull null
+        }
         val isNew = (lObj["is_new_character"] as? JsonPrimitive)?.booleanOrNull ?: false
         val genderStr = (lObj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase()
         val gender = when {
@@ -1538,7 +1678,8 @@ object MangaVisionResponseParser {
         body: String,
         panelCount: Int,
         existingCharacters: List<MangaCharacterProfile>,
-        thoughtTrace: String
+        thoughtTrace: String,
+        includeNonBubbleText: Boolean = false
     ): ParsedPageAnalysis? {
         val knownNames = existingCharacters.map { it.name }.distinct()
         val lineRe = Regex("""^\s*(?:\[?P(\d+)\]?\s*[-:]\s*)?([A-Za-z0-9_ ]{2,22}):\s*["“]?(.+?)["”]?\s*$""")
@@ -1549,6 +1690,7 @@ object MangaVisionResponseParser {
             val speaker = m.groupValues[2].trim().uppercase()
             val text = m.groupValues[3].trim()
             if (text.length < 2 || speaker in setOf("THOUGHT", "MOOD", "SCENE", "SUMMARY")) return@forEach
+            if (!includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(speaker, text)) return@forEach
             val list = grouped.getOrPut(pIdx) { mutableListOf() }
             list += DiscoveredLineSpec(
                 bubbleIndex = list.size + 1,

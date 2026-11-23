@@ -208,7 +208,7 @@ object MangaMotionVideoMuxer {
                 val panelStartMs = cursorMs
                 val timedLines = ArrayList<TimedDialogueSpan>(panel.lines.size)
                 if (panel.lines.isEmpty()) {
-                    val silentHold = 950L
+                    val silentHold = 750L
                     audioSpans += AudioSpan(cursorMs, silentHold, null)
                     cursorMs += silentHold
                 } else {
@@ -540,7 +540,7 @@ object MangaMotionVideoMuxer {
             }
             is PanTransitionShot -> {
                 val rawT = ((timeMs - shot.startMs).toFloat() / (shot.endMs - shot.startMs).coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
-                viewportNorm = lerpRectWithZoomArc(shot.fromRect, shot.toRect, rawT)
+                viewportNorm = lerpRectWithZoomArc(shot.fromRect, shot.toRect, rawT, aspect)
                 atmosphere = shot.atmosphere
                 activeDialogue = null
                 camState = null
@@ -1029,7 +1029,8 @@ object MangaMotionVideoMuxer {
     private fun lerpRectWithZoomArc(
         from: MangaNormalizedRect,
         to: MangaNormalizedRect,
-        rawT: Float
+        rawT: Float,
+        aspect: MangaVideoAspect
     ): MangaNormalizedRect {
         val clampedT = rawT.coerceIn(0f, 1f)
         val t = easeInOutCubic(clampedT)
@@ -1037,7 +1038,8 @@ object MangaMotionVideoMuxer {
         val cy = from.centerY + (to.centerY - from.centerY) * t
         val baseW = from.width + (to.width - from.width) * t
         val baseH = from.height + (to.height - from.height) * t
-        val arcExpand = 1f + sin(clampedT * PI.toFloat()) * 0.10f
+        val peakArc = if (aspect == MangaVideoAspect.VERTICAL_9_16) 0.018f else 0.032f
+        val arcExpand = 1f + sin(clampedT * PI.toFloat()) * peakArc
         val halfW = (baseW * arcExpand) * 0.5f
         val halfH = (baseH * arcExpand) * 0.5f
         val l = (cx - halfW).coerceIn(0f, 0.98f)

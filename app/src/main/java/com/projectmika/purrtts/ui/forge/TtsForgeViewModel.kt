@@ -1814,12 +1814,19 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val selectedMangaReadingOrder: StateFlow<MangaReadingOrder>
         get() = mangaDubManager.selectedReadingOrder
 
+    val includeMangaNonBubbleText: StateFlow<Boolean>
+        get() = mangaDubManager.includeNonBubbleText
+
     fun selectMangaVisionModel(tier: MangaVisionModelTier) {
         mangaDubManager.setSelectedVisionModel(tier)
     }
 
     fun selectMangaReadingOrder(order: MangaReadingOrder) {
         mangaDubManager.setSelectedReadingOrder(order)
+    }
+
+    fun setMangaIncludeNonBubbleText(include: Boolean) {
+        mangaDubManager.setIncludeNonBubbleText(include)
     }
 
     fun importMangaCbz(
@@ -1832,6 +1839,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
+        includeNonBubbleText: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null
     ) {
         mangaDubManager.importCbzChapter(
@@ -1844,6 +1852,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             videoAspect = videoAspect,
             burnInSubtitles = burnInSubtitles,
             videoQuality = videoQuality,
+            includeNonBubbleText = includeNonBubbleText,
             preferredVisionModel = preferredVisionModel
         ) { msg ->
             showToast(msg)
@@ -1938,6 +1947,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
         enableAtmosphereFx: Boolean? = null,
+        includeNonBubbleText: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         autoCookFullMp4: Boolean? = null,
@@ -1949,6 +1959,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         burnInSubtitles = burnInSubtitles,
         videoQuality = videoQuality,
         enableAtmosphereFx = enableAtmosphereFx,
+        includeNonBubbleText = includeNonBubbleText,
         powerUserVisionUrl = powerUserVisionUrl,
         preferredVisionModel = preferredVisionModel,
         autoCookFullMp4 = autoCookFullMp4,

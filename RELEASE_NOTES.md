@@ -1,3 +1,27 @@
+# 🌌 PURR-TTS v1.9.4 // Storyboard Context Pass, Toned-Down Motion & Speech-Bubble-Only Filter
+
+### ✨ What's New since v1.9.3
+
+Eliminates dizzying over-zooming/panning (especially in **Portrait 9:16**), skips noisy SFX/scanlation credits by default while preserving an experimental toggle, and adds a whole-chapter **Storyboard Context Pass** so characters and plot stay consistent across every page! 🧠📖🎬
+
+* **🎬 Toned-Down Camera Zoom & Vertical-Aware Panning (`MangaDeterministicEffectsEngine` / `MangaMotionVideoMuxer`)**:
+  * Reduced subtle push-in / pull-back zoom margins to ~1–2% and gentle panning (Portrait **9:16** uses **0.55×** motion scale vs **0.85×** in Landscape **16:9**), raising the portrait wide-panel pan threshold (`>= 2.10` aspect ratio) and softening midpoint transition arcs (`0.018` Portrait / `0.032` Landscape) with snappier `750ms` silent panel holds.
+  * Increased recursive composite gutter splitting (`MangaBfsPanelSlicer`) up to 4 levels with bright (`luminance >= 235`) white-margin awareness so dense multi-subpanel pages break cleanly into calm individual framing.
+* **💬 Speech-Bubble-Only Default & Experimental SFX Toggle (`MangaDubModels` / `LiteRtGemmaVisionEngine` / UI)**:
+  * Skips sound effects (`Shaaa`, `GULP`, `BWO DO`), floating background laughs, scanlation credit bars (`Scanlation by:`), and handwritten signatures by default during cook sessions (`includeNonBubbleText = false`) via both VLM schema gating (`is_speech_bubble`) and deterministic pattern filtering (`isNonBubbleOrCreditNoise`).
+  * Power users can still opt back in via the **`EXPERIMENTAL: PROCESS NON-BUBBLE TEXT & SFX`** toggle in the Customize drawer.
+* **🗺️ Fast Chapter Storyboard Context Pass (`runChapterStoryboardPass`)**:
+  * Renders up to 6 chapter pages onto a single labeled `1024×1024` contact sheet right before per-panel OCR so the Vision LLM grasps the full chapter arc, canonical character names, outfits, and per-page synopses upfront — ending mid-chapter speaker identity drift across scene cuts.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.4_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `30`).
+2. **`PURR-TTS_V1.9.4.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.3 // Sticky Vision Model Picker, 6 VLMs, Per-Panel Crop OCR & Reading Direction UI
 
 ### ✨ What's New since v1.9.2

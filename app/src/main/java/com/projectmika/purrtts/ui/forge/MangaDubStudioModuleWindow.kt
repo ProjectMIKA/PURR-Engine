@@ -146,6 +146,8 @@ fun MangaDubStudioModuleWindowBody(
         mutableStateOf(activeProject?.videoQuality ?: MangaVideoQuality.HD_720P)
     }
     val selectedVisionTier by viewModel.selectedMangaVisionModel.collectAsState()
+    val globalIncludeNonBubbleText by viewModel.includeMangaNonBubbleText.collectAsState()
+    val includeNonBubbleText = activeProject?.includeNonBubbleText ?: globalIncludeNonBubbleText
     var autoCookFullMp4 by remember(activeProject?.id) {
         mutableStateOf(activeProject?.autoCookFullMp4 ?: true)
     }
@@ -154,6 +156,7 @@ fun MangaDubStudioModuleWindowBody(
     }
     var preProdTab by remember { mutableStateOf(MangaPreProdTab.CAST) }
     var selectedPageIdx by remember(activeChapter?.id) { mutableIntStateOf(0) }
+    var expandAdvancedSettings by remember { mutableStateOf(false) }
     var expandCustomizeDrawer by remember { mutableStateOf(false) }
     var expandPowerUser by remember { mutableStateOf(false) }
 
@@ -197,6 +200,7 @@ fun MangaDubStudioModuleWindowBody(
                 videoAspect = selectedVideoAspect,
                 burnInSubtitles = selectedBurnSubtitles,
                 videoQuality = selectedVideoQuality,
+                includeNonBubbleText = includeNonBubbleText,
                 preferredVisionModel = selectedVisionTier
             )
         }
@@ -649,6 +653,26 @@ fun MangaDubStudioModuleWindowBody(
                 }
             }
         }
+        Spacer(modifier = Modifier.height(6.dp))
+
+        ExpandableTerminalSection(
+            title = "ADVANCED_SCAN_SETTINGS",
+            expanded = expandAdvancedSettings,
+            onToggle = { expandAdvancedSettings = !expandAdvancedSettings },
+            accent = MikaColors.NeonPurple
+        ) {
+            SimplePurrToggle(
+                title = "EXPERIMENTAL: PROCESS NON-BUBBLE TEXT & SFX",
+                subtitle = "OFF by default (skips floating SFX like Shaaa/GULP, scanlation credits & signatures). Turn ON to dub everything.",
+                checked = includeNonBubbleText,
+                accent = MikaColors.NeonPurple,
+                icon = CyberIconType.BOLT_ACCEL,
+                onToggle = { checked ->
+                    viewModel.setMangaIncludeNonBubbleText(checked)
+                    activeProject?.let { viewModel.updateMangaProjectConfig(it.id, includeNonBubbleText = checked) }
+                }
+            )
+        }
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(
@@ -954,6 +978,17 @@ fun MangaDubStudioModuleWindowBody(
                     accent = MikaColors.SsrGold,
                     icon = CyberIconType.BOLT_ACCEL,
                     onToggle = { viewModel.updateMangaProjectConfig(activeProject.id, enableAtmosphereFx = it) }
+                )
+                SimplePurrToggle(
+                    title = "EXPERIMENTAL: PROCESS NON-BUBBLE TEXT & SFX",
+                    subtitle = "OFF by default (skips SFX, scanlation credits & signatures). Re-scan chapter after changing.",
+                    checked = activeProject.includeNonBubbleText,
+                    accent = MikaColors.NeonPurple,
+                    icon = CyberIconType.BOLT_ACCEL,
+                    onToggle = { checked ->
+                        viewModel.setMangaIncludeNonBubbleText(checked)
+                        viewModel.updateMangaProjectConfig(activeProject.id, includeNonBubbleText = checked)
+                    }
                 )
 
                 // 3 Pre-Production Tabs
