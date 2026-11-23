@@ -28,6 +28,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -47,6 +49,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.purr.CartridgeCategory
+import com.projectmika.purrtts.core.purr.CartridgeFilterMode
+import com.projectmika.purrtts.core.purr.CartridgeSortMode
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.ModelBundleState
@@ -64,20 +68,6 @@ import com.projectmika.purrtts.ui.theme.MikaTagPill
  * - Interactive Cyberdeck Motherboard Pin Rack Visualizer
  * - Physical Molded Cartridges with nested Expansion Sub-Cartridges (`SUB-02A/B` & `SUB-05A..F`)
  */
-private enum class CartridgeSortMode(val label: String) {
-    BAY_ORDER("BAY"),
-    NAME("NAME"),
-    SIZE("SIZE"),
-    NEWEST("NEWEST")
-}
-
-private enum class CartridgeFilterMode(val label: String) {
-    ALL("ALL"),
-    DOWNLOADED("INSTALLED"),
-    NOT_DOWNLOADED("UNINSTALLED"),
-    SLOTTED("SLOTTED")
-}
-
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelCatalogTab(
@@ -116,8 +106,8 @@ fun ModelCatalogTab(
                 forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED
         }
     }
-    var sortMode by remember { mutableStateOf(CartridgeSortMode.BAY_ORDER) }
-    var filterMode by remember { mutableStateOf(CartridgeFilterMode.ALL) }
+    val sortMode = forgeState.catalogSortMode
+    val filterMode = forgeState.catalogFilterMode
     val visibleCatalog = remember(categoryCatalog, sortMode, filterMode, forgeState.modelStates, forgeState.slottedCartridges) {
         val filtered = categoryCatalog.filter { spec ->
             val installed = isSpecOrStandaloneSubInstalled(spec)
@@ -162,7 +152,7 @@ fun ModelCatalogTab(
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (isTts) MikaColors.TerminalGreen.copy(alpha = 0.16f) else MikaColors.PanelBg)
-                    .border(1.5.dp, if (isTts) MikaColors.TerminalGreen else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                    .border(1.5.dp, if (isTts) MikaColors.TerminalGreen else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
                     .clickable { onSelectCategory(CartridgeCategory.TTS) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.Center,
@@ -185,7 +175,7 @@ fun ModelCatalogTab(
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (isCloning) MikaColors.NeonPurple.copy(alpha = 0.18f) else MikaColors.PanelBg)
-                    .border(1.5.dp, if (isCloning) MikaColors.NeonPurple else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                    .border(1.5.dp, if (isCloning) MikaColors.NeonPurple else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
                     .clickable { onSelectCategory(CartridgeCategory.CLONING) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.Center,
@@ -208,7 +198,7 @@ fun ModelCatalogTab(
                     .weight(1f)
                     .clip(RoundedCornerShape(6.dp))
                     .background(if (isTools) MikaColors.NeonPink.copy(alpha = 0.16f) else MikaColors.PanelBg)
-                    .border(1.5.dp, if (isTools) MikaColors.NeonPink else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                    .border(1.5.dp, if (isTools) MikaColors.NeonPink else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
                     .clickable { onSelectCategory(CartridgeCategory.TOOLS) }
                     .padding(vertical = 10.dp),
                 horizontalArrangement = Arrangement.Center,
@@ -278,8 +268,8 @@ fun ModelCatalogTab(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(Color(0xFF040207))
-                    .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(6.dp))
+                    .background(MikaColors.DeepWellBg)
+                    .border(1.dp, MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
                     .padding(horizontal = 6.dp, vertical = 8.dp),
                 verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
@@ -292,7 +282,7 @@ fun ModelCatalogTab(
                             val globalIdx = rowIdx * 8 + colIdx
                             val isInstalled = isSpecOrStandaloneSubInstalled(spec)
                             val isSlotted = spec.id in forgeState.slottedCartridges
-                            val accent = Color(spec.accentHex)
+                            val accent = MikaColors.resolveAccent(Color(spec.accentHex))
 
                             Column(
                                 modifier = Modifier
@@ -301,11 +291,11 @@ fun ModelCatalogTab(
                                     .clip(RoundedCornerShape(4.dp))
                                     .background(
                                         if (isSlotted) accent.copy(alpha = 0.22f)
-                                        else Color.White.copy(alpha = 0.03f)
+                                        else MikaColors.PrimaryText.copy(alpha = 0.04f)
                                     )
                                     .border(
                                         width = 1.dp,
-                                        color = if (isSlotted) accent else if (isInstalled) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.14f),
+                                        color = if (isSlotted) accent else if (isInstalled) accent.copy(alpha = 0.35f) else MikaColors.SubtleBorder,
                                         shape = RoundedCornerShape(4.dp)
                                     )
                                     .clickable {
@@ -324,7 +314,7 @@ fun ModelCatalogTab(
                                         .width(10.dp)
                                         .height(4.dp)
                                         .clip(RoundedCornerShape(2.dp))
-                                        .background(if (isSlotted) accent else Color.White.copy(alpha = 0.15f))
+                                        .background(if (isSlotted) accent else MikaColors.DimText.copy(alpha = 0.3f))
                                 )
                                 Text(
                                     text = when (selectedCategory) {
@@ -332,7 +322,7 @@ fun ModelCatalogTab(
                                         CartridgeCategory.CLONING -> "C${globalIdx + 1}"
                                         CartridgeCategory.TOOLS -> "T${globalIdx + 1}"
                                     },
-                                    color = if (isSlotted) Color.White else Color.White.copy(alpha = 0.35f),
+                                    color = if (isSlotted) MikaColors.PrimaryText else MikaColors.DimText,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
                                     fontSize = 8.sp
@@ -341,7 +331,7 @@ fun ModelCatalogTab(
                                     modifier = Modifier
                                         .fillMaxWidth(0.7f)
                                         .height(3.dp)
-                                        .background(if (isSlotted) MikaColors.SsrGold else Color.White.copy(alpha = 0.08f))
+                                        .background(if (isSlotted) MikaColors.SsrGold else MikaColors.SubtleBorder.copy(alpha = 0.45f))
                                 )
                             }
                         }
@@ -352,13 +342,13 @@ fun ModelCatalogTab(
                                         .weight(1f)
                                         .height(48.dp)
                                         .clip(RoundedCornerShape(4.dp))
-                                        .background(Color.White.copy(alpha = 0.015f))
-                                        .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(4.dp)),
+                                        .background(MikaColors.PrimaryText.copy(alpha = 0.02f))
+                                        .border(1.dp, MikaColors.SubtleBorder.copy(alpha = 0.45f), RoundedCornerShape(4.dp)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Text(
                                         text = "--",
-                                        color = Color.White.copy(alpha = 0.14f),
+                                        color = MikaColors.DimText.copy(alpha = 0.4f),
                                         fontFamily = FontFamily.Monospace,
                                         fontSize = 8.sp
                                     )
@@ -412,16 +402,18 @@ fun ModelCatalogTab(
             }
         }
 
-        // 1b. Compact Filter & Sort Controls
+        // 1b. Compact Filter & Sort Dropdown Controls (persisted across screen switches)
+        var filterMenuOpen by remember { mutableStateOf(false) }
+        var sortMenuOpen by remember { mutableStateOf(false) }
         MikaGlowPanel(accent = categoryAccent, contentPadding = 10.dp) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "> FILTER // ${visibleCatalog.size} OF ${categoryCatalog.size}",
+                        text = "> CATALOG_VIEW // ${visibleCatalog.size} OF ${categoryCatalog.size}",
                         color = categoryAccent,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
@@ -435,49 +427,149 @@ fun ModelCatalogTab(
                             fontWeight = FontWeight.Bold,
                             fontSize = 9.sp,
                             modifier = Modifier.clickable {
-                                filterMode = CartridgeFilterMode.ALL
-                                sortMode = CartridgeSortMode.BAY_ORDER
+                                viewModel.setCatalogFilterMode(CartridgeFilterMode.ALL)
+                                viewModel.setCatalogSortMode(CartridgeSortMode.BAY_ORDER)
                             }
-                        )
-                    }
-                }
-                FlowRow(
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    CartridgeFilterMode.entries.forEach { mode ->
-                        MikaTagPill(
-                            label = mode.label,
-                            selected = filterMode == mode,
-                            activeColor = categoryAccent,
-                            onClick = { filterMode = mode }
                         )
                     }
                 }
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "SORT:",
-                        color = MikaColors.DimText,
-                        fontFamily = FontFamily.Monospace,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 9.sp
-                    )
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(5.dp),
-                        verticalArrangement = Arrangement.spacedBy(5.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        CartridgeSortMode.entries.forEach { mode ->
-                            MikaTagPill(
-                                label = mode.label,
-                                selected = sortMode == mode,
-                                activeColor = MikaColors.SsrGold,
-                                onClick = { sortMode = mode }
+                    Box(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MikaColors.DeepWellBg)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (filterMode != CartridgeFilterMode.ALL) categoryAccent else MikaColors.SubtleBorder,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .clickable { filterMenuOpen = true }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "FILTER",
+                                    color = MikaColors.DimText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 8.sp
+                                )
+                                Text(
+                                    text = filterMode.label,
+                                    color = if (filterMode != CartridgeFilterMode.ALL) categoryAccent else MikaColors.PrimaryText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            MikaCyberIcon(
+                                type = if (filterMenuOpen) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
+                                tint = categoryAccent,
+                                size = 11.dp
                             )
+                        }
+                        DropdownMenu(
+                            expanded = filterMenuOpen,
+                            onDismissRequest = { filterMenuOpen = false },
+                            modifier = Modifier
+                                .background(MikaColors.PanelBg)
+                                .border(1.dp, categoryAccent.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        ) {
+                            CartridgeFilterMode.entries.forEach { mode ->
+                                val selected = mode == filterMode
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = if (selected) "✓ ${mode.label}" else mode.label,
+                                            color = if (selected) categoryAccent else MikaColors.PrimaryText,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                            fontSize = 10.sp
+                                        )
+                                    },
+                                    onClick = {
+                                        viewModel.setCatalogFilterMode(mode)
+                                        filterMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+
+                    Box(modifier = Modifier.weight(1f)) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MikaColors.DeepWellBg)
+                                .border(
+                                    width = 1.dp,
+                                    color = if (sortMode != CartridgeSortMode.BAY_ORDER) MikaColors.SsrGold else MikaColors.SubtleBorder,
+                                    shape = RoundedCornerShape(6.dp)
+                                )
+                                .clickable { sortMenuOpen = true }
+                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "SORT",
+                                    color = MikaColors.DimText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 8.sp
+                                )
+                                Text(
+                                    text = sortMode.label,
+                                    color = if (sortMode != CartridgeSortMode.BAY_ORDER) MikaColors.SsrGold else MikaColors.PrimaryText,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 10.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            MikaCyberIcon(
+                                type = if (sortMenuOpen) CyberIconType.CHEVRON_UP else CyberIconType.CHEVRON_DOWN,
+                                tint = MikaColors.SsrGold,
+                                size = 11.dp
+                            )
+                        }
+                        DropdownMenu(
+                            expanded = sortMenuOpen,
+                            onDismissRequest = { sortMenuOpen = false },
+                            modifier = Modifier
+                                .background(MikaColors.PanelBg)
+                                .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.5f), RoundedCornerShape(4.dp))
+                        ) {
+                            CartridgeSortMode.entries.forEach { mode ->
+                                val selected = mode == sortMode
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            text = if (selected) "✓ ${mode.label}" else mode.label,
+                                            color = if (selected) MikaColors.SsrGold else MikaColors.PrimaryText,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = if (selected) FontWeight.Black else FontWeight.Bold,
+                                            fontSize = 10.sp
+                                        )
+                                    },
+                                    onClick = {
+                                        viewModel.setCatalogSortMode(mode)
+                                        sortMenuOpen = false
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -502,7 +594,7 @@ fun ModelCatalogTab(
                         label = "SHOW ALL",
                         selected = true,
                         activeColor = MikaColors.MikaAmber,
-                        onClick = { filterMode = CartridgeFilterMode.ALL }
+                        onClick = { viewModel.setCatalogFilterMode(CartridgeFilterMode.ALL) }
                     )
                 }
             }
@@ -522,7 +614,7 @@ fun ModelCatalogTab(
             val isSlotted = isInstalled && spec.id in forgeState.slottedCartridges
             val isToolCartridge = spec.isBuiltInOsCartridge && (spec.category == CartridgeCategory.TOOLS || spec.id == "tool_clone_studio")
             val isCloningCartridge = spec.category == CartridgeCategory.CLONING
-            val accent = Color(spec.accentHex)
+            val accent = MikaColors.resolveAccent(Color(spec.accentHex))
             val sizeLabel = when {
                 isToolCartridge -> "OS_MODULE"
                 spec.isBuiltInOsCartridge -> "BUILT-IN"
@@ -541,13 +633,13 @@ fun ModelCatalogTab(
                         .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
                         .background(
                             Brush.verticalGradient(
-                                if (isSlotted) listOf(Color(0xFF27223A), Color(0xFF171326), Color(0xFF100D1C))
-                                else listOf(Color(0xFF171422), Color(0xFF0E0C16))
+                                if (isSlotted) listOf(MikaColors.HousingTop, MikaColors.CardViolet, MikaColors.PanelBg)
+                                else listOf(MikaColors.RaisedCardBg, MikaColors.PanelBg)
                             )
                         )
                         .border(
                             width = if (isSlotted) 2.dp else 1.5.dp,
-                            color = if (isSlotted) accent else Color.White.copy(alpha = 0.16f),
+                            color = if (isSlotted) accent else MikaColors.SubtleBorder,
                             shape = RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp)
                         )
                         .padding(start = 12.dp, end = 12.dp, top = 10.dp)
@@ -562,16 +654,16 @@ fun ModelCatalogTab(
                             modifier = Modifier
                                 .size(12.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF0A0812))
-                                .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape),
+                                .background(MikaColors.PanelBg)
+                                .border(1.dp, MikaColors.SubtleBorder, CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
-                            MikaCyberIcon(type = CyberIconType.SCREW_BOSS, tint = Color.White.copy(alpha = 0.35f), size = 9.dp)
+                            MikaCyberIcon(type = CyberIconType.SCREW_BOSS, tint = MikaColors.DimText, size = 9.dp)
                         }
                         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.12f)))
-                            Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.08f)))
-                            Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.12f)))
+                            Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else MikaColors.SubtleBorder))
+                            Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.22f) else MikaColors.SubtleBorder.copy(alpha = 0.6f)))
+                            Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else MikaColors.SubtleBorder))
                         }
                         Text(
                             text = when {
@@ -579,7 +671,7 @@ fun ModelCatalogTab(
                                 isCloningCartridge -> "M.I.K.A.-CLN"
                                 else -> "M.I.K.A.-ROM"
                             },
-                            color = if (isSlotted) accent else Color.White.copy(alpha = 0.3f),
+                            color = if (isSlotted) accent else MikaColors.DimText,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
                             fontSize = 8.sp,
@@ -594,10 +686,10 @@ fun ModelCatalogTab(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(6.dp))
-                            .background(if (isSlotted) accent.copy(alpha = 0.12f) else Color(0xFF08060E))
+                            .background(if (isSlotted) accent.copy(alpha = 0.12f) else MikaColors.DeepWellBg)
                             .border(
                                 1.dp,
-                                if (isSlotted) accent else Color.White.copy(alpha = 0.14f),
+                                if (isSlotted) accent else MikaColors.SubtleBorder,
                                 RoundedCornerShape(6.dp)
                             )
                     ) {
@@ -605,7 +697,7 @@ fun ModelCatalogTab(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(if (isSlotted) accent.copy(alpha = 0.85f) else Color.White.copy(alpha = 0.07f))
+                                .background(if (isSlotted) accent.copy(alpha = 0.85f) else MikaColors.PrimaryText.copy(alpha = 0.06f))
                                 .padding(horizontal = 10.dp, vertical = 5.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -613,18 +705,18 @@ fun ModelCatalogTab(
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                                 Text(
                                     text = spec.romCode,
-                                    color = if (isSlotted) MikaColors.VoidBg else Color.White.copy(alpha = 0.7f),
+                                    color = if (isSlotted) MikaColors.VoidBg else MikaColors.PrimaryText.copy(alpha = 0.78f),
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
                                     fontSize = 10.sp,
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(3.dp))
-                                        .background(if (isSlotted) Color.White.copy(alpha = 0.9f) else Color.Black.copy(alpha = 0.4f))
+                                        .background(if (isSlotted) MikaColors.PrimaryText.copy(alpha = 0.9f) else MikaColors.VoidBg.copy(alpha = 0.55f))
                                         .padding(horizontal = 5.dp, vertical = 1.dp)
                                 )
                                 Text(
                                     text = "// ${spec.badge} • $sizeLabel",
-                                    color = if (isSlotted) MikaColors.VoidBg else Color.White.copy(alpha = 0.55f),
+                                    color = if (isSlotted) MikaColors.VoidBg else MikaColors.DimText,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 9.sp
@@ -636,15 +728,15 @@ fun ModelCatalogTab(
                                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                                 modifier = Modifier
                                     .clip(RoundedCornerShape(3.dp))
-                                    .background(Color(0xFF07050C))
-                                    .border(1.dp, if (isSlotted) MikaColors.TerminalGreen else Color.White.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                                    .background(MikaColors.DeepWellBg)
+                                    .border(1.dp, if (isSlotted) MikaColors.TerminalGreen else MikaColors.SubtleBorder, RoundedCornerShape(3.dp))
                                     .padding(horizontal = 6.dp, vertical = 2.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
                                         .size(6.dp)
                                         .clip(CircleShape)
-                                        .background(if (isSlotted) MikaColors.TerminalGreen else if (isInstalled) MikaColors.MikaAmber else Color.White.copy(alpha = 0.25f))
+                                        .background(if (isSlotted) MikaColors.TerminalGreen else if (isInstalled) MikaColors.MikaAmber else MikaColors.DimText.copy(alpha = 0.45f))
                                 )
                                 Text(
                                     text = when {
@@ -655,7 +747,7 @@ fun ModelCatalogTab(
                                     color = when {
                                         isSlotted -> MikaColors.TerminalGreen
                                         isInstalled -> MikaColors.MikaAmber
-                                        else -> Color.White.copy(alpha = 0.5f)
+                                        else -> MikaColors.DimText
                                     },
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
@@ -671,7 +763,7 @@ fun ModelCatalogTab(
                         ) {
                             Text(
                                 text = spec.name,
-                                color = Color.White,
+                                color = MikaColors.PrimaryText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 13.sp
@@ -706,7 +798,7 @@ fun ModelCatalogTab(
                                     MikaCyberIcon(type = CyberIconType.CHECK, tint = accent, size = 11.dp)
                                     Text(
                                         text = spec.unlocksSummary,
-                                        color = if (isSlotted) Color.White else accent,
+                                        color = if (isSlotted) MikaColors.PrimaryText else accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 9.5.sp,
@@ -959,7 +1051,7 @@ fun ModelCatalogTab(
                             label = "subMenuBorder_${spec.id}"
                         )
                         val drawerBgColor by animateColorAsState(
-                            targetValue = if (isExpanded) Color(0xFF0A0716) else Color(0xFF07050E),
+                            targetValue = if (isExpanded) MikaColors.RaisedCardBg else MikaColors.DeepWellBg,
                             animationSpec = tween(220),
                             label = "subMenuBg_${spec.id}"
                         )
@@ -979,6 +1071,9 @@ fun ModelCatalogTab(
                                 "rom_qwen3_custom_06b" -> "QWEN3 SUB-MODULES (${childSubs.size})"
                                 "rom_kitten_tts" -> "KITTENTTS FULL-WEIGHT UPGRADE (${childSubs.size})"
                                 "rom_piper" -> "PIPER, MELOTTS & FLOW SUB-MODULES (${childSubs.size})"
+                                "rom_coqui_vits" -> "COQUI VITS LJSPEECH PACKS (${childSubs.size})"
+                                "rom_meta_mms" -> "META MMS LANGUAGE PACKS (${childSubs.size})"
+                                "rom_mimic3_neural" -> "MIMIC3 LANGUAGE PACKS (${childSubs.size})"
                                 else -> "SUB-MODULES FOR ${spec.romCode} (${childSubs.size})"
                             }
 
@@ -1120,7 +1215,10 @@ fun ModelCatalogTab(
                                         "rom_kitten_tts" -> "// Install 30MB Nano Base above OR Micro (42MB) / Mini 80M (64MB) below — all work standalone!"
                                         "rom_inflect_v2" -> "// Install Inflect v2 Nano (21MB) above OR Micro Studio (41MB) below!"
                                         "rom_icefall_vits" -> "// Install Icefall Medium (70MB) above OR Lite (30MB) below!"
-                                        "rom_piper" -> "// Pick Piper Lessac US above OR any standalone narrator pack (Amy, Ryan, Cori, Alba, GLaDOS, Kristin, MeloTTS, Supertonic 3, Matcha)."
+                                        "rom_piper" -> "// Pick Piper Lessac US above OR any standalone narrator pack (Amy, Ryan, Cori, Alba, GLaDOS, Kristin, Jenny UK, Alan UK, MeloTTS, Supertonic 3, Matcha)."
+                                        "rom_coqui_vits" -> "// Install Coqui VCTK 109-Speaker Hub above OR standalone Coqui LJSpeech / Neon AI Studio below!"
+                                        "rom_meta_mms" -> "// Install Meta MMS English above OR add Spanish, French & German language packs below!"
+                                        "rom_mimic3_neural" -> "// Install Mycroft Mimic3 Spanish above OR add Korean KSS (ko-KR) below!"
                                         else -> "// Expansion sub-cartridges for ${spec.romCode}:"
                                     }
                                     Text(
@@ -1154,7 +1252,7 @@ fun ModelCatalogTab(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF06040A))
+                            .background(MikaColors.DeepWellBg)
                             .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.3f))
                             .padding(horizontal = 8.dp, vertical = 3.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1175,8 +1273,8 @@ fun ModelCatalogTab(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
-                        .background(Color(0xFF090710))
-                        .border(1.dp, if (isSlotted) accent.copy(alpha = 0.7f) else Color.White.copy(alpha = 0.14f), RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
+                        .background(MikaColors.PanelBg)
+                        .border(1.dp, if (isSlotted) accent.copy(alpha = 0.7f) else MikaColors.SubtleBorder, RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp))
                         .padding(horizontal = 12.dp, vertical = 5.dp),
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
@@ -1229,15 +1327,15 @@ private fun SubCartridgeCard(
     isEnabled: Boolean,
     viewModel: TtsForgeViewModel
 ) {
-    val subAccent = Color(subSpec.accentHex)
+    val subAccent = MikaColors.resolveAccent(Color(subSpec.accentHex))
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(6.dp))
-            .background(if (isEnabled) subAccent.copy(alpha = 0.10f) else Color(0xFF0C0916))
+            .background(if (isEnabled) subAccent.copy(alpha = 0.10f) else MikaColors.PanelBg)
             .border(
                 width = if (isEnabled) 1.5.dp else 1.dp,
-                color = if (isEnabled) subAccent else Color.White.copy(alpha = 0.16f),
+                color = if (isEnabled) subAccent else MikaColors.SubtleBorder,
                 shape = RoundedCornerShape(6.dp)
             )
             .padding(9.dp),
@@ -1282,7 +1380,7 @@ private fun SubCartridgeCard(
 
         Text(
             text = subSpec.name,
-            color = Color.White,
+            color = MikaColors.PrimaryText,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
             fontSize = 11.sp

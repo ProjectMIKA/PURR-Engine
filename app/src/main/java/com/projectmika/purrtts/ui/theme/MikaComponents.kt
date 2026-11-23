@@ -104,43 +104,74 @@ fun MikaTerminalStage(
         label = "scanlineScroll"
     )
 
+    val stageGlow = MikaColors.GlowIntensity
+    val borderAlpha = if (MikaColors.IsNeonGlowMode) (0.28f + 0.25f * stageGlow).coerceAtMost(0.60f) else 0.08f
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(MikaColors.VoidBg)
-            .border(width = 1.dp, color = MikaColors.NeonCyan.copy(alpha = 0.08f))
+            .border(width = if (MikaColors.IsNeonGlowMode) 1.5.dp else 1.dp, color = MikaColors.NeonCyan.copy(alpha = borderAlpha))
     ) {
         content()
 
         Canvas(modifier = Modifier.fillMaxSize()) {
-            val stripeStep = 3.dp.toPx().coerceAtLeast(3f)
-            var y = 0f
-            val stripeColor = MikaColors.NeonCyan.copy(alpha = 0.016f)
-            while (y < size.height) {
-                drawLine(
-                    color = stripeColor,
-                    start = Offset(0f, y),
-                    end = Offset(size.width, y),
-                    strokeWidth = 1f
-                )
-                y += stripeStep
-            }
-
-            val bandHeight = 60.dp.toPx()
-            val bandTop = bandFraction * size.height
-            drawRect(
-                brush = Brush.verticalGradient(
-                    colors = listOf(
-                        Color.Transparent,
-                        MikaColors.NeonCyan.copy(alpha = 0.045f),
-                        Color.Transparent
+            if (MikaColors.IsNeonGlowMode) {
+                // Sleek ambient neon top/bottom edge luminescence in Neon Glow skin
+                val edgeAlpha = (0.12f * stageGlow).coerceIn(0.03f, 0.22f)
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            MikaColors.NeonCyan.copy(alpha = edgeAlpha),
+                            Color.Transparent
+                        ),
+                        startY = 0f,
+                        endY = 140.dp.toPx()
                     ),
-                    startY = bandTop,
-                    endY = bandTop + bandHeight
-                ),
-                topLeft = Offset(0f, bandTop),
-                size = Size(size.width, bandHeight)
-            )
+                    topLeft = Offset.Zero,
+                    size = Size(size.width, 140.dp.toPx())
+                )
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            MikaColors.NeonCyan.copy(alpha = edgeAlpha * 0.8f)
+                        ),
+                        startY = size.height - 120.dp.toPx(),
+                        endY = size.height
+                    ),
+                    topLeft = Offset(0f, size.height - 120.dp.toPx()),
+                    size = Size(size.width, 120.dp.toPx())
+                )
+            } else {
+                val stripeStep = 3.dp.toPx().coerceAtLeast(3f)
+                var y = 0f
+                val stripeColor = MikaColors.NeonCyan.copy(alpha = 0.016f)
+                while (y < size.height) {
+                    drawLine(
+                        color = stripeColor,
+                        start = Offset(0f, y),
+                        end = Offset(size.width, y),
+                        strokeWidth = 1f
+                    )
+                    y += stripeStep
+                }
+
+                val bandHeight = 60.dp.toPx()
+                val bandTop = bandFraction * size.height
+                drawRect(
+                    brush = Brush.verticalGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            MikaColors.NeonCyan.copy(alpha = 0.045f),
+                            Color.Transparent
+                        ),
+                        startY = bandTop,
+                        endY = bandTop + bandHeight
+                    ),
+                    topLeft = Offset(0f, bandTop),
+                    size = Size(size.width, bandHeight)
+                )
+            }
         }
     }
 }
@@ -286,10 +317,17 @@ fun MikaGlowPanel(
     contentPadding: Dp = 12.dp,
     content: @Composable ColumnScope.() -> Unit
 ) {
+    val effectiveAccent = MikaColors.resolveAccent(accent)
+    val glowMult = if (MikaColors.IsNeonGlowMode) (0.55f + 0.45f * MikaColors.GlowIntensity) else 1f
+    val borderAlpha = if (MikaColors.IsNeonGlowMode) (0.52f * glowMult).coerceIn(0.32f, 0.85f) else 0.30f
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(elevation = 8.dp, shape = RoundedCornerShape(cornerRadius), spotColor = accent.copy(alpha = 0.25f))
+            .shadow(
+                elevation = if (MikaColors.IsNeonGlowMode) 12.dp else 8.dp,
+                shape = RoundedCornerShape(cornerRadius),
+                spotColor = effectiveAccent.copy(alpha = if (MikaColors.IsNeonGlowMode) 0.45f * MikaColors.GlowIntensity else 0.25f)
+            )
             .clip(RoundedCornerShape(cornerRadius))
             .background(
                 Brush.verticalGradient(
@@ -299,7 +337,7 @@ fun MikaGlowPanel(
                     )
                 )
             )
-            .border(1.dp, accent.copy(alpha = 0.30f), RoundedCornerShape(cornerRadius))
+            .border(if (MikaColors.IsNeonGlowMode) 1.25.dp else 1.dp, effectiveAccent.copy(alpha = borderAlpha), RoundedCornerShape(cornerRadius))
             .padding(contentPadding),
         content = content
     )
@@ -851,7 +889,7 @@ fun MikaTagPill(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     activeColor: Color = MikaColors.TerminalGreen,
-    inactiveColor: Color = Color.White.copy(alpha = 0.45f),
+    inactiveColor: Color = MikaColors.DimText,
     leadingIcon: CyberIconType? = null,
     trailingIcon: CyberIconType? = null
 ) {
@@ -973,11 +1011,11 @@ fun CartridgeSlamOverlay(
         exit = fadeOut(tween(250))
     ) {
         if (spec != null) {
-            val accent = if (isInsert) Color(spec.accentHex) else MikaColors.DangerRed
+            val accent = if (isInsert) MikaColors.resolveAccent(Color(spec.accentHex)) else MikaColors.DangerRed
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xD805030A))
+                    .background(MikaColors.VoidBg.copy(alpha = 0.88f))
                     .clickable(onClick = onDismiss)
                     .padding(24.dp),
                 contentAlignment = Alignment.Center
@@ -993,7 +1031,7 @@ fun CartridgeSlamOverlay(
                             .clip(RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
                             .background(
                                 Brush.verticalGradient(
-                                    listOf(Color(0xFF252038), Color(0xFF141122), Color(0xFF0D0A18))
+                                    listOf(MikaColors.HousingTop, MikaColors.CardViolet, MikaColors.PanelBg)
                                 )
                             )
                             .border(2.dp, accent, RoundedCornerShape(topStart = 10.dp, topEnd = 10.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
@@ -1005,7 +1043,7 @@ fun CartridgeSlamOverlay(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .height(2.dp)
-                                        .background(Color.White.copy(alpha = 0.16f))
+                                        .background(MikaColors.PrimaryText.copy(alpha = 0.16f))
                                 )
                             }
                         }
@@ -1044,7 +1082,7 @@ fun CartridgeSlamOverlay(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = spec.name,
-                                color = Color.White,
+                                color = MikaColors.PrimaryText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 11.sp,
@@ -1053,7 +1091,7 @@ fun CartridgeSlamOverlay(
                             )
                             Text(
                                 text = spec.hardwareAccelNote,
-                                color = Color.White.copy(alpha = 0.7f),
+                                color = MikaColors.PrimaryText.copy(alpha = 0.7f),
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = 8.sp,
                                 maxLines = 1,
@@ -1091,7 +1129,7 @@ fun CartridgeSlamOverlay(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .background(Color(0xFF08060E))
+                                .background(MikaColors.DeepWellBg)
                                 .border(1.dp, MikaColors.SsrGold.copy(alpha = 0.35f))
                                 .padding(horizontal = 6.dp, vertical = 3.dp),
                             horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -1112,7 +1150,7 @@ fun CartridgeSlamOverlay(
                         modifier = Modifier
                             .width(260.dp)
                             .clip(RoundedCornerShape(4.dp))
-                            .background(Color(0xFF0A0812))
+                            .background(MikaColors.PanelBg)
                             .border(2.dp, accent, RoundedCornerShape(4.dp))
                             .padding(horizontal = 10.dp, vertical = 6.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1135,7 +1173,7 @@ fun CartridgeSlamOverlay(
                         }
                         Text(
                             text = "SLOT // ${spec.romCode}",
-                            color = Color.White.copy(alpha = 0.55f),
+                            color = MikaColors.DimText,
                             fontFamily = FontFamily.Monospace,
                             fontSize = 8.sp
                         )
@@ -1415,7 +1453,7 @@ fun MikaVoiceDropdownSelector(
                         Spacer(modifier = Modifier.height(3.dp))
                         Text(
                             text = selectedVoice.displayName,
-                            color = Color.White,
+                            color = MikaColors.PrimaryText,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
                             fontSize = 13.sp,
@@ -1466,7 +1504,7 @@ fun MikaVoiceDropdownSelector(
                     .fillMaxWidth()
                     .padding(top = 6.dp)
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color(0xFF06040C))
+                    .background(MikaColors.DeepWellBg)
                     .border(1.5.dp, accent.copy(alpha = 0.72f), RoundedCornerShape(8.dp))
                     .padding(10.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -1554,11 +1592,11 @@ fun MikaVoiceDropdownSelector(
                                     .clip(RoundedCornerShape(6.dp))
                                     .background(
                                         if (isSelected) accent.copy(alpha = 0.16f)
-                                        else Color.White.copy(alpha = 0.03f)
+                                        else MikaColors.PrimaryText.copy(alpha = 0.04f)
                                     )
                                     .border(
                                         width = if (isSelected) 1.dp else 0.5.dp,
-                                        color = if (isSelected) accent else Color.White.copy(alpha = 0.12f),
+                                        color = if (isSelected) accent else MikaColors.SubtleBorder,
                                         shape = RoundedCornerShape(6.dp)
                                     )
                                     .clickable {
@@ -1584,7 +1622,7 @@ fun MikaVoiceDropdownSelector(
                                     Column(modifier = Modifier.weight(1f)) {
                                         Text(
                                             text = voice.displayName,
-                                            color = if (isSelected) Color.White else MikaColors.CyanWhite,
+                                            color = if (isSelected) MikaColors.PrimaryText else MikaColors.CyanWhite,
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = if (isSelected) FontWeight.Black else FontWeight.Bold,
                                             fontSize = 11.sp,
@@ -1629,7 +1667,8 @@ enum class OsModuleIconType {
     CLONE_STUDIO,
     AUDIO_EXPORTER,
     VOICE_DESIGN,
-    AUDIOBOOK_CONSTRUCTOR
+    AUDIOBOOK_CONSTRUCTOR,
+    THEME_ENGINE
 }
 
 /**
@@ -1654,7 +1693,7 @@ fun MikaOsModuleIcon(
                 Brush.radialGradient(
                     colors = listOf(
                         accentColor.copy(alpha = 0.22f * activeAlpha),
-                        Color(0xFF07050D)
+                        MikaColors.PanelBg
                     )
                 )
             )
@@ -1855,6 +1894,37 @@ fun MikaOsModuleIcon(
                     drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.71f, h * 0.34f), Offset(w * 0.71f, h * 0.66f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
                     drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.80f, h * 0.44f), Offset(w * 0.80f, h * 0.58f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
                 }
+
+                OsModuleIconType.THEME_ENGINE -> {
+                    // Neon Theme Prism: outer glowing aperture ring, spectral quadrant nodes & inner diamond prism
+                    drawCircle(
+                        color = drawColor.copy(alpha = 0.35f),
+                        radius = w * 0.40f,
+                        center = Offset(w * 0.50f, h * 0.50f),
+                        style = thinStroke
+                    )
+                    val prism = Path().apply {
+                        moveTo(w * 0.50f, h * 0.16f)
+                        lineTo(w * 0.84f, h * 0.50f)
+                        lineTo(w * 0.50f, h * 0.84f)
+                        lineTo(w * 0.16f, h * 0.50f)
+                        close()
+                    }
+                    drawPath(prism, color = drawColor, style = stroke)
+                    val core = Path().apply {
+                        moveTo(w * 0.50f, h * 0.32f)
+                        lineTo(w * 0.68f, h * 0.50f)
+                        lineTo(w * 0.50f, h * 0.68f)
+                        lineTo(w * 0.32f, h * 0.50f)
+                        close()
+                    }
+                    drawPath(core, color = MikaColors.NeonCyan.copy(alpha = 0.85f * activeAlpha), style = thinStroke)
+                    val nodeR = (2.8f * s).dp.toPx()
+                    drawCircle(MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.50f, h * 0.16f))
+                    drawCircle(MikaColors.NeonPink.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.84f, h * 0.50f))
+                    drawCircle(MikaColors.TerminalGreen.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.50f, h * 0.84f))
+                    drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.16f, h * 0.50f))
+                }
             }
         }
     }
@@ -1898,8 +1968,8 @@ fun MikaBottomHudBar(
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF0E1622).copy(alpha = 0.64f),
-                            Color(0xFF060911).copy(alpha = 0.74f)
+                            MikaColors.RaisedCardBg.copy(alpha = 0.82f),
+                            MikaColors.PanelBg.copy(alpha = 0.90f)
                         )
                     )
                 )
@@ -1930,14 +2000,14 @@ fun MikaBottomHudBar(
                                 Brush.radialGradient(
                                     colors = listOf(
                                         accent.copy(alpha = 0.24f),
-                                        Color(0xFF090D16).copy(alpha = 0.72f)
+                                        MikaColors.DeepWellBg.copy(alpha = 0.86f)
                                     )
                                 )
                             } else {
                                 Brush.verticalGradient(
                                     colors = listOf(
-                                        Color(0xFF05070D).copy(alpha = 0.40f),
-                                        Color(0xFF05070D).copy(alpha = 0.55f)
+                                        MikaColors.VoidBg.copy(alpha = 0.45f),
+                                        MikaColors.VoidBg.copy(alpha = 0.62f)
                                     )
                                 )
                             }

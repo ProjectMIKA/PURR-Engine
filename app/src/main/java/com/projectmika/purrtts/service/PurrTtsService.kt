@@ -305,7 +305,8 @@ class PurrTtsService : TextToSpeechService() {
                 return base.copy(
                     primaryVoiceId = requestedVoice,
                     preferredBackend = match.engine,
-                    selectedCartridgeId = match.cartridgeId
+                    selectedCartridgeId = match.cartridgeId,
+                    sherpaFamily = match.sherpaFamily ?: base.sherpaFamily
                 )
             }
         }

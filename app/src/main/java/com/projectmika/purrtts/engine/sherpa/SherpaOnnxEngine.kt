@@ -78,6 +78,7 @@ class SherpaOnnxEngine(
     private var activeMountKey: String? = null
     private var activeSmartOffload: Boolean = false
     private var activeUsedNnapi: Boolean = false
+    private var lastMountError: String? = null
 
     val modelsBaseDir: File by lazy {
         File(context.filesDir, "models/sherpa").apply { mkdirs() }
@@ -143,11 +144,17 @@ class SherpaOnnxEngine(
                     subCartridgeId = voiceDesc?.requiredSubCartridgeId,
                     family = targetFamily
                 )
+                val mountReason = lastMountError
+                val summary = if (!mountReason.isNullOrBlank() && isFamilyInstalled(targetFamily, subCartridgeId)) {
+                    "$cartridgeLabel failed to mount: $mountReason"
+                } else {
+                    "$voiceLabel offline — $cartridgeLabel cartridge not installed (download it in Tab 3)"
+                }
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "$voiceLabel offline — $cartridgeLabel cartridge not installed (download it in Tab 3)",
+                    engineSummary = summary,
                     isFallbackNeuralPreview = true
                 )
             }
@@ -155,16 +162,34 @@ class SherpaOnnxEngine(
             val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
             val compensatedSpeed = (speakingRate / clampedPitch).coerceIn(0.6f, 1.8f)
             val speakerId = resolveSpeakerId(voiceId, targetFamily)
-            val generated = runCatching {
+            var genResult = runCatching {
                 tts.generate(text = text, sid = speakerId, speed = compensatedSpeed)
-            }.getOrNull()
+            }
+            var generated = genResult.getOrNull()
 
-            if (generated == null || generated.samples.isEmpty()) {
+            // Runtime NNAPI -> CPU fail-soft retry: some Android NNAPI drivers accept dynamic
+            // shapes at init time and only fail/return empty inside generate().
+            if ((generated == null || generated.samples.isEmpty()) && activeUsedNnapi) {
+                Log.w(TAG, "[NNAPI_FALLBACK] ${targetFamily.label} failed under NNAPI (${genResult.exceptionOrNull()?.message ?: "empty"}); reloading CPU")
+                ensureFamilyLoadedLocked(targetFamily, subCartridgeId, forceCpu = true)
+                activeOfflineTts?.let { cpuTts ->
+                    genResult = runCatching {
+                        cpuTts.generate(text = text, sid = speakerId, speed = compensatedSpeed)
+                    }
+                    generated = genResult.getOrNull()
+                }
+            }
+
+            val finalGenerated = generated
+            if (finalGenerated == null || finalGenerated.samples.isEmpty()) {
+                val errDetail = genResult.exceptionOrNull()?.message ?: lastMountError
+                val errSuffix = if (!errDetail.isNullOrBlank()) " ($errDetail)" else ""
+                Log.w(TAG, "[GEN_EMPTY] ${targetFamily.label} sub=$subCartridgeId sid=$speakerId$errSuffix")
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "${targetFamily.label} synthesis returned empty buffer",
+                    engineSummary = "${targetFamily.label} synthesis returned empty buffer$errSuffix",
                     isFallbackNeuralPreview = true
                 )
             }
@@ -176,8 +201,8 @@ class SherpaOnnxEngine(
             }
             _statusFlow.value = activeBadge
             val resampled = PurrDspProcessor.resampleMono(
-                samples = generated.samples,
-                fromRate = generated.sampleRate,
+                samples = finalGenerated.samples,
+                fromRate = finalGenerated.sampleRate,
                 toRate = SAMPLE_RATE_HZ
             )
             val suffix = if (activeSmartOffload) {
@@ -189,7 +214,7 @@ class SherpaOnnxEngine(
                 pcmFloat24k = PurrDspProcessor.shiftPitchCubic(resampled, clampedPitch),
                 sampleRateHz = SAMPLE_RATE_HZ,
                 hardwareBadge = activeBadge,
-                engineSummary = "sherpa-onnx • ${voiceDesc?.displayName ?: targetFamily.label} (${generated.sampleRate}Hz -> 24kHz)$suffix"
+                engineSummary = "sherpa-onnx • ${voiceDesc?.displayName ?: targetFamily.label} (${finalGenerated.sampleRate}Hz -> 24kHz)$suffix"
             )
         }
     }
@@ -221,7 +246,7 @@ class SherpaOnnxEngine(
             val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
             val compensatedSpeed = (speakingRate / clampedPitch).coerceIn(0.6f, 1.8f)
             val refSamples = loadWavMonoFloat24k(File(clonedVoice.referenceWavPath))
-            val generated = runCatching {
+            var genResult = runCatching {
                 if (refSamples.isNotEmpty()) {
                     val genCfg = GenerationConfig(
                         speed = compensatedSpeed,
@@ -233,14 +258,39 @@ class SherpaOnnxEngine(
                 } else {
                     tts.generate(text = text, sid = 0, speed = compensatedSpeed)
                 }
-            }.getOrNull()
+            }
+            var generated = genResult.getOrNull()
 
-            if (generated == null || generated.samples.isEmpty()) {
+            if ((generated == null || generated.samples.isEmpty()) && activeUsedNnapi) {
+                Log.w(TAG, "[NNAPI_FALLBACK] ${clonedVoice.family.label} clone failed under NNAPI; retrying CPU")
+                ensureFamilyLoadedLocked(clonedVoice.family, clonedVoice.resolvedCloneEngineId, forceCpu = true)
+                activeOfflineTts?.let { cpuTts ->
+                    genResult = runCatching {
+                        if (refSamples.isNotEmpty()) {
+                            val genCfg = GenerationConfig(
+                                speed = compensatedSpeed,
+                                referenceAudio = refSamples,
+                                referenceSampleRate = SAMPLE_RATE_HZ,
+                                referenceText = clonedVoice.referenceTranscript
+                            )
+                            cpuTts.generateWithConfig(text, genCfg)
+                        } else {
+                            cpuTts.generate(text = text, sid = 0, speed = compensatedSpeed)
+                        }
+                    }
+                    generated = genResult.getOrNull()
+                }
+            }
+
+            val finalGenerated = generated
+            if (finalGenerated == null || finalGenerated.samples.isEmpty()) {
+                val errDetail = genResult.exceptionOrNull()?.message ?: lastMountError
+                val errSuffix = if (!errDetail.isNullOrBlank()) " ($errDetail)" else ""
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "${clonedVoice.family.label} clone synthesis failed",
+                    engineSummary = "${clonedVoice.family.label} clone synthesis failed$errSuffix",
                     isFallbackNeuralPreview = true
                 )
             }
@@ -252,8 +302,8 @@ class SherpaOnnxEngine(
             }
             _statusFlow.value = activeBadge
             val resampled = PurrDspProcessor.resampleMono(
-                samples = generated.samples,
-                fromRate = generated.sampleRate,
+                samples = finalGenerated.samples,
+                fromRate = finalGenerated.sampleRate,
                 toRate = SAMPLE_RATE_HZ
             )
             val suffix = if (activeSmartOffload) {
@@ -305,7 +355,11 @@ class SherpaOnnxEngine(
         } else {
             File(modelsBaseDir, "zipvoice")
         }
-        SherpaModelFamily.MATCHA -> File(modelsBaseDir, "matcha")
+        SherpaModelFamily.MATCHA -> if (subCartridgeId != null && subCartridgeId != "rom_matcha_zh_en") {
+            File(modelsBaseDir, "matcha_$subCartridgeId")
+        } else {
+            File(modelsBaseDir, "matcha")
+        }
         SherpaModelFamily.MELO_TTS -> File(modelsBaseDir, "melo_${subCartridgeId ?: "sub_melo_en"}")
         SherpaModelFamily.PIPER -> if (subCartridgeId != null && subCartridgeId != "rom_piper") {
             File(modelsBaseDir, "piper_$subCartridgeId")
@@ -327,21 +381,27 @@ class SherpaOnnxEngine(
         return spec?.let { "${it.romCode} ${it.name}" } ?: family.label
     }
 
-    private fun ensureFamilyLoadedLocked(family: SherpaModelFamily, subCartridgeId: String? = null) {
+    private fun ensureFamilyLoadedLocked(
+        family: SherpaModelFamily,
+        subCartridgeId: String? = null,
+        forceCpu: Boolean = false
+    ) {
         val smartOffload = smartOffloadProvider()
-        val mountKey = "${subCartridgeId ?: family.name}|smart=$smartOffload"
+        val mountKey = "${subCartridgeId ?: family.name}|smart=$smartOffload|cpu=$forceCpu"
         if (activeOfflineTts != null && activeMountKey == mountKey) return
         runCatching { activeOfflineTts?.release() }
         activeOfflineTts = null
         activeMountKey = mountKey
         activeSmartOffload = smartOffload
         activeUsedNnapi = false
+        lastMountError = null
 
         val dir = familyDir(family, subCartridgeId)
         val files = dir.walkTopDown().filter { it.isFile }.toList()
         if (files.none { it.extension.equals("onnx", ignoreCase = true) }) {
             // ✨ TRUST RENEWAL (v1.8.1): say WHY the mount refused — support gold when a user
             // swears they downloaded a cartridge but every voice fail-softs to OS speech.
+            lastMountError = "Missing .onnx model under ${dir.name} (${files.size} files)"
             Log.w(TAG, "[MOUNT_MISS] family=$family sub=$subCartridgeId — no .onnx under ${dir.absolutePath} (${files.size} files present)")
             return
         }
@@ -466,8 +526,12 @@ class SherpaOnnxEngine(
             }
             SherpaModelFamily.PIPER,
             SherpaModelFamily.MELO_TTS -> {
-                val onnx = files.firstOrNull { it.extension.equals("onnx", ignoreCase = true) }?.absolutePath.orEmpty()
-                if (onnx.isEmpty()) {
+                val onnxFiles = files.filter { it.extension.equals("onnx", ignoreCase = true) }
+                val onnx = (onnxFiles.firstOrNull { it.name.contains("int8", ignoreCase = true) }
+                    ?: onnxFiles.firstOrNull())?.absolutePath.orEmpty()
+                if (onnx.isEmpty() || tokensPath.isEmpty()) {
+                    lastMountError = "Missing VITS asset (onnx=${onnx.isNotEmpty()}, tokens=${tokensPath.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError in ${dir.absolutePath}")
                     null
                 } else {
                     OfflineTtsModelConfig(
@@ -536,9 +600,15 @@ class SherpaOnnxEngine(
 
         val ruleFstsArg = if (family == SherpaModelFamily.KOKORO || family == SherpaModelFamily.MELO_TTS) ruleFsts else ""
 
-        // ✨ SMART HARDWARE OFFLOAD (v1.8.5): try NNAPI first when enabled & supported, always
-        // failing soft to ARM64 CPU if a model graph rejects NNAPI delegation.
-        if (smartOffload && hardwareProfile.hasNnapi) {
+        // ✨ SMART HARDWARE OFFLOAD (v1.8.5): try NNAPI first when enabled & supported on
+        // architectures with predictable shapes (Kokoro/Kitten/Supertonic/Pocket/ZipVoice).
+        // Skip dynamic-shape VITS/Melo/Matcha graphs where Android NNAPI frequently accepts
+        // session init and then produces empty buffers at generate().
+        val allowNnapi = !forceCpu &&
+            smartOffload &&
+            hardwareProfile.hasNnapi &&
+            family !in setOf(SherpaModelFamily.PIPER, SherpaModelFamily.MELO_TTS, SherpaModelFamily.MATCHA)
+        if (allowNnapi) {
             val nnapiCfg = buildConfigForProvider("nnapi") ?: return
             val nnapiAttempt = runCatching {
                 OfflineTts(assetManager = null, config = OfflineTtsConfig(model = nnapiCfg, ruleFsts = ruleFstsArg))
@@ -560,6 +630,7 @@ class SherpaOnnxEngine(
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
             Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")
         }.onFailure { err ->
+            lastMountError = err.message ?: "OfflineTts mount failed"
             Log.e(TAG, "Failed to mount sherpa-onnx ${family.label}: ${err.message}", err)
             activeOfflineTts = null
         }
@@ -616,14 +687,22 @@ class SherpaOnnxEngine(
     private fun inferFamilyFromVoice(voiceId: String, defaultFamily: SherpaModelFamily): SherpaModelFamily {
         val cleanId = voiceId.substringAfter(':')
         return when {
-            cleanId.matches(Regex("^[abjefhipz][fm]_[a-z]+$")) -> SherpaModelFamily.KOKORO
-            cleanId.contains("kitten", ignoreCase = true) || cleanId.startsWith("kmini_") -> SherpaModelFamily.KITTEN_TTS
+            cleanId.matches(Regex("^[abjefhipz][fm]_[a-z0-9]+$")) ||
+                cleanId.startsWith("fp32_") || cleanId.startsWith("v11_") -> SherpaModelFamily.KOKORO
+            cleanId.contains("kitten", ignoreCase = true) ||
+                cleanId.startsWith("kmini_") || cleanId.startsWith("kmicro_") -> SherpaModelFamily.KITTEN_TTS
             cleanId.contains("melo", ignoreCase = true) -> SherpaModelFamily.MELO_TTS
             cleanId.contains("supertonic", ignoreCase = true) -> SherpaModelFamily.SUPERTONIC_3
             cleanId.contains("pocket", ignoreCase = true) -> SherpaModelFamily.POCKET_TTS
             cleanId.contains("zipvoice", ignoreCase = true) -> SherpaModelFamily.ZIPVOICE
-            cleanId.contains("piper", ignoreCase = true) -> SherpaModelFamily.PIPER
             cleanId.contains("matcha", ignoreCase = true) -> SherpaModelFamily.MATCHA
+            cleanId.contains("piper", ignoreCase = true) ||
+                cleanId.startsWith("inflect_") ||
+                cleanId.startsWith("icefall_") ||
+                cleanId.startsWith("coqui_") ||
+                cleanId.startsWith("mms_") ||
+                cleanId.startsWith("vctk_") ||
+                cleanId.startsWith("mimic3_") -> SherpaModelFamily.PIPER
             else -> defaultFamily
         }
     }

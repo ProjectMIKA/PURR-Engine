@@ -131,6 +131,22 @@ enum class CartridgeCategory(val label: String) {
 }
 
 @Serializable
+enum class CartridgeSortMode(val label: String) {
+    BAY_ORDER("BAY"),
+    NAME("NAME"),
+    SIZE("SIZE"),
+    NEWEST("NEWEST")
+}
+
+@Serializable
+enum class CartridgeFilterMode(val label: String) {
+    ALL("ALL"),
+    DOWNLOADED("INSTALLED"),
+    NOT_DOWNLOADED("UNINSTALLED"),
+    SLOTTED("SLOTTED")
+}
+
+@Serializable
 enum class HardwareStatusBadge(val terminalLabel: String) {
     NPU_ACTIVE("[NPU ACTIVE]"),
     GPU_FP16("[GPU FP16]"),
@@ -523,6 +539,12 @@ data class PurrForgeState(
             state = DownloadState.INSTALLED,
             sha256Verified = true,
             localPath = "builtin://tool/audiobook_constructor"
+        ),
+        "tool_theme_engine" to ModelBundleState(
+            specId = "tool_theme_engine",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/theme_engine"
         )
     ),
     val slottedCartridges: Set<String> = setOf(
@@ -533,14 +555,20 @@ data class PurrForgeState(
         "tool_clone_studio",
         "tool_audio_exporter",
         "tool_voice_design",
-        "tool_audiobook_constructor"
+        "tool_audiobook_constructor",
+        "tool_theme_engine"
     ),
     val enabledSubCartridges: Set<String> = emptySet(),
     val savedVoiceDesigns: List<SavedVoiceDesign> = emptyList(),
-    val knownToolCatalogVersion: Int = 2,
+    val knownToolCatalogVersion: Int = 3,
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
     val seenTutorialVersion: Int = 0,
+    // ✨ PERSISTED CARTRIDGE BAY CONTROLS (v1.8.6)
+    val catalogSortMode: CartridgeSortMode = CartridgeSortMode.BAY_ORDER,
+    val catalogFilterMode: CartridgeFilterMode = CartridgeFilterMode.ALL,
+    // ✨ NEON THEME ENGINE (v1.8.6)
+    val themeConfig: PurrThemeConfig = PurrThemeConfig(),
     // ✨ SMART HARDWARE OFFLOAD (v1.8.5): experimental device-level toggle that probes the
     // SoC (Qualcomm Adreno/Hexagon, Tensor, Dimensity, generic ARM64) and automatically engages
     // the best supported acceleration path per engine (Adreno OpenCL GPU, Hexagon NPU / NNAPI
@@ -1116,6 +1144,42 @@ object PurrDefaultPresets {
                 requiredSubCartridgeId = "sub_piper_kristin"
             ),
             VoiceDescriptor(
+                id = "piper_jenny_uk",
+                displayName = "Piper VITS // Jenny Dioco (UK Velvet)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_piper",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-GB",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "british", "velvet", "warm", "piper"),
+                requiredSubCartridgeId = "sub_piper_jenny"
+            ),
+            VoiceDescriptor(
+                id = "piper_alan_uk",
+                displayName = "Piper VITS // Alan Medium (UK Narrator)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_piper",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.MALE,
+                languageCode = "en-GB",
+                speakerIndex = 0,
+                nativeTags = listOf("male", "british", "narrator", "calm", "piper"),
+                requiredSubCartridgeId = "sub_piper_alan"
+            ),
+            VoiceDescriptor(
+                id = "melo_zh_en",
+                displayName = "MeloTTS // Bilingual ZH+EN Studio",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_piper",
+                sherpaFamily = SherpaModelFamily.MELO_TTS,
+                gender = VoiceGender.FEMALE,
+                languageCode = "zh-CN",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "chinese", "english", "melotts", "bilingual"),
+                requiredSubCartridgeId = "sub_melo_zh_en"
+            ),
+            VoiceDescriptor(
                 id = "melo_en_us",
                 displayName = "MeloTTS // English US",
                 engine = BackendType.SHERPA_ONNX,
@@ -1269,7 +1333,84 @@ object PurrDefaultPresets {
             )
         )
 
-        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + sherpaSpecialized + heavyNativeVoices + proxyVoices
+        val coquiVctkVoices = listOf(
+            VoiceDescriptor("coqui_vctk_0", "Coqui VCTK // Speaker 0 (Scottish UK)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-GB", 0, listOf("female", "british", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_1", "Coqui VCTK // Speaker 1 (RP London)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-GB", 1, listOf("female", "british", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_2", "Coqui VCTK // Speaker 2 (Warm Studio)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.MALE, "en-GB", 2, listOf("male", "british", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_3", "Coqui VCTK // Speaker 3 (Crisp Alto)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-GB", 3, listOf("female", "british", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_4", "Coqui VCTK // Speaker 4 (Northern UK)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.MALE, "en-GB", 4, listOf("male", "british", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_5", "Coqui VCTK // Speaker 5 (US Bright)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-US", 5, listOf("female", "american", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_6", "Coqui VCTK // Speaker 6 (Canadian Clear)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.MALE, "en-US", 6, listOf("male", "american", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_7", "Coqui VCTK // Speaker 7 (Soft Irish)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-GB", 7, listOf("female", "british", "coqui", "vctk")),
+            VoiceDescriptor("coqui_vctk_8", "Coqui VCTK // Speaker 8 (Deep Baritone)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.MALE, "en-US", 8, listOf("male", "american", "deep", "coqui")),
+            VoiceDescriptor("coqui_vctk_9", "Coqui VCTK // Speaker 9 (Storyteller)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-US", 9, listOf("female", "american", "narrator", "coqui")),
+            VoiceDescriptor("coqui_ljspeech", "Coqui VITS // LJSpeech Studio (EN)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-US", 0, listOf("female", "american", "coqui", "narrator"), requiredSubCartridgeId = "sub_coqui_ljspeech"),
+            VoiceDescriptor("coqui_ljspeech_neon", "Coqui VITS // Neon AI LJSpeech (EN)", BackendType.SHERPA_ONNX, "rom_coqui_vits", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-US", 0, listOf("female", "american", "coqui", "neon"), requiredSubCartridgeId = "sub_coqui_ljspeech_neon")
+        )
+
+        val mmsVoices = listOf(
+            VoiceDescriptor("mms_eng", "Meta MMS // English Direct (EN)", BackendType.SHERPA_ONNX, "rom_meta_mms", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "en-US", 0, listOf("female", "english", "mms", "multilingual")),
+            VoiceDescriptor("mms_spa", "Meta MMS // Spanish (ES)", BackendType.SHERPA_ONNX, "rom_meta_mms", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "es-ES", 0, listOf("female", "spanish", "mms", "multilingual"), requiredSubCartridgeId = "sub_mms_spa"),
+            VoiceDescriptor("mms_fra", "Meta MMS // French (FR)", BackendType.SHERPA_ONNX, "rom_meta_mms", SherpaModelFamily.PIPER, VoiceGender.FEMALE, "fr-FR", 0, listOf("female", "french", "mms", "multilingual"), requiredSubCartridgeId = "sub_mms_fra"),
+            VoiceDescriptor("mms_deu", "Meta MMS // German (DE)", BackendType.SHERPA_ONNX, "rom_meta_mms", SherpaModelFamily.PIPER, VoiceGender.MALE, "de-DE", 0, listOf("male", "german", "mms", "multilingual"), requiredSubCartridgeId = "sub_mms_deu")
+        )
+
+        val vctkStudioVoices = (0..9).map { idx ->
+            val isFemale = idx % 2 == 0
+            VoiceDescriptor(
+                id = "vctk_s$idx",
+                displayName = "VCTK Lexicon // Studio Voice #$idx (${if (isFemale) "F" else "M"})",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_vctk_studio",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = if (isFemale) VoiceGender.FEMALE else VoiceGender.MALE,
+                languageCode = "en-GB",
+                speakerIndex = idx,
+                nativeTags = listOf(if (isFemale) "female" else "male", "british", "vctk", "lexicon")
+            )
+        }
+
+        val matchaEnVoices = listOf(
+            VoiceDescriptor(
+                id = "matcha_en_ljspeech",
+                displayName = "Matcha Flow EN // LJSpeech + 22kHz Vocos",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_matcha_en",
+                sherpaFamily = SherpaModelFamily.MATCHA,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "matcha", "flow", "narrator")
+            )
+        )
+
+        val mimic3Voices = listOf(
+            VoiceDescriptor(
+                id = "mimic3_es_mailabs",
+                displayName = "Mycroft Mimic3 // Spanish (ES Low)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_mimic3_neural",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "es-ES",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "spanish", "mimic3", "narrator")
+            ),
+            VoiceDescriptor(
+                id = "mimic3_ko_kss",
+                displayName = "Mycroft Mimic3 // Korean KSS (KR Low)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_mimic3_neural",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "ko-KR",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "korean", "mimic3"),
+                requiredSubCartridgeId = "sub_mimic3_ko"
+            )
+        )
+
+        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + sherpaSpecialized + heavyNativeVoices + proxyVoices
     }
 
     /**
@@ -1557,14 +1698,14 @@ object PurrDefaultPresets {
     }
 
     /**
-     * ✨ CLEAN 3-CATEGORY CARTRIDGE RACK (v1.8.5) ✨
-     * - `CartridgeCategory.TTS`: ROM-01..ROM-09 core speech synthesis hubs + nested sub-chips.
+     * ✨ CLEAN 3-CATEGORY CARTRIDGE RACK (v1.8.6) ✨
+     * - `CartridgeCategory.TTS`: ROM-01..ROM-14 core speech synthesis hubs + nested sub-chips.
      * - `CartridgeCategory.CLONING`: CLN-01..CLN-05 dedicated voice cloning engines & Clone Studio.
-     * - `CartridgeCategory.TOOLS`: TOOL-01..TOOL-06 built-in Cyberdeck OS modules.
+     * - `CartridgeCategory.TOOLS`: TOOL-01..TOOL-07 built-in Cyberdeck OS modules.
      */
     fun modelCatalog(): List<ModelBundleSpec> = listOf(
         // =========================================================================
-        // 9 MAIN TTS HUB CARTRIDGES (ROM-01 .. ROM-09)
+        // 14 MAIN TTS HUB CARTRIDGES (ROM-01 .. ROM-14)
         // =========================================================================
         ModelBundleSpec(
             id = "rom_core_os",
@@ -1776,6 +1917,110 @@ object PurrDefaultPresets {
             unlocksSummary = "UNLOCKS: Icefall VITS LJSpeech Medium + Lite 30MB sub-cartridge below.",
             category = CartridgeCategory.TTS,
             releaseOrder = 9
+        ),
+        ModelBundleSpec(
+            id = "rom_coqui_vits",
+            romCode = "ROM-10",
+            badge = "COQUI_VITS",
+            accentHex = 0xFFFF6B9D,
+            name = "COQUI_VITS_HUB",
+            subtitle = "Coqui VCTK 109-Speaker Hub (117MB) + LJSpeech & Neon Studio Packs",
+            description = "Classic Coqui TTS VITS multi-speaker VCTK pack spanning British, Scottish, Irish & US accents, plus standalone LJSpeech & Neon Coqui sub-cartridges below.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-coqui-en-vctk.tar.bz2",
+            fileName = "vits-coqui-en-vctk.tar.bz2",
+            expectedSha256 = "32da47c0def9cedaa6275df058e3b57d1863ae0a0f3646a5ec8adb7562d59ded",
+            approximateSizeMb = 117,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Coqui VITS ONNX + espeak-ng • Multi-Accent EN",
+            unlocksSummary = "UNLOCKS: 10 curated Coqui VCTK voices + hosts Coqui LJSpeech & Neon sub-packs.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 10
+        ),
+        ModelBundleSpec(
+            id = "rom_meta_mms",
+            romCode = "ROM-11",
+            badge = "META_MMS",
+            accentHex = 0xFF38BDF8,
+            name = "META_MMS_MULTILANG",
+            subtitle = "Meta MMS VITS • English Base (103MB) + Spanish, French & German",
+            description = "Meta's Massively Multilingual Speech VITS engine running pure character-level ONNX frontend without espeak dependencies. Expand below with ES, FR & DE packs!",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-mms-eng.tar.bz2",
+            fileName = "vits-mms-eng.tar.bz2",
+            expectedSha256 = "8712cb52f71ee00bde27b8c18058d97a794fccf873c4629fbea0de87d31366b4",
+            approximateSizeMb = 103,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Meta MMS VITS • Pure Character Frontend ONNX",
+            unlocksSummary = "UNLOCKS: Meta MMS English + optional Spanish, French & German sub-cartridges below.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 11
+        ),
+        ModelBundleSpec(
+            id = "rom_vctk_studio",
+            romCode = "ROM-12",
+            badge = "VCTK_109",
+            accentHex = 0xFFA855F7,
+            name = "VCTK_109_STUDIO",
+            subtitle = "k2-fsa VCTK Multi-Speaker VITS INT8/FP32 (145MB) • Fast Lexicon Engine",
+            description = "k2-fsa's dedicated 109-speaker VCTK neural VITS model using an ultra-fast built-in pronunciation lexicon (no espeak overhead) with curated multi-accent speakers.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-vctk.tar.bz2",
+            fileName = "vits-vctk.tar.bz2",
+            expectedSha256 = "4f0a02db66914b3760b144cebc004e65dd4d1aeef43379f2b058849e74002490",
+            approximateSizeMb = 145,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "VCTK INT8 ONNX + Direct CMU Lexicon • Ultra-Fast",
+            unlocksSummary = "UNLOCKS: 10 curated VCTK multi-accent studio speakers (UK, US & regional).",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 12
+        ),
+        ModelBundleSpec(
+            id = "rom_matcha_en",
+            romCode = "ROM-13",
+            badge = "MATCHA_EN",
+            accentHex = 0xFF00FF9D,
+            name = "MATCHA_FLOW_EN",
+            subtitle = "Icefall Matcha-TTS English Flow Model (73MB) + 22kHz Vocos Vocoder (51MB)",
+            description = "English conditional flow-matching Matcha-TTS trained on studio LJSpeech narration paired with the universal 22kHz Vocos neural vocoder for silky cadence.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.MATCHA,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-en_US-ljspeech.tar.bz2",
+            fileName = "matcha-icefall-en_US-ljspeech.tar.bz2",
+            expectedSha256 = "cff849fee69d7d3b22e0b0267aa6b863e32d05039a1eca963765a314a73450c0",
+            approximateSizeMb = 73,
+            isArchiveTarBz2 = true,
+            companionUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder-models/vocos-22khz-univ.onnx",
+            companionFileName = "vocos-22khz-univ.onnx",
+            companionExpectedSha256 = "0574a135aa1db2de6e181050db2ec528496cacd4a4701fc5d7faf9f9804c0081",
+            companionApproxSizeMb = 51,
+            hardwareAccelNote = "Matcha Flow-Matching + 22kHz Vocos Vocoder",
+            unlocksSummary = "UNLOCKS: English Matcha Flow Narrator with 22kHz Vocos neural vocoder.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 13
+        ),
+        ModelBundleSpec(
+            id = "rom_mimic3_neural",
+            romCode = "ROM-14",
+            badge = "MIMIC3_VITS",
+            accentHex = 0xFFFFB703,
+            name = "MIMIC3_MULTILANG",
+            subtitle = "Mycroft Mimic3 VITS • Spanish Low (76MB) + Korean KSS (64MB)",
+            description = "Open-source Mycroft AI Mimic3 VITS voices compiled for mobile ONNX Runtime! Spanish base + Korean KSS sub-cartridge below.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-mimic3-es_ES-m-ailabs_low.tar.bz2",
+            fileName = "vits-mimic3-es_ES-m-ailabs_low.tar.bz2",
+            expectedSha256 = "5d3141aae2b4691053a466e8d77ce9c594471c8ef2bb1b59c0986965243f2ccc",
+            approximateSizeMb = 76,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Mycroft Mimic3 VITS ONNX + espeak-ng",
+            unlocksSummary = "UNLOCKS: Mimic3 Spanish (es-ES) + Korean KSS (ko-KR) sub-cartridge below.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 14
         ),
 
         // =========================================================================
@@ -2389,8 +2634,210 @@ object PurrDefaultPresets {
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
+        ModelBundleSpec(
+            id = "sub_piper_jenny",
+            romCode = "SUB-07J",
+            badge = "PIPER_UK_VELVET",
+            accentHex = 0xFFFF6B9D,
+            name = "PIPER_JENNY_UK",
+            subtitle = "Piper VITS Jenny Dioco Medium • British Velvet Storytelling (+64 MB)",
+            description = "Adds the warm British Jenny Dioco studio voice pack under ROM-07.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-jenny_dioco-medium.tar.bz2",
+            fileName = "vits-piper-en_GB-jenny_dioco-medium.tar.bz2",
+            expectedSha256 = "a0888024569bafbefc05a4b48ddf8419d8dbbf3205f4af37cf7c6f1a87cc20c5",
+            approximateSizeMb = 64,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Piper VITS ONNX Medium (en-GB)",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Jenny Dioco (UK Velvet) to ROM-07.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_piper",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 10
+        ),
+        ModelBundleSpec(
+            id = "sub_piper_alan",
+            romCode = "SUB-07K",
+            badge = "PIPER_UK_MALE",
+            accentHex = 0xFF38BDF8,
+            name = "PIPER_ALAN_UK",
+            subtitle = "Piper VITS Alan Medium • Calm British Male Narrator (+64 MB)",
+            description = "Adds the articulate British male narrator Alan Medium pack under ROM-07.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alan-medium.tar.bz2",
+            fileName = "vits-piper-en_GB-alan-medium.tar.bz2",
+            expectedSha256 = "a48d4017da0f77668b27bed63fe6e04dd64c6397e1fadad4f460efb0ef7c9012",
+            approximateSizeMb = 64,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Piper VITS ONNX Medium (en-GB)",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Alan Medium (UK Narrator) to ROM-07.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_piper",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 10
+        ),
+        ModelBundleSpec(
+            id = "sub_melo_zh_en",
+            romCode = "SUB-07L",
+            badge = "MELOTTS_ZH_EN",
+            accentHex = 0xFF00FFA3,
+            name = "MELO_TTS_ZH_EN",
+            subtitle = "MeloTTS VITS Bilingual • Natural Mixed Mandarin + English (+159 MB)",
+            description = "MyShell AI's bilingual Chinese + English MeloTTS model for seamless code-switching narration under ROM-07.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.MELO_TTS,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-melo-tts-zh_en.tar.bz2",
+            fileName = "vits-melo-tts-zh_en.tar.bz2",
+            expectedSha256 = "e58351ed7149f290a54534538badd4077cdbe6fddc964b24d0bee870415d1514",
+            approximateSizeMb = 159,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "MeloTTS VITS Bilingual ZH+EN",
+            unlocksSummary = "ADDS VOICE: MeloTTS // Bilingual ZH+EN Studio to ROM-07.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_piper",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 10
+        ),
+
         // =========================================================================
-        // BUILT-IN OS TOOL MODULES (TOOL-01 .. TOOL-06)
+        // SUB-CARTRIDGES: ROM-10 (COQUI), ROM-11 (META MMS) & ROM-14 (MIMIC3)
+        // =========================================================================
+        ModelBundleSpec(
+            id = "sub_coqui_ljspeech",
+            romCode = "SUB-10A",
+            badge = "COQUI_LJSPEECH",
+            accentHex = 0xFFFF85B3,
+            name = "COQUI_LJSPEECH_VITS",
+            subtitle = "Coqui VITS LJSpeech • Classic Single-Speaker EN Studio (+110 MB)",
+            description = "Adds the Coqui TTS LJSpeech VITS female studio narrator under ROM-10.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-coqui-en-ljspeech.tar.bz2",
+            fileName = "vits-coqui-en-ljspeech.tar.bz2",
+            expectedSha256 = "c545bc8f7c74b888de053f602d0bb8d9868a204aa352f0ff333553092ba19eac",
+            approximateSizeMb = 110,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Coqui VITS LJSpeech ONNX",
+            unlocksSummary = "ADDS VOICE: Coqui VITS // LJSpeech Studio to ROM-10.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_coqui_vits",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 10
+        ),
+        ModelBundleSpec(
+            id = "sub_coqui_ljspeech_neon",
+            romCode = "SUB-10B",
+            badge = "COQUI_NEON",
+            accentHex = 0xFF00E5FF,
+            name = "COQUI_LJSPEECH_NEON",
+            subtitle = "Coqui VITS Neon AI Tuning • Crisp Clear Phonetics (+110 MB)",
+            description = "Adds Neon AI's tuned Coqui LJSpeech VITS weights with brisk articulation under ROM-10.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-coqui-en-ljspeech-neon.tar.bz2",
+            fileName = "vits-coqui-en-ljspeech-neon.tar.bz2",
+            expectedSha256 = "d93893e40fce6a0732a1fff3c7b3954dd7cf8a4a4378ad004cc79badc7a1ad52",
+            approximateSizeMb = 110,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Coqui Neon VITS ONNX",
+            unlocksSummary = "ADDS VOICE: Coqui VITS // Neon AI LJSpeech to ROM-10.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_coqui_vits",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 10
+        ),
+        ModelBundleSpec(
+            id = "sub_mms_spa",
+            romCode = "SUB-11A",
+            badge = "MMS_SPANISH",
+            accentHex = 0xFFFF9100,
+            name = "META_MMS_SPANISH",
+            subtitle = "Meta MMS VITS • Native Spanish (es-ES) Character Engine (+103 MB)",
+            description = "Adds native Spanish synthesis via Meta's Massively Multilingual Speech VITS architecture under ROM-11.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-mms-spa.tar.bz2",
+            fileName = "vits-mms-spa.tar.bz2",
+            expectedSha256 = "fcc16a2ba9370b6ad955e012c59966f695e4bbb81e151c34f31125e4100b9462",
+            approximateSizeMb = 103,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Meta MMS Spanish ONNX",
+            unlocksSummary = "ADDS VOICE: Meta MMS // Spanish (ES) to ROM-11.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_meta_mms",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 11
+        ),
+        ModelBundleSpec(
+            id = "sub_mms_fra",
+            romCode = "SUB-11B",
+            badge = "MMS_FRENCH",
+            accentHex = 0xFFB533FF,
+            name = "META_MMS_FRENCH",
+            subtitle = "Meta MMS VITS • Native French (fr-FR) Character Engine (+103 MB)",
+            description = "Adds native French synthesis via Meta's Massively Multilingual Speech VITS architecture under ROM-11.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-mms-fra.tar.bz2",
+            fileName = "vits-mms-fra.tar.bz2",
+            expectedSha256 = "d50e904b0e036b935511b68de64bd1d9353be9e0efaf9d25c0beec3692e763ef",
+            approximateSizeMb = 103,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Meta MMS French ONNX",
+            unlocksSummary = "ADDS VOICE: Meta MMS // French (FR) to ROM-11.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_meta_mms",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 11
+        ),
+        ModelBundleSpec(
+            id = "sub_mms_deu",
+            romCode = "SUB-11C",
+            badge = "MMS_GERMAN",
+            accentHex = 0xFFFFD700,
+            name = "META_MMS_GERMAN",
+            subtitle = "Meta MMS VITS • Native German (de-DE) Character Engine (+103 MB)",
+            description = "Adds native German synthesis via Meta's Massively Multilingual Speech VITS architecture under ROM-11.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-mms-deu.tar.bz2",
+            fileName = "vits-mms-deu.tar.bz2",
+            expectedSha256 = "57492064b816383575ee2fc4acb7c5ae4160a216eb71b1e9916b73e1f751685f",
+            approximateSizeMb = 103,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Meta MMS German ONNX",
+            unlocksSummary = "ADDS VOICE: Meta MMS // German (DE) to ROM-11.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_meta_mms",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 11
+        ),
+        ModelBundleSpec(
+            id = "sub_mimic3_ko",
+            romCode = "SUB-14A",
+            badge = "MIMIC3_KOREAN",
+            accentHex = 0xFFFF6B35,
+            name = "MIMIC3_KOREAN_KSS",
+            subtitle = "Mycroft Mimic3 VITS • Korean KSS Low (ko-KR) (+64 MB)",
+            description = "Adds the Korean KSS voice pack from Mycroft AI Mimic3 under ROM-14.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-mimic3-ko_KO-kss_low.tar.bz2",
+            fileName = "vits-mimic3-ko_KO-kss_low.tar.bz2",
+            expectedSha256 = "f015d1d15a52ed00d6fe22757c5ef4a74283c53daf829c838fa5c22616ed789c",
+            approximateSizeMb = 64,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Mimic3 Korean VITS ONNX",
+            unlocksSummary = "ADDS VOICE: Mycroft Mimic3 // Korean KSS (KR) to ROM-14.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_mimic3_neural",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 14
+        ),
+        // =========================================================================
+        // BUILT-IN OS TOOL MODULES (TOOL-01 .. TOOL-07)
         // =========================================================================
         ModelBundleSpec(
             id = "tool_purr_engine",
@@ -2505,6 +2952,26 @@ object PurrDefaultPresets {
             isBuiltInOsCartridge = true,
             unlocksSummary = "ENABLES: Audiobook Constructor OS Module for chapter-by-chapter resumable .M4B creation.",
             category = CartridgeCategory.TOOLS
+        ),
+        ModelBundleSpec(
+            id = "tool_theme_engine",
+            romCode = "TOOL-07",
+            badge = "NEON_SKIN_LAB",
+            accentHex = 0xFF00E5FF,
+            name = "NEON_THEME_ENGINE",
+            subtitle = "Retro Cyberdeck <-> Unified Neon Glow Skin • Custom Background & Accent + Contrast Guard",
+            description = "Switches PURR Engine between classic Retro Cyberdeck and full-app Neon Glow styling. Pick your backdrop (default Pure Black) & glowing accent color with automatic WCAG contrast protection.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/theme_engine",
+            fileName = "theme_engine.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "WCAG Contrast-Guarded Neon & Retro Theme Engine • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Neon Theme Engine OS Module for full-app Retro / Neon Glow customization.",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 14
         )
     )
 }

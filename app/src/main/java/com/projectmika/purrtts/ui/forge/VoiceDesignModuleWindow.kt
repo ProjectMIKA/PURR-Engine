@@ -535,7 +535,7 @@ fun VoiceDesignModuleWindowBody(
                         ) {
                             Text(
                                 text = saved.name,
-                                color = Color.White,
+                                color = MikaColors.PrimaryText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 10.5.sp,

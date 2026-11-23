@@ -282,4 +282,43 @@ class PurrHeavyEnginesTest {
             tempFile.delete()
         }
     }
+
+    @Test
+    fun `persists catalog sort filter theme config and auto-slots theme engine on upgrade`() {
+        val repoDir = Files.createTempDirectory("purr_v186_state").toFile()
+        try {
+            val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+            File(repoDir, "purr_forge_state.json").writeText(
+                json.encodeToString(
+                    PurrForgeState(
+                        knownToolCatalogVersion = 2,
+                        slottedCartridges = setOf("rom_core_os", "tool_purr_engine")
+                    )
+                )
+            )
+            val repo = PurrProfileRepository(repoDir)
+            assertTrue("tool_theme_engine" in repo.state.value.slottedCartridges)
+
+            repo.setCatalogSortMode(CartridgeSortMode.SIZE)
+            repo.setCatalogFilterMode(CartridgeFilterMode.DOWNLOADED)
+            repo.updateThemeConfig {
+                PurrThemeConfig(
+                    mode = PurrThemeMode.NEON_GLOW,
+                    neonBackgroundHex = 0xFF000000L,
+                    neonPrimaryHex = 0xFF00E5FFL,
+                    glowIntensity = 0.92f
+                )
+            }
+
+            val reloaded = PurrProfileRepository(repoDir)
+            assertEquals(CartridgeSortMode.SIZE, reloaded.state.value.catalogSortMode)
+            assertEquals(CartridgeFilterMode.DOWNLOADED, reloaded.state.value.catalogFilterMode)
+            assertEquals(PurrThemeMode.NEON_GLOW, reloaded.state.value.themeConfig.mode)
+            assertEquals(0xFF000000L, reloaded.state.value.themeConfig.neonBackgroundHex)
+            assertEquals(0xFF00E5FFL, reloaded.state.value.themeConfig.neonPrimaryHex)
+            assertEquals(0.92f, reloaded.state.value.themeConfig.glowIntensity, 0.001f)
+        } finally {
+            repoDir.deleteRecursively()
+        }
+    }
 }

@@ -8,6 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
 import com.projectmika.purrtts.ui.theme.MikaPurrTheme
 
@@ -47,7 +49,8 @@ class MainActivity : ComponentActivity() {
         val initialTab = intent.getIntExtra(EXTRA_INITIAL_TAB, 0)
 
         setContent {
-            MikaPurrTheme {
+            val forgeState by viewModel.forgeState.collectAsState()
+            MikaPurrTheme(themeConfig = forgeState.themeConfig) {
                 TtsForgeScreen(
                     viewModel = viewModel,
                     initialTabIndex = initialTab,

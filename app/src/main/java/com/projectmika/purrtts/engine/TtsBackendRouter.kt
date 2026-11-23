@@ -3,6 +3,7 @@ package com.projectmika.purrtts.engine
 import android.content.Context
 import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.BackendType
+import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.DspConfig
 import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
@@ -180,17 +181,24 @@ class TtsBackendRouter(
             }
         }
 
-        // Never silently hijack explicit voice-clone, VoiceDesign, or Qwen3 requests with device
-        // OS speech when the user explicitly targeted them — surface the exact engine reason instead.
+        // Never silently hijack explicit voice-clone, VoiceDesign, or Qwen3 requests — OR any
+        // already-installed & slotted neural cartridge — with device OS speech.
         val cleanVoiceId = voiceId.substringAfter(':')
         val isExplicitCloneOrDesign = repository.state.value.clonedVoices.any { it.id == voiceId || it.id == cleanVoiceId } ||
             cleanVoiceId in setOf("qwen3_base_clone_default", "qwen3_design_custom")
+        val targetVoiceDesc = repository.allAvailableVoices().firstOrNull { it.id == cleanVoiceId }
+        val targetCartridgeId = targetVoiceDesc?.cartridgeId ?: profile.selectedCartridgeId
+        val requiredSpecId = targetVoiceDesc?.requiredSubCartridgeId ?: targetCartridgeId
+        val isTargetInstalledAndSlotted =
+            repository.state.value.modelStates[requiredSpecId]?.state == DownloadState.INSTALLED &&
+                repository.isCartridgeSlotted(targetCartridgeId)
 
         // Fail soft to real CORE_OS speech whenever a standard cartridge isn't downloaded or slotted yet (if ROM-01 is slotted)
         if (rawOutcome.pcmFloat24k.isEmpty() &&
             selectedBackend != BackendType.CORE_OS &&
             selectedBackend != BackendType.QWEN3_NATIVE &&
             !isExplicitCloneOrDesign &&
+            !isTargetInstalledAndSlotted &&
             repository.isCartridgeSlotted("rom_core_os")
         ) {
             rawOutcome = proxyEngine.synthesizeChunk(

@@ -94,6 +94,19 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
+    // ✨ PERSISTED CARTRIDGE BAY & THEME CONTROLS (v1.8.6)
+    fun setCatalogSortMode(mode: CartridgeSortMode) {
+        updateState { s -> s.copy(catalogSortMode = mode) }
+    }
+
+    fun setCatalogFilterMode(mode: CartridgeFilterMode) {
+        updateState { s -> s.copy(catalogFilterMode = mode) }
+    }
+
+    fun updateThemeConfig(transform: (PurrThemeConfig) -> PurrThemeConfig) {
+        updateState { s -> s.copy(themeConfig = transform(s.themeConfig)) }
+    }
+
     // ✨ SMART HARDWARE OFFLOAD (v1.8.5): experimental device-level toggle — auto-selects
     // Adreno OpenCL, Hexagon NPU / NNAPI FP16, or XNNPACK per SoC with safe CPU fallback.
     fun setSmartHardwareOffload(enabled: Boolean) {
@@ -409,7 +422,9 @@ class PurrProfileRepository(filesDir: File) {
             } else {
                 when (v.cartridgeId) {
                     "rom_piper", "rom_kitten_tts", "rom_qwen3_custom_06b",
-                    "rom_pocket_tts", "rom_zipvoice", "rom_inflect_v2", "rom_icefall_vits" -> {
+                    "rom_pocket_tts", "rom_zipvoice", "rom_inflect_v2",
+                    "rom_icefall_vits", "rom_coqui_vits", "rom_meta_mms",
+                    "rom_mimic3_neural" -> {
                         val baseInstalled = state.modelStates[v.cartridgeId]?.state == DownloadState.INSTALLED
                         val anyStandaloneSubInstalled = catalog.any { sub ->
                             sub.parentCartridgeId == v.cartridgeId &&
@@ -568,12 +583,15 @@ class PurrProfileRepository(filesDir: File) {
             val catalogById = PurrDefaultPresets.modelCatalog().associateBy { it.id }
             val nextEnabledSubs = decoded.enabledSubCartridges.toMutableSet()
             val nextSlotted = decoded.slottedCartridges.toMutableSet()
-            // Auto-slot newly introduced v1.8.0 OS modules once when upgrading from <= v1.7.1.
+            // Auto-slot newly introduced v1.8.0 & v1.8.6 OS modules once when upgrading.
             val isNewToolCatalogV2 = decoded.knownToolCatalogVersion < 2 ||
                 ("tool_voice_design" !in decoded.modelStates && "tool_audiobook_constructor" !in decoded.modelStates)
             if (isNewToolCatalogV2) {
                 nextSlotted += "tool_voice_design"
                 nextSlotted += "tool_audiobook_constructor"
+            }
+            if (decoded.knownToolCatalogVersion < 3 || "tool_theme_engine" !in decoded.modelStates) {
+                nextSlotted += "tool_theme_engine"
             }
             for ((legacyId, hubId) in legacyCartridgeToHub) {
                 if (normalizedModelStates[legacyId]?.state == DownloadState.INSTALLED) {
@@ -656,7 +674,7 @@ class PurrProfileRepository(filesDir: File) {
                 profiles = remappedProfiles,
                 slottedCartridges = nextSlotted,
                 enabledSubCartridges = nextEnabledSubs,
-                knownToolCatalogVersion = 2
+                knownToolCatalogVersion = 3
             )
         }.getOrElse {
             PurrForgeState()

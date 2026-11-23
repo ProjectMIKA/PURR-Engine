@@ -193,13 +193,13 @@ fun MikaAcademyOverlay(
                         Box(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFFFFD700).copy(alpha = 0.10f))
-                                .border(1.dp, Color(0xFFFFD700), RoundedCornerShape(6.dp))
+                                .background(MikaColors.SsrGold.copy(alpha = 0.10f))
+                                .border(1.dp, MikaColors.SsrGold, RoundedCornerShape(6.dp))
                                 .padding(horizontal = 12.dp, vertical = 6.dp)
                         ) {
                             Text(
                                 text = "PURR-TTS v$versionName",
-                                color = Color(0xFFFFD700),
+                                color = MikaColors.SsrGold,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
                                 fontSize = 12.sp,
@@ -209,14 +209,14 @@ fun MikaAcademyOverlay(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "> HIGHLIGHTS",
-                            color = Color(0xFFFFD700).copy(alpha = 0.6f),
+                            color = MikaColors.SsrGold.copy(alpha = 0.6f),
                             fontFamily = FontFamily.Monospace,
                             fontSize = 10.sp,
                             letterSpacing = 1.0.sp
                         )
                         Spacer(modifier = Modifier.height(6.dp))
                         PURR_WHATS_NEW.forEach { entry ->
-                            val entryColor = Color(entry.colorHex)
+                            val entryColor = MikaColors.resolveAccent(Color(entry.colorHex))
                             Column(
                                 modifier = Modifier
                                     .fillMaxWidth()

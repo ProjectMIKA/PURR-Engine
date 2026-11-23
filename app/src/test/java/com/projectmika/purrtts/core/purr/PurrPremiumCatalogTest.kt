@@ -1,13 +1,15 @@
 package com.projectmika.purrtts.core.purr
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * ✨ PURE-JVM TESTS FOR THE 3-CATEGORY CARTRIDGE RACK (TTS + CLONING + TOOLS) ✨
- * Guards the 9 unified TTS hubs (`ROM-01..ROM-09`), the 5 dedicated Voice Cloning modules
- * (`CLN-01..CLN-05`), nested expansion/upgrade sub-cartridges, unique voice IDs, and SHA-256 metadata.
+ * Guards the 14 unified TTS hubs (`ROM-01..ROM-14`), the 5 dedicated Voice Cloning modules
+ * (`CLN-01..CLN-05`), the 7 Cyberdeck OS Tools (`TOOL-01..TOOL-07`), nested sub-cartridges,
+ * unique voice IDs, and SHA-256 metadata.
  */
 class PurrPremiumCatalogTest {
 
@@ -16,15 +18,33 @@ class PurrPremiumCatalogTest {
     private val subTtsChips = catalog.filter { it.isSubCartridge && it.category == CartridgeCategory.TTS }
     private val mainCloningModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.CLONING }
     private val subCloningChips = catalog.filter { it.isSubCartridge && it.category == CartridgeCategory.CLONING }
+    private val toolsModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
 
     @Test
-    fun `top level tts catalog forms a clean 9-bay hub rack ROM-01 through ROM-09`() {
-        assertEquals(9, mainTtsHubs.size)
+    fun `top level tts catalog forms a 14-hub rack ROM-01 through ROM-14`() {
+        assertEquals(14, mainTtsHubs.size)
         val codes = mainTtsHubs.map { it.romCode }
         assertEquals(
-            listOf("ROM-01", "ROM-02", "ROM-03", "ROM-04", "ROM-05", "ROM-06", "ROM-07", "ROM-08", "ROM-09"),
+            (1..14).map { idx -> "ROM-%02d".format(idx) },
             codes
         )
+        val expectedIds = setOf(
+            "rom_coqui_vits", "rom_meta_mms", "rom_vctk_studio", "rom_matcha_en", "rom_mimic3_neural"
+        )
+        assertTrue(mainTtsHubs.map { it.id }.toSet().containsAll(expectedIds))
+    }
+
+    @Test
+    fun `tools category hosts TOOL-01 through TOOL-07 including Neon Theme Engine`() {
+        assertEquals(7, toolsModules.size)
+        assertEquals(
+            (1..7).map { idx -> "TOOL-%02d".format(idx) },
+            toolsModules.map { it.romCode }
+        )
+        val themeTool = toolsModules.first { it.id == "tool_theme_engine" }
+        assertTrue(themeTool.isBuiltInOsCartridge)
+        assertEquals(CartridgeCategory.TOOLS, themeTool.category)
+        assertTrue("tool_theme_engine" in PurrForgeState().slottedCartridges)
     }
 
     @Test
@@ -51,8 +71,12 @@ class PurrPremiumCatalogTest {
             "rom_kokoro_fp32", "rom_kokoro_v11",
             "sub_qwen3_design_17b",
             "sub_kitten_mini", "sub_kitten_micro",
-            "sub_melo_en", "rom_supertonic3", "rom_matcha_zh_en",
-            "sub_inflect_micro", "sub_icefall_low"
+            "sub_melo_en", "sub_melo_zh_en", "rom_supertonic3", "rom_matcha_zh_en",
+            "sub_piper_jenny", "sub_piper_alan",
+            "sub_inflect_micro", "sub_icefall_low",
+            "sub_coqui_ljspeech", "sub_coqui_ljspeech_neon",
+            "sub_mms_spa", "sub_mms_fra", "sub_mms_deu",
+            "sub_mimic3_ko"
         )
         val foundTts = subTtsChips.filter { it.id in checkedTtsSubIds }
         assertEquals(checkedTtsSubIds.size, foundTts.size)
@@ -92,13 +116,21 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `matcha sub-cartridge carries a verified 16khz vocos companion under ROM-07`() {
-        val matcha = catalog.first { it.id == "rom_matcha_zh_en" }
-        assertEquals("rom_piper", matcha.parentCartridgeId)
-        assertEquals("vocos-16khz-univ.onnx", matcha.companionFileName)
-        assertTrue(matcha.companionUrl.endsWith("vocos-16khz-univ.onnx"))
-        assertEquals("b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e", matcha.companionExpectedSha256)
-        assertEquals(51, matcha.companionApproxSizeMb)
+    fun `matcha modules carry verified 16khz and 22khz vocos companions`() {
+        val matchaZhEn = catalog.first { it.id == "rom_matcha_zh_en" }
+        assertEquals("rom_piper", matchaZhEn.parentCartridgeId)
+        assertEquals("vocos-16khz-univ.onnx", matchaZhEn.companionFileName)
+        assertTrue(matchaZhEn.companionUrl.endsWith("vocos-16khz-univ.onnx"))
+        assertEquals("b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e", matchaZhEn.companionExpectedSha256)
+        assertEquals(51, matchaZhEn.companionApproxSizeMb)
+
+        val matchaEn = catalog.first { it.id == "rom_matcha_en" }
+        assertFalse(matchaEn.isSubCartridge)
+        assertEquals("ROM-13", matchaEn.romCode)
+        assertEquals("vocos-22khz-univ.onnx", matchaEn.companionFileName)
+        assertTrue(matchaEn.companionUrl.endsWith("vocos-22khz-univ.onnx"))
+        assertEquals("0574a135aa1db2de6e181050db2ec528496cacd4a4701fc5d7faf9f9804c0081", matchaEn.companionExpectedSha256)
+        assertEquals(51, matchaEn.companionApproxSizeMb)
     }
 
     @Test
@@ -159,6 +191,31 @@ class PurrPremiumCatalogTest {
         assertEquals("sub_melo_en", all["melo_en_us"]?.requiredSubCartridgeId)
         assertEquals(BackendType.SHERPA_ONNX, all["matcha_narrator"]?.engine)
         assertEquals("rom_matcha_zh_en", all["matcha_narrator"]?.requiredSubCartridgeId)
+    }
+
+    @Test
+    fun `v1_8_6 new sherpa engines and voices wire to expected hubs, families, and sub-cartridges`() {
+        val all = PurrDefaultPresets.builtInVoices().associateBy { it.id }
+        assertEquals("sub_piper_jenny", all["piper_jenny_uk"]?.requiredSubCartridgeId)
+        assertEquals("sub_piper_alan", all["piper_alan_uk"]?.requiredSubCartridgeId)
+        assertEquals(SherpaModelFamily.MELO_TTS, all["melo_zh_en"]?.sherpaFamily)
+        assertEquals("sub_melo_zh_en", all["melo_zh_en"]?.requiredSubCartridgeId)
+
+        assertEquals("rom_coqui_vits", all["coqui_vctk_0"]?.cartridgeId)
+        assertEquals("sub_coqui_ljspeech", all["coqui_ljspeech"]?.requiredSubCartridgeId)
+        assertEquals("sub_coqui_ljspeech_neon", all["coqui_ljspeech_neon"]?.requiredSubCartridgeId)
+
+        assertEquals("rom_meta_mms", all["mms_eng"]?.cartridgeId)
+        assertEquals("sub_mms_spa", all["mms_spa"]?.requiredSubCartridgeId)
+        assertEquals("sub_mms_fra", all["mms_fra"]?.requiredSubCartridgeId)
+        assertEquals("sub_mms_deu", all["mms_deu"]?.requiredSubCartridgeId)
+
+        assertEquals("rom_vctk_studio", all["vctk_s0"]?.cartridgeId)
+        assertEquals(SherpaModelFamily.MATCHA, all["matcha_en_ljspeech"]?.sherpaFamily)
+        assertEquals("rom_matcha_en", all["matcha_en_ljspeech"]?.cartridgeId)
+
+        assertEquals("rom_mimic3_neural", all["mimic3_es_mailabs"]?.cartridgeId)
+        assertEquals("sub_mimic3_ko", all["mimic3_ko_kss"]?.requiredSubCartridgeId)
     }
 
     @Test

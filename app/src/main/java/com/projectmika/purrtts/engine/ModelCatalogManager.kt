@@ -650,7 +650,11 @@ class ModelCatalogManager(
         } else {
             File(context.filesDir, "models/sherpa/zipvoice")
         }
-        SherpaModelFamily.MATCHA -> File(context.filesDir, "models/sherpa/matcha")
+        SherpaModelFamily.MATCHA -> if (spec.id != "rom_matcha_zh_en") {
+            File(context.filesDir, "models/sherpa/matcha_${spec.id}")
+        } else {
+            File(context.filesDir, "models/sherpa/matcha")
+        }
         SherpaModelFamily.MELO_TTS -> File(context.filesDir, "models/sherpa/melo_${spec.id}")
         SherpaModelFamily.PIPER -> if (spec.id != "rom_piper") {
             File(context.filesDir, "models/sherpa/piper_${spec.id}")

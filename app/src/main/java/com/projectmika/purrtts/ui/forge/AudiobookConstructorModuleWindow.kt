@@ -212,7 +212,7 @@ fun AudiobookConstructorModuleWindowBody(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = activeProject.title,
-                    color = Color.White,
+                    color = MikaColors.PrimaryText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
                     fontSize = 12.sp,
@@ -407,7 +407,7 @@ fun AudiobookConstructorModuleWindowBody(
             onValueChange = { editTitle = it },
             label = { Text("AUDIOBOOK_TITLE_TAG", fontSize = 9.sp, fontFamily = FontFamily.Monospace) },
             singleLine = true,
-            textStyle = TextStyle(color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+            textStyle = TextStyle(color = MikaColors.PrimaryText, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = MikaColors.SsrGold,
                 unfocusedBorderColor = MikaColors.SsrGold.copy(alpha = 0.35f),
@@ -618,7 +618,7 @@ private fun ChapterItemCard(
             ) {
                 Text(
                     text = "${chapter.index + 1}. ${chapter.title}",
-                    color = if (chapter.included) Color.White else MikaColors.DimText,
+                    color = if (chapter.included) MikaColors.PrimaryText else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 10.sp,
@@ -711,7 +711,7 @@ private fun ChapterItemCard(
                         onValueChange = { editingTitle = it },
                         label = { Text("RENAME_CHAPTER", fontSize = 8.5.sp, fontFamily = FontFamily.Monospace) },
                         singleLine = true,
-                        textStyle = TextStyle(color = Color.White, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                        textStyle = TextStyle(color = MikaColors.PrimaryText, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = MikaColors.NeonCyan,
                             unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),

@@ -1,3 +1,29 @@
+# 🌌 PURR-TTS v1.8.6 // The Neon Synthesis Fleet
+
+### ✨ What's New since v1.8.5
+
+Inflect v2 & Icefall VITS wired up cleanly, 5 new on-device neural TTS hubs (14 total), persisted Sort/Filter dropdowns, and the full-app Neon Theme Engine! 🌈⚡🎙️
+
+* **🔧 INFLECT v2, ICEFALL VITS & MATCHA WIRING FIX**: Eliminated silent fallbacks to Android System TTS when running Inflect v2 (`ROM-08`), Icefall VITS (`ROM-09`), and Matcha Flow engines. Stopped Smart Hardware Offload (`NNAPI`) from engaging on dynamic-shape VITS/MeloTTS/Matcha graphs (with automatic CPU fail-soft recovery if a runtime offload fails), isolated Matcha Flow extract directories (`matcha_<id>`), extended voice-family inference (`inflect_`, `icefall_`, `kmicro_`, `coqui_`, `mms_`, `vctk_`, `mimic3_`), and blocked silent `CORE_OS` fallback whenever an installed neural cartridge is slotted.
+* **🌐 THE DEFACTO ON-DEVICE TTS FLEET (`ROM-01..ROM-14` + EXPANSIONS)**: Added 5 brand-new open-source neural TTS hubs and 9 expansion sub-cartridges (all SHA-256 verified):
+  * **`ROM-10` Coqui VITS Hub**: 10 curated VCTK multi-accent speakers + `SUB-10A` LJSpeech Studio & `SUB-10B` Neon AI LJSpeech.
+  * **`ROM-11` Meta MMS Multilingual**: Pure character-frontend English ONNX + `SUB-11A` Spanish, `SUB-11B` French, and `SUB-11C` German packs.
+  * **`ROM-12` VCTK 109 Studio**: Fast built-in CMU-lexicon 10-speaker VCTK pack with zero espeak overhead.
+  * **`ROM-13` Matcha Flow EN + 22kHz Vocos**: English conditional flow-matching Matcha narrator paired with universal 22kHz Vocos vocoder.
+  * **`ROM-14` Mycroft Mimic3 MultiLang**: Spanish (`es-ES`) base + `SUB-14A` Korean KSS (`ko-KR`).
+  * **`ROM-07` Piper / MeloTTS Additions**: `SUB-07J` Piper Jenny Dioco (UK Velvet), `SUB-07K` Piper Alan Medium (UK Male), and `SUB-07L` MeloTTS Bilingual ZH+EN.
+* **🌈 `TOOL-07` NEON THEME ENGINE (RETRO <-> NEON GLOW + CONTRAST GUARD)**: Keep the classic multi-accent **Retro Cyberdeck** cartridge skin or transform the entire app into a glowing **Neon Glow** UI! Pick your backdrop color (default Pure Black `#000000`, presets including Soft Light, or custom `#RRGGBB` hex), choose your primary glowing accent (e.g. Electric Cyan, Neon Pink, Toxic Green, Pulse Gold), and tune bloom intensity — while automatic WCAG 2.1 contrast enforcement guarantees crisp, readable text and borders on every surface.
+* **🗂️ PERSISTED SORT & FILTER DROPDOWNS**: Converted Cartridge Bay Filter (`ALL` / `INSTALLED` / `UNINSTALLED` / `SLOTTED`) and Sort (`BAY` / `NAME` / `SIZE` / `NEWEST`) controls into clean side-by-side dropdown menus whose selections persist across screen switches and app restarts.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.6_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `22`).
+2. **`PURR-TTS_V1.8.6.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.5 // The Cloning Bay & Smart Offload
 
 ### ✨ What's New since v1.8.4

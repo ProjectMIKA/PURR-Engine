@@ -21,6 +21,8 @@ import com.projectmika.purrtts.core.audiobook.AudiobookChapter
 import com.projectmika.purrtts.core.audiobook.AudiobookProject
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.CartridgeCategory
+import com.projectmika.purrtts.core.purr.CartridgeFilterMode
+import com.projectmika.purrtts.core.purr.CartridgeSortMode
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ExportedAudioFile
@@ -35,6 +37,7 @@ import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
+import com.projectmika.purrtts.core.purr.PurrThemeConfig
 import com.projectmika.purrtts.core.purr.PurrUpdateChecker
 import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SavedVoiceDesign
@@ -401,6 +404,18 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun updateMikaStopConfig(transform: (MikaStopConfig) -> MikaStopConfig) {
         repository.updateActiveProfile { p -> p.copy(mikaStopConfig = transform(p.mikaStopConfig)) }
+    }
+
+    fun setCatalogSortMode(mode: CartridgeSortMode) {
+        repository.setCatalogSortMode(mode)
+    }
+
+    fun setCatalogFilterMode(mode: CartridgeFilterMode) {
+        repository.setCatalogFilterMode(mode)
+    }
+
+    fun updateThemeConfig(transform: (PurrThemeConfig) -> PurrThemeConfig) {
+        repository.updateThemeConfig(transform)
     }
 
     // ✨ SMART HARDWARE OFFLOAD (v1.8.5): experimental auto-offload across supported accelerators.

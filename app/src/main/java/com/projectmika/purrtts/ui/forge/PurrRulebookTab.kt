@@ -72,6 +72,8 @@ import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrNeuralBypass
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
+import com.projectmika.purrtts.core.purr.PurrThemeEngine
+import com.projectmika.purrtts.core.purr.PurrThemeMode
 import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SymbolShieldConfig
 import com.projectmika.purrtts.ui.theme.CyberDropdown
@@ -91,7 +93,7 @@ private enum class ActiveOsModule(
     val subtitle: String,
     val badge: String,
     val iconType: OsModuleIconType,
-    val accent: Color
+    private val accentResolver: () -> Color
 ) {
     PURR_ENGINE(
         toolCartridgeId = "tool_purr_engine",
@@ -99,7 +101,7 @@ private enum class ActiveOsModule(
         subtitle = "Vibe Presets, Slang, MIKASTOP & Rulebook",
         badge = "TOOL-01",
         iconType = OsModuleIconType.PURR_CORE,
-        accent = MikaColors.NeonPink
+        accentResolver = { MikaColors.NeonPink }
     ),
     DSP_RACK(
         toolCartridgeId = "tool_dsp_rack",
@@ -107,7 +109,7 @@ private enum class ActiveOsModule(
         subtitle = "120ms Tail Taper, EQ & 10 Voice FX",
         badge = "TOOL-02",
         iconType = OsModuleIconType.DSP_RACK,
-        accent = MikaColors.NeonCyan
+        accentResolver = { MikaColors.NeonCyan }
     ),
     SYMBOL_SHIELD(
         toolCartridgeId = "tool_symbol_shield",
@@ -115,7 +117,7 @@ private enum class ActiveOsModule(
         subtitle = "Audiobook Sanitizer & Loose Chunks",
         badge = "TOOL-03",
         iconType = OsModuleIconType.SYMBOL_SHIELD,
-        accent = MikaColors.TerminalGreen
+        accentResolver = { MikaColors.TerminalGreen }
     ),
     CLONE_STUDIO(
         toolCartridgeId = "tool_clone_studio",
@@ -123,7 +125,7 @@ private enum class ActiveOsModule(
         subtitle = "3-12s Zero-Shot Recorder & Clones",
         badge = "CLN-05",
         iconType = OsModuleIconType.CLONE_STUDIO,
-        accent = MikaColors.NeonPurple
+        accentResolver = { MikaColors.NeonPurple }
     ),
     AUDIO_EXPORTER(
         toolCartridgeId = "tool_audio_exporter",
@@ -131,7 +133,7 @@ private enum class ActiveOsModule(
         subtitle = "Text/Audiobook -> Mastered WAV",
         badge = "TOOL-04",
         iconType = OsModuleIconType.AUDIO_EXPORTER,
-        accent = MikaColors.SsrGold
+        accentResolver = { MikaColors.SsrGold }
     ),
     VOICE_DESIGN(
         toolCartridgeId = "tool_voice_design",
@@ -139,7 +141,7 @@ private enum class ActiveOsModule(
         subtitle = "1.7B Structured Prompt Lab",
         badge = "TOOL-05",
         iconType = OsModuleIconType.VOICE_DESIGN,
-        accent = MikaColors.NeonPink
+        accentResolver = { MikaColors.NeonPink }
     ),
     AUDIOBOOK_CONSTRUCTOR(
         toolCartridgeId = "tool_audiobook_constructor",
@@ -147,8 +149,18 @@ private enum class ActiveOsModule(
         subtitle = "EPUB/PDF/TXT -> Chaptered .M4B",
         badge = "TOOL-06",
         iconType = OsModuleIconType.AUDIOBOOK_CONSTRUCTOR,
-        accent = MikaColors.NeonCyan
-    )
+        accentResolver = { MikaColors.NeonCyan }
+    ),
+    THEME_ENGINE(
+        toolCartridgeId = "tool_theme_engine",
+        title = "NEON THEME ENGINE",
+        subtitle = "Retro / Neon Glow Skin & Contrast",
+        badge = "TOOL-07",
+        iconType = OsModuleIconType.THEME_ENGINE,
+        accentResolver = { MikaColors.NeonCyan }
+    );
+
+    fun accentColor(): Color = accentResolver()
 }
 
 /**
@@ -259,6 +271,11 @@ fun PurrRulebookTab(
                                                 ActiveOsModule.AUDIO_EXPORTER -> "${forgeState.exportedAudioFiles.size} EXPORTS"
                                                 ActiveOsModule.VOICE_DESIGN -> "${forgeState.savedVoiceDesigns.size} DESIGNS"
                                                 ActiveOsModule.AUDIOBOOK_CONSTRUCTOR -> "EPUB/PDF -> .M4B"
+                                                ActiveOsModule.THEME_ENGINE -> if (forgeState.themeConfig.mode == PurrThemeMode.NEON_GLOW) {
+                                                    "NEON ${PurrThemeEngine.formatHexRgb(forgeState.themeConfig.neonPrimaryHex)}"
+                                                } else {
+                                                    "RETRO"
+                                                }
                                             },
                                             onClick = { openedModule = mod }
                                         )
@@ -271,13 +288,14 @@ fun PurrRulebookTab(
                         }
                     }
                 } else {
+                    val targetAccent = targetModule.accentColor()
                     // Opened Animated Cyberdeck OS Window
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(10.dp))
-                            .background(Color(0xFF07050D))
-                            .border(1.5.dp, targetModule.accent, RoundedCornerShape(10.dp))
+                            .background(MikaColors.PanelBg)
+                            .border(1.5.dp, targetAccent, RoundedCornerShape(10.dp))
                     ) {
                         // Window Chrome Header Bar
                         Row(
@@ -286,12 +304,12 @@ fun PurrRulebookTab(
                                 .background(
                                     Brush.horizontalGradient(
                                         colors = listOf(
-                                            targetModule.accent.copy(alpha = 0.28f),
-                                            Color(0xFF100B1C)
+                                            targetAccent.copy(alpha = 0.28f),
+                                            MikaColors.RaisedCardBg
                                         )
                                     )
                                 )
-                                .border(0.5.dp, targetModule.accent.copy(alpha = 0.45f))
+                                .border(0.5.dp, targetAccent.copy(alpha = 0.45f))
                                 .padding(horizontal = 10.dp, vertical = 8.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
@@ -301,10 +319,10 @@ fun PurrRulebookTab(
                                 horizontalArrangement = Arrangement.spacedBy(7.dp),
                                 modifier = Modifier.weight(1f)
                             ) {
-                                MikaCyberIcon(type = CyberIconType.WINDOW_FRAME, tint = targetModule.accent, size = 13.dp)
+                                MikaCyberIcon(type = CyberIconType.WINDOW_FRAME, tint = targetAccent, size = 13.dp)
                                 Text(
                                     text = targetModule.title,
-                                    color = targetModule.accent,
+                                    color = targetAccent,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Black,
                                     fontSize = 11.sp,
@@ -360,7 +378,7 @@ fun PurrRulebookTab(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .background(Color(0xFF0A0813))
+                                    .background(MikaColors.DeepWellBg)
                                     .padding(vertical = 7.dp)
                             ) {
                                 Row(
@@ -373,6 +391,7 @@ fun PurrRulebookTab(
                                 ) {
                                     activeModules.forEach { mod ->
                                         val isCurrent = mod == targetModule
+                                        val modAccent = mod.accentColor()
                                         Column(
                                             horizontalAlignment = Alignment.CenterHorizontally,
                                             verticalArrangement = Arrangement.spacedBy(3.dp),
@@ -383,7 +402,7 @@ fun PurrRulebookTab(
                                         ) {
                                             MikaOsModuleIcon(
                                                 type = mod.iconType,
-                                                accentColor = mod.accent,
+                                                accentColor = modAccent,
                                                 isOnline = isCurrent,
                                                 iconSize = 36.dp
                                             )
@@ -393,7 +412,7 @@ fun PurrRulebookTab(
                                                     .height(2.5.dp)
                                                     .clip(RoundedCornerShape(2.dp))
                                                     .background(
-                                                        if (isCurrent) mod.accent else Color.Transparent
+                                                        if (isCurrent) modAccent else Color.Transparent
                                                     )
                                             )
                                         }
@@ -407,7 +426,7 @@ fun PurrRulebookTab(
                                             .align(Alignment.CenterStart)
                                             .background(
                                                 Brush.horizontalGradient(
-                                                    colors = listOf(Color(0xFF0A0813), Color(0xCC0A0813), Color.Transparent)
+                                                    colors = listOf(MikaColors.DeepWellBg, MikaColors.DeepWellBg.copy(alpha = 0.8f), Color.Transparent)
                                                 )
                                             )
                                             .clickable {
@@ -419,7 +438,7 @@ fun PurrRulebookTab(
                                     ) {
                                         MikaCyberIcon(
                                             type = CyberIconType.CHEVRON_LEFT,
-                                            tint = targetModule.accent.copy(alpha = arrowAlpha),
+                                            tint = targetAccent.copy(alpha = arrowAlpha),
                                             size = 14.dp,
                                             modifier = Modifier.offset { IntOffset(-arrowNudge.dp.roundToPx(), 0) }
                                         )
@@ -433,7 +452,7 @@ fun PurrRulebookTab(
                                             .align(Alignment.CenterEnd)
                                             .background(
                                                 Brush.horizontalGradient(
-                                                    colors = listOf(Color.Transparent, Color(0xCC0A0813), Color(0xFF0A0813))
+                                                    colors = listOf(Color.Transparent, MikaColors.DeepWellBg.copy(alpha = 0.8f), MikaColors.DeepWellBg)
                                                 )
                                             )
                                             .clickable {
@@ -445,7 +464,7 @@ fun PurrRulebookTab(
                                     ) {
                                         MikaCyberIcon(
                                             type = CyberIconType.CHEVRON_RIGHT,
-                                            tint = targetModule.accent.copy(alpha = arrowAlpha),
+                                            tint = targetAccent.copy(alpha = arrowAlpha),
                                             size = 14.dp,
                                             modifier = Modifier.offset { IntOffset(arrowNudge.dp.roundToPx(), 0) }
                                         )
@@ -454,7 +473,7 @@ fun PurrRulebookTab(
                             }
                         }
 
-                        HorizontalDivider(color = targetModule.accent.copy(alpha = 0.30f))
+                        HorizontalDivider(color = targetAccent.copy(alpha = 0.30f))
 
                         // Window Body
                         Column(
@@ -503,6 +522,10 @@ fun PurrRulebookTab(
                                     isPlayingPreview = isPlayingPreview,
                                     viewModel = viewModel
                                 )
+                                ActiveOsModule.THEME_ENGINE -> ThemeEngineModuleWindowBody(
+                                    forgeState = forgeState,
+                                    viewModel = viewModel
+                                )
                             }
                         }
                     }
@@ -518,6 +541,7 @@ private fun OsDesktopAppTile(
     statusNote: String,
     onClick: () -> Unit
 ) {
+    val moduleAccent = module.accentColor()
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -525,12 +549,12 @@ private fun OsDesktopAppTile(
             .background(
                 Brush.verticalGradient(
                     colors = listOf(
-                        Color(0xFF141022),
-                        Color(0xFF090710)
+                        MikaColors.RaisedCardBg,
+                        MikaColors.PanelBg
                     )
                 )
             )
-            .border(1.2.dp, module.accent.copy(alpha = 0.42f), RoundedCornerShape(10.dp))
+            .border(1.2.dp, moduleAccent.copy(alpha = 0.42f), RoundedCornerShape(10.dp))
             .clickable(onClick = onClick)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
@@ -543,7 +567,7 @@ private fun OsDesktopAppTile(
         ) {
             Text(
                 text = module.badge,
-                color = module.accent.copy(alpha = 0.85f),
+                color = moduleAccent.copy(alpha = 0.85f),
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
                 fontSize = 8.sp
@@ -567,13 +591,13 @@ private fun OsDesktopAppTile(
 
         MikaOsModuleIcon(
             type = module.iconType,
-            accentColor = module.accent,
+            accentColor = moduleAccent,
             isOnline = true
         )
 
         Text(
             text = module.title,
-            color = Color.White,
+            color = MikaColors.PrimaryText,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
             fontSize = 11.sp,
@@ -1382,7 +1406,7 @@ private fun CloneStudioModuleWindowBody(
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
                                 text = clone.displayName,
-                                color = Color.White,
+                                color = MikaColors.PrimaryText,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 11.sp
@@ -1710,7 +1734,7 @@ private fun AudioExporterModuleWindowBody(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = entry.fileName,
-                                    color = Color.White,
+                                    color = MikaColors.PrimaryText,
                                     fontFamily = FontFamily.Monospace,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 10.5.sp,
@@ -1836,7 +1860,7 @@ internal fun SimplePurrToggle(
                 }
                 Text(
                     text = title,
-                    color = if (checked) Color.White else MikaColors.DimText,
+                    color = if (checked) MikaColors.PrimaryText else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
                     fontSize = 11.sp

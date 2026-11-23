@@ -264,7 +264,7 @@ private fun SettingsToggleRow(
         Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
                 text = title,
-                color = if (checked) Color.White else MikaColors.CyanWhite.copy(alpha = 0.78f),
+                color = if (checked) MikaColors.PrimaryText else MikaColors.CyanWhite.copy(alpha = 0.82f),
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
                 fontSize = 10.sp,

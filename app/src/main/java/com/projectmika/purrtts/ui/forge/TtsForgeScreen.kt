@@ -98,6 +98,7 @@ fun TtsForgeScreen(
     onOpenSystemTtsSettings: () -> Unit
 ) {
     val forgeState by viewModel.forgeState.collectAsState()
+    MikaColors.applyTheme(forgeState.themeConfig)
     val discoveredSystemVoices by viewModel.discoveredSystemVoices.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
     val vramSec by viewModel.vramRemainingSeconds.collectAsState()
@@ -932,7 +933,7 @@ private fun EngineDropdownSelector(
     val selectedIsProxy = activeCartridgeId == "proxy_lan"
     val selectedAccent = when {
         selectedIsProxy -> MikaColors.NeonPurple
-        selectedSpec != null -> Color(selectedSpec.accentHex)
+        selectedSpec != null -> MikaColors.resolveAccent(Color(selectedSpec.accentHex))
         else -> MikaColors.DimText
     }
     val selectedLabel = when {
@@ -996,7 +997,7 @@ private fun EngineDropdownSelector(
                     .padding(vertical = 4.dp)
             ) {
                 slottedSpecs.forEach { spec ->
-                    val specAccent = Color(spec.accentHex)
+                    val specAccent = MikaColors.resolveAccent(Color(spec.accentHex))
                     val isSelected = activeCartridgeId == spec.id
                     Row(
                         modifier = Modifier
