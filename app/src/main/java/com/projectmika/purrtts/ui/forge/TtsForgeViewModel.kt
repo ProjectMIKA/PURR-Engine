@@ -23,9 +23,11 @@ import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
 import com.projectmika.purrtts.core.manga.MangaJobTelemetry
+import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSeriesProject
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
+import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.CartridgeCategory
@@ -1812,7 +1814,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         seriesTitleInput: String,
         readingOrder: MangaReadingOrder,
         autoProduceMp4: Boolean = true,
-        pauseOnFlags: Boolean = true
+        pauseOnFlags: Boolean = true,
+        videoAspect: MangaVideoAspect? = null,
+        burnInSubtitles: Boolean? = null,
+        videoQuality: MangaVideoQuality? = null
     ) {
         mangaDubManager.importCbzChapter(
             uri = uri,
@@ -1820,7 +1825,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             seriesTitleInput = seriesTitleInput,
             readingOrder = readingOrder,
             autoProduceMp4 = autoProduceMp4,
-            pauseOnFlags = pauseOnFlags
+            pauseOnFlags = pauseOnFlags,
+            videoAspect = videoAspect,
+            burnInSubtitles = burnInSubtitles,
+            videoQuality = videoQuality
         ) { msg ->
             showToast(msg)
         }
@@ -1899,11 +1907,20 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         atmosphere: MangaAtmospherePreset
     ) = mangaDubManager.updatePanelAtmosphere(projectId, chapterId, pageIndex, panelId, atmosphere)
 
+    fun updateMangaPanelCameraEffect(
+        projectId: String,
+        chapterId: String,
+        pageIndex: Int,
+        panelId: String,
+        cameraEffect: MangaPanelCameraEffect
+    ) = mangaDubManager.updatePanelCameraEffect(projectId, chapterId, pageIndex, panelId, cameraEffect)
+
     fun updateMangaProjectConfig(
         projectId: String,
         readingOrder: MangaReadingOrder? = null,
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
+        videoQuality: MangaVideoQuality? = null,
         enableAtmosphereFx: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
@@ -1914,6 +1931,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         readingOrder = readingOrder,
         videoAspect = videoAspect,
         burnInSubtitles = burnInSubtitles,
+        videoQuality = videoQuality,
         enableAtmosphereFx = enableAtmosphereFx,
         powerUserVisionUrl = powerUserVisionUrl,
         preferredVisionModel = preferredVisionModel,

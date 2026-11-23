@@ -4,7 +4,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.BlurMaskFilter
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -18,23 +17,39 @@ import android.media.MediaCodecInfo
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.opengl.EGL14
+import android.opengl.EGLConfig
+import android.opengl.EGLContext
+import android.opengl.EGLDisplay
+import android.opengl.EGLExt
+import android.opengl.EGLSurface
+import android.opengl.GLES20
+import android.opengl.GLUtils
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
+import android.view.Surface
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaChapterEntry
+import com.projectmika.purrtts.core.manga.MangaDeterministicEffectsEngine
 import com.projectmika.purrtts.core.manga.MangaEmotionalPacer
 import com.projectmika.purrtts.core.manga.MangaNormalizedRect
 import com.projectmika.purrtts.core.manga.MangaPageEntry
+import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaPanelNode
+import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSpeechLine
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
+import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.engine.audiobook.M4bAudiobookMuxer
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
+import java.nio.ByteOrder
+import java.nio.FloatBuffer
 import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.min
@@ -44,18 +59,20 @@ import kotlin.math.sin
  * ✨ HARDWARE MEDIACODEC MOTION-COMIC .MP4 VIDEO & AAC MUXER (TOOL-11) ✨
  *
  * Encodes a complete dubbed manga chapter into a hardware H.264/AVC + AAC `.mp4`:
- * - Uses isolated single-track Video + Audio encodes followed by a fast dual-track `MediaExtractor`
- *   mux so `MediaCodec` buffers never deadlock across differing format-ready timings.
- * - Renders Holodeck dimmed page backdrops (`HolodeckOverlay.jsx`), cubic-bezier panel camera pans,
- *   GachaSwipe Ken Burns drifts (`photoViewerCamera.js`), `AtmosphereEngine` weather/combat particles,
- *   and synchronized bottom speaker subtitle HUD pills.
+ * - Uses EGL14 + `eglPresentationTimeANDROID` + deterministic output PTS normalization so
+ *   every panel locks 1:1 with its spoken audio span (zero fast-forwarding or end-frame freezes).
+ * - Decodes high-resolution page sources per `MangaVideoQuality` (480p / 720p / 1080p) and allocates
+ *   dedicated bitrate headroom without rate-controller starvation.
+ * - Executes `MangaDeterministicEffectsEngine` reading sweeps, readable entry/exit hold plateaus,
+ *   impact bursts, and non-overlapping bottom subtitle HUDs.
  */
 object MangaMotionVideoMuxer {
 
+    private const val TAG = "MangaMotionVideoMuxer"
     private const val FPS = 24
-    private const val VIDEO_BITRATE = 4_000_000
-    private const val ESTABLISH_HOLD_MS = 650L
-    private const val PAN_TRANSITION_MS = 400L
+    private const val ESTABLISH_HOLD_MS = 500L
+    private const val PAN_TRANSITION_MS = 320L
+    private const val EGL_RECORDABLE_ANDROID = 0x3142
 
     data class RenderResult(
         val internalMp4File: File,
@@ -97,6 +114,7 @@ object MangaMotionVideoMuxer {
         override val page: MangaPageEntry,
         val panel: MangaPanelNode,
         val atmosphere: MangaAtmospherePreset,
+        val cameraEffect: MangaPanelCameraEffect,
         val lines: List<TimedDialogueSpan>
     ) : ShotSegment
 
@@ -113,11 +131,23 @@ object MangaMotionVideoMuxer {
         burnInSubtitles: Boolean,
         enableAtmosphereFx: Boolean,
         destMp4File: File,
+        quality: MangaVideoQuality = MangaVideoQuality.HD_720P,
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): RenderResult {
         if (chapter.pages.isEmpty()) {
             throw IllegalStateException("Chapter has no pages to render")
         }
+
+        val (width, height) = aspect.resolveDimensions(quality)
+        val pad = minOf(width, height) * 0.028f
+        val subtitleReserveH = if (burnInSubtitles) {
+            if (width < height) height * 0.165f else height * 0.21f
+        } else {
+            0f
+        }
+        val availW = (width - pad * 2f).coerceAtLeast(64f)
+        val availH = (height - pad * 2f - subtitleReserveH).coerceAtLeast(height * 0.45f)
+        val stageAspect = availW / availH.coerceAtLeast(1f)
 
         val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
         val shots = ArrayList<ShotSegment>()
@@ -131,6 +161,7 @@ object MangaMotionVideoMuxer {
             cursorMs += ESTABLISH_HOLD_MS
 
             var prevRect = fullPageRect
+            val totalPanelsOnPage = page.panels.size
             for (panel in page.panels) {
                 val atmo = if (enableAtmosphereFx) {
                     MangaEmotionalPacer.resolveAtmosphere(
@@ -141,13 +172,34 @@ object MangaMotionVideoMuxer {
                 } else {
                     MangaAtmospherePreset.NONE
                 }
+                val camEffect = MangaDeterministicEffectsEngine.resolveCameraEffect(
+                    panel = panel,
+                    totalPanelsOnPage = totalPanelsOnPage,
+                    videoAspect = aspect
+                )
+                val entryState = MangaDeterministicEffectsEngine.computeViewportState(
+                    panel = panel,
+                    effect = camEffect,
+                    progress = 0f,
+                    readingOrder = chapter.readingOrder,
+                    videoAspect = aspect,
+                    stageAspect = stageAspect
+                )
+                val exitState = MangaDeterministicEffectsEngine.computeViewportState(
+                    panel = panel,
+                    effect = camEffect,
+                    progress = 1f,
+                    readingOrder = chapter.readingOrder,
+                    videoAspect = aspect,
+                    stageAspect = stageAspect
+                )
 
                 shots += PanTransitionShot(
                     startMs = cursorMs,
                     endMs = cursorMs + PAN_TRANSITION_MS,
                     page = page,
                     fromRect = prevRect,
-                    toRect = panel.cameraStartRect,
+                    toRect = entryState.sourceCropRect,
                     atmosphere = atmo
                 )
                 audioSpans += AudioSpan(cursorMs, PAN_TRANSITION_MS, null)
@@ -189,14 +241,15 @@ object MangaMotionVideoMuxer {
                     page = page,
                     panel = panel,
                     atmosphere = atmo,
+                    cameraEffect = camEffect,
                     lines = timedLines
                 )
-                prevRect = panel.cameraEndRect
+                prevRect = exitState.sourceCropRect
             }
         }
 
         val totalDurationMs = cursorMs.coerceAtLeast(1000L)
-        val totalFrames = ((totalDurationMs * FPS) / 1000L).toInt().coerceAtLeast(24)
+        val totalFrames = (((totalDurationMs * FPS) + 999L) / 1000L).toInt().coerceAtLeast(24)
 
         destMp4File.parentFile?.mkdirs()
         val tempVideoFile = File(destMp4File.parentFile, "${destMp4File.nameWithoutExtension}.vid.tmp.mp4")
@@ -206,10 +259,17 @@ object MangaMotionVideoMuxer {
         if (destMp4File.exists()) destMp4File.delete()
 
         try {
-            onProgress(0.05f, "ENCODING VIDEO ($totalFrames FRAMES @ ${aspect.widthPx}x${aspect.heightPx})...")
+            onProgress(0.05f, "ENCODING VIDEO ($totalFrames FRAMES @ ${width}x${height} • ${quality.shortLabel})...")
             encodeVideoTrack(
-                width = aspect.widthPx,
-                height = aspect.heightPx,
+                width = width,
+                height = height,
+                pad = pad,
+                availW = availW,
+                availH = availH,
+                stageAspect = stageAspect,
+                aspect = aspect,
+                quality = quality,
+                readingOrder = chapter.readingOrder,
                 totalFrames = totalFrames,
                 totalDurationMs = totalDurationMs,
                 shots = shots,
@@ -230,6 +290,7 @@ object MangaMotionVideoMuxer {
             encodeAacTrack(
                 pcm16 = pcmStream,
                 sampleRate = sampleRate,
+                bitrateBps = quality.audioBitrateBps,
                 tempAudioFile = tempAudioFile,
                 onProgress = { p ->
                     onProgress(
@@ -259,6 +320,13 @@ object MangaMotionVideoMuxer {
     private fun encodeVideoTrack(
         width: Int,
         height: Int,
+        pad: Float,
+        availW: Float,
+        availH: Float,
+        stageAspect: Float,
+        aspect: MangaVideoAspect,
+        quality: MangaVideoQuality,
+        readingOrder: MangaReadingOrder,
         totalFrames: Int,
         totalDurationMs: Long,
         shots: List<ShotSegment>,
@@ -268,7 +336,7 @@ object MangaMotionVideoMuxer {
     ) {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-            setInteger(MediaFormat.KEY_BIT_RATE, VIDEO_BITRATE)
+            setInteger(MediaFormat.KEY_BIT_RATE, quality.videoBitrateBps)
             setInteger(MediaFormat.KEY_FRAME_RATE, FPS)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1)
         }
@@ -278,18 +346,38 @@ object MangaMotionVideoMuxer {
         val inputSurface = encoder.createInputSurface()
         encoder.start()
 
+        val eglRenderer = runCatching {
+            EglBitmapSurfaceRenderer(inputSurface, width, height)
+        }.onFailure { err ->
+            Log.w(TAG, "EGL surface presentation timer unavailable; using Surface Canvas + PTS override", err)
+        }.getOrNull()
+        val frameBitmap = if (eglRenderer != null) {
+            Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        } else {
+            null
+        }
+        val bitmapCanvas = frameBitmap?.let(::Canvas)
+
         val muxer = MediaMuxer(tempVideoFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var trackIdx = -1
         var muxerStarted = false
         val bufferInfo = MediaCodec.BufferInfo()
+        var encodedSampleCount = 0L
+        var lastWrittenPtsUs = -1L
 
-        fun drainVideo(endOfStream: Boolean) {
+        fun drainVideo(endOfStream: Boolean, allowBriefWait: Boolean) {
             if (endOfStream) {
                 encoder.signalEndOfInputStream()
             }
             var eosWaitTries = 0
+            var pollCount = 0
             while (true) {
-                val timeout = if (endOfStream) 10_000L else 0L
+                val timeout = when {
+                    endOfStream -> 10_000L
+                    allowBriefWait && pollCount == 0 -> 2_500L
+                    else -> 0L
+                }
+                pollCount++
                 val outIdx = encoder.dequeueOutputBuffer(bufferInfo, timeout)
                 when {
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
@@ -306,9 +394,13 @@ object MangaMotionVideoMuxer {
                     outIdx >= 0 -> {
                         eosWaitTries = 0
                         val outBuf = encoder.getOutputBuffer(outIdx)
-                        if (outBuf != null && bufferInfo.size > 0 && muxerStarted &&
-                            (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
-                        ) {
+                        val isConfig = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0
+                        if (outBuf != null && bufferInfo.size > 0 && muxerStarted && !isConfig) {
+                            val targetPtsUs = ((encodedSampleCount * 1_000_000L) / FPS.toLong())
+                                .coerceAtLeast(lastWrittenPtsUs + 1L)
+                            bufferInfo.presentationTimeUs = targetPtsUs
+                            lastWrittenPtsUs = targetPtsUs
+                            encodedSampleCount++
                             outBuf.position(bufferInfo.offset)
                             outBuf.limit(bufferInfo.offset + bufferInfo.size)
                             muxer.writeSampleData(trackIdx, outBuf, bufferInfo)
@@ -328,24 +420,30 @@ object MangaMotionVideoMuxer {
         val paint = RenderPaints(width, height)
 
         try {
+            val maxTimeMs = (totalDurationMs - 1L).coerceAtLeast(0L)
             for (frameIdx in 0 until totalFrames) {
-                val timeMs = ((frameIdx.toLong() * 1000L) / FPS.toLong()).coerceAtMost(totalDurationMs)
+                val timeMs = ((frameIdx.toLong() * 1000L) / FPS.toLong()).coerceAtMost(maxTimeMs)
                 val activeShot = shots.firstOrNull { timeMs in it.startMs until it.endMs } ?: shots.last()
 
                 if (cachedPagePath != activeShot.page.localImagePath) {
                     cachedPageBmp?.recycle()
                     cachedBackdropBmp?.recycle()
                     cachedPagePath = activeShot.page.localImagePath
-                    cachedPageBmp = decodeBoundedPageBitmap(cachedPagePath!!, 1920)
+                    cachedPageBmp = decodeBoundedPageBitmap(cachedPagePath!!, quality.maxPageDecodeDimPx)
                     cachedBackdropBmp = cachedPageBmp?.let { createDimmedBackdropBitmap(it, width, height) }
                 }
 
-                val canvas = inputSurface.lockCanvas(null)
-                try {
+                if (eglRenderer != null && frameBitmap != null && bitmapCanvas != null) {
                     drawMangaFrame(
-                        canvas = canvas,
+                        canvas = bitmapCanvas,
                         width = width,
                         height = height,
+                        pad = pad,
+                        availW = availW,
+                        availH = availH,
+                        stageAspect = stageAspect,
+                        aspect = aspect,
+                        readingOrder = readingOrder,
                         frameIdx = frameIdx,
                         timeMs = timeMs,
                         shot = activeShot,
@@ -354,19 +452,45 @@ object MangaMotionVideoMuxer {
                         burnInSubtitles = burnInSubtitles,
                         paints = paint
                     )
-                } finally {
-                    inputSurface.unlockCanvasAndPost(canvas)
+                    val ptsNs = (frameIdx.toLong() * 1_000_000_000L) / FPS.toLong()
+                    eglRenderer.drawBitmap(frameBitmap, ptsNs)
+                } else {
+                    val canvas = inputSurface.lockCanvas(null)
+                    try {
+                        drawMangaFrame(
+                            canvas = canvas,
+                            width = width,
+                            height = height,
+                            pad = pad,
+                            availW = availW,
+                            availH = availH,
+                            stageAspect = stageAspect,
+                            aspect = aspect,
+                            readingOrder = readingOrder,
+                            frameIdx = frameIdx,
+                            timeMs = timeMs,
+                            shot = activeShot,
+                            pageBitmap = cachedPageBmp,
+                            backdropBitmap = cachedBackdropBmp,
+                            burnInSubtitles = burnInSubtitles,
+                            paints = paint
+                        )
+                    } finally {
+                        inputSurface.unlockCanvasAndPost(canvas)
+                    }
                 }
 
-                drainVideo(endOfStream = false)
+                drainVideo(endOfStream = false, allowBriefWait = frameIdx >= 2)
                 if (frameIdx % 8 == 0 || frameIdx == totalFrames - 1) {
                     onProgress(frameIdx + 1, totalFrames)
                 }
             }
-            drainVideo(endOfStream = true)
+            drainVideo(endOfStream = true, allowBriefWait = true)
         } finally {
             cachedPageBmp?.recycle()
             cachedBackdropBmp?.recycle()
+            frameBitmap?.recycle()
+            runCatching { eglRenderer?.release() }
             runCatching { inputSurface.release() }
             runCatching { encoder.stop() }
             runCatching { encoder.release() }
@@ -381,6 +505,12 @@ object MangaMotionVideoMuxer {
         canvas: Canvas,
         width: Int,
         height: Int,
+        pad: Float,
+        availW: Float,
+        availH: Float,
+        stageAspect: Float,
+        aspect: MangaVideoAspect,
+        readingOrder: MangaReadingOrder,
         frameIdx: Int,
         timeMs: Long,
         shot: ShotSegment,
@@ -399,12 +529,14 @@ object MangaMotionVideoMuxer {
         val viewportNorm: MangaNormalizedRect
         val atmosphere: MangaAtmospherePreset
         val activeDialogue: MangaSpeechLine?
+        val camState: MangaDeterministicEffectsEngine.PanelCameraFrameState?
 
         when (shot) {
             is EstablishShot -> {
                 viewportNorm = shot.focusRect
                 atmosphere = MangaAtmospherePreset.NONE
                 activeDialogue = null
+                camState = null
             }
             is PanTransitionShot -> {
                 val rawT = ((timeMs - shot.startMs).toFloat() / (shot.endMs - shot.startMs).coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
@@ -412,16 +544,27 @@ object MangaMotionVideoMuxer {
                 viewportNorm = lerpRect(shot.fromRect, shot.toRect, eased)
                 atmosphere = shot.atmosphere
                 activeDialogue = null
+                camState = null
             }
             is PanelSpeakShot -> {
                 val rawT = ((timeMs - shot.startMs).toFloat() / (shot.endMs - shot.startMs).coerceAtLeast(1L).toFloat()).coerceIn(0f, 1f)
-                viewportNorm = lerpRect(shot.panel.cameraStartRect, shot.panel.cameraEndRect, rawT)
+                val state = MangaDeterministicEffectsEngine.computeViewportState(
+                    panel = shot.panel,
+                    effect = shot.cameraEffect,
+                    progress = rawT,
+                    readingOrder = readingOrder,
+                    videoAspect = aspect,
+                    stageAspect = stageAspect
+                )
+                camState = state
+                viewportNorm = state.sourceCropRect
                 atmosphere = shot.atmosphere
                 activeDialogue = shot.lines.firstOrNull { timeMs in it.startMs until it.endMs }?.line
+                    ?: shot.lines.lastOrNull { timeMs >= it.startMs }?.takeIf { timeMs <= it.endMs + 450L }?.line
             }
         }
 
-        // Layer 2: Active camera crop rendered crisp & centered with cyber frame border
+        // Layer 2: Active camera crop rendered crisp inside upper stage (zero overlap with subtitles)
         if (pageBitmap != null) {
             val bmpW = pageBitmap.width
             val bmpH = pageBitmap.height
@@ -431,10 +574,7 @@ object MangaMotionVideoMuxer {
             val srcBottom = (viewportNorm.bottom * bmpH).toInt().coerceIn(srcTop + 1, bmpH)
             val srcRect = Rect(srcLeft, srcTop, srcRight, srcBottom)
 
-            val pad = minOf(width, height) * 0.045f
-            val availW = width - pad * 2f
-            val availH = height - pad * 2f
-            val cropRatio = (srcRect.width().toFloat() / srcRect.height().toFloat().coerceAtLeast(1f))
+            val cropRatio = srcRect.width().toFloat() / srcRect.height().toFloat().coerceAtLeast(1f)
             val frameRatio = availW / availH.coerceAtLeast(1f)
             val dstW: Float
             val dstH: Float
@@ -445,16 +585,23 @@ object MangaMotionVideoMuxer {
                 dstH = availH
                 dstW = availH * cropRatio
             }
-            val dstLeft = (width - dstW) * 0.5f
-            val dstTop = (height - dstH) * 0.46f
+            val shakePxX = (camState?.shakeOffsetXFrac ?: 0f) * width
+            val shakePxY = (camState?.shakeOffsetYFrac ?: 0f) * height
+            val dstLeft = pad + (availW - dstW) * 0.5f + shakePxX
+            val dstTop = pad + (availH - dstH) * 0.5f + shakePxY
             val dstRect = RectF(dstLeft, dstTop, dstLeft + dstW, dstTop + dstH)
 
-            // Subtle drop shadow + neon accent rim
+            // Crisp dual-stroke neon border (hardware-fast, zero CPU BlurMaskFilter stall)
             canvas.drawRoundRect(
                 RectF(dstRect.left - 3f, dstRect.top - 3f, dstRect.right + 3f, dstRect.bottom + 3f),
                 8f, 8f, paints.panelGlowPaint
             )
             canvas.drawBitmap(pageBitmap, srcRect, dstRect, paints.bitmapPaint)
+
+            if (camState?.showSpeedLines == true) {
+                drawImpactSpeedLines(canvas, width, height, dstRect, frameIdx, camState.impactFlashAlpha, paints)
+            }
+
             canvas.drawRoundRect(dstRect, 6f, 6f, paints.panelBorderPaint)
         }
 
@@ -463,9 +610,43 @@ object MangaMotionVideoMuxer {
             drawAtmosphereParticles(canvas, width, height, frameIdx, atmosphere, paints)
         }
 
-        // Layer 4: Synchronized Speaker & Subtitle HUD pill
+        // Layer 4: Synchronized Speaker & Subtitle HUD pill (optional, strictly inside bottom zone)
         if (burnInSubtitles && activeDialogue != null && activeDialogue.sanitizedText.isNotBlank()) {
-            drawSubtitleHud(canvas, width, height, activeDialogue, paints)
+            drawSubtitleHud(canvas, width, height, pad, activeDialogue, paints)
+        }
+    }
+
+    private fun drawImpactSpeedLines(
+        canvas: Canvas,
+        width: Int,
+        height: Int,
+        dstRect: RectF,
+        frameIdx: Int,
+        flashAlpha: Float,
+        paints: RenderPaints
+    ) {
+        if (flashAlpha > 0.01f) {
+            paints.fxPaint.style = Paint.Style.FILL
+            paints.fxPaint.color = Color.argb((flashAlpha * 255).toInt().coerceIn(0, 90), 255, 255, 255)
+            canvas.drawRoundRect(dstRect, 6f, 6f, paints.fxPaint)
+        }
+        val cx = dstRect.centerX()
+        val cy = dstRect.centerY()
+        val maxR = minOf(width, height) * 0.85f
+        val innerR = minOf(dstRect.width(), dstRect.height()) * 0.44f
+        paints.speedLinePaint.color = Color.argb(110, 220, 248, 255)
+        for (i in 0 until 20) {
+            val angle = ((i * 18f) + (frameIdx % 3) * 4f) * (PI.toFloat() / 180f)
+            val dx = cos(angle)
+            val dy = sin(angle)
+            val r0 = innerR + ((i % 3) * 14f)
+            canvas.drawLine(
+                cx + dx * r0,
+                cy + dy * r0,
+                cx + dx * maxR,
+                cy + dy * maxR,
+                paints.speedLinePaint
+            )
         }
     }
 
@@ -528,30 +709,31 @@ object MangaMotionVideoMuxer {
         canvas: Canvas,
         width: Int,
         height: Int,
+        pad: Float,
         line: MangaSpeechLine,
         paints: RenderPaints
     ) {
         val text = line.sanitizedText
-        val maxBoxW = width * 0.86f
-        val maxTextW = maxBoxW - 44f
+        val maxBoxW = width * 0.92f
+        val maxTextW = maxBoxW - 36f
         val wrapped = wrapLines(text, paints.subTextPaint, maxTextW).take(3)
-        val lineH = paints.subTextPaint.textSize * 1.32f
-        val speakerH = paints.speakerTextPaint.textSize * 1.35f
-        val boxH = speakerH + wrapped.size * lineH + 28f
+        val lineH = paints.subTextPaint.textSize * 1.28f
+        val speakerH = paints.speakerTextPaint.textSize * 1.28f
+        val boxH = speakerH + wrapped.size * lineH + 20f
         val left = (width - maxBoxW) * 0.5f
-        val bottom = height - minOf(height * 0.045f, 34f)
+        val bottom = height - pad.coerceIn(10f, 30f)
         val top = bottom - boxH
         val boxRect = RectF(left, top, left + maxBoxW, bottom)
 
-        canvas.drawRoundRect(boxRect, 14f, 14f, paints.subBgPaint)
-        canvas.drawRoundRect(boxRect, 14f, 14f, paints.subBorderPaint)
+        canvas.drawRoundRect(boxRect, 12f, 12f, paints.subBgPaint)
+        canvas.drawRoundRect(boxRect, 12f, 12f, paints.subBorderPaint)
 
         val speakerLabel = line.speakerName.ifBlank { "SPEAKER" }.uppercase()
-        canvas.drawText(speakerLabel, left + 22f, top + 14f + paints.speakerTextPaint.textSize, paints.speakerTextPaint)
+        canvas.drawText(speakerLabel, left + 18f, top + 10f + paints.speakerTextPaint.textSize, paints.speakerTextPaint)
 
-        var textY = top + 18f + speakerH + paints.subTextPaint.textSize * 0.85f
+        var textY = top + 14f + speakerH + paints.subTextPaint.textSize * 0.85f
         for (row in wrapped) {
-            canvas.drawText(row, left + 22f, textY, paints.subTextPaint)
+            canvas.drawText(row, left + 18f, textY, paints.subTextPaint)
             textY += lineH
         }
     }
@@ -624,13 +806,14 @@ object MangaMotionVideoMuxer {
     private fun encodeAacTrack(
         pcm16: ByteArray,
         sampleRate: Int,
+        bitrateBps: Int = 128_000,
         tempAudioFile: File,
         onProgress: (Float) -> Unit = {}
     ) {
         val safePcm = if (pcm16.size >= 2) pcm16 else ByteArray(2048)
         val evenSize = safePcm.size - (safePcm.size and 1)
         val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, 1).apply {
-            setInteger(MediaFormat.KEY_BIT_RATE, 96_000)
+            setInteger(MediaFormat.KEY_BIT_RATE, bitrateBps)
             setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
             setInteger(MediaFormat.KEY_PCM_ENCODING, AudioFormat.ENCODING_PCM_16BIT)
             setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, 16384)
@@ -800,7 +983,13 @@ object MangaMotionVideoMuxer {
         while (opts.outWidth / sample > maxDim || opts.outHeight / sample > maxDim) {
             sample *= 2
         }
-        return BitmapFactory.decodeFile(path, BitmapFactory.Options().apply { inSampleSize = sample })
+        return BitmapFactory.decodeFile(
+            path,
+            BitmapFactory.Options().apply {
+                inSampleSize = sample
+                inPreferredConfig = Bitmap.Config.ARGB_8888
+            }
+        )
     }
 
     private fun createDimmedBackdropBitmap(page: Bitmap, width: Int, height: Int): Bitmap {
@@ -873,33 +1062,264 @@ object MangaMotionVideoMuxer {
         val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
         val panelGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 6f
-            color = Color.argb(120, 0, 229, 255)
-            maskFilter = BlurMaskFilter(10f, BlurMaskFilter.Blur.NORMAL)
+            strokeWidth = (baseUnit * 0.011f).coerceIn(5f, 12f)
+            color = Color.argb(65, 0, 229, 255)
         }
         val panelBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 3f
-            color = Color.argb(230, 0, 229, 255)
+            strokeWidth = (baseUnit * 0.0042f).coerceIn(2.5f, 5f)
+            color = Color.argb(235, 0, 229, 255)
+        }
+        val speedLinePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = (baseUnit * 0.003f).coerceIn(1.8f, 4f)
+            color = Color.argb(115, 220, 248, 255)
         }
         val fxPaint = Paint(Paint.ANTI_ALIAS_FLAG)
         val subBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
-            color = Color.argb(215, 8, 6, 16)
+            color = Color.argb(225, 8, 6, 16)
         }
         val subBorderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 2.5f
-            color = Color.argb(210, 255, 51, 102)
+            strokeWidth = (baseUnit * 0.0035f).coerceIn(2f, 4.5f)
+            color = Color.argb(215, 255, 51, 102)
         }
         val speakerTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(255, 0, 229, 255)
-            textSize = (baseUnit * 0.028f).coerceIn(16f, 28f)
+            textSize = (baseUnit * 0.026f).coerceIn(13f, 32f)
             isFakeBoldText = true
         }
         val subTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(255, 245, 245, 250)
-            textSize = (baseUnit * 0.032f).coerceIn(18f, 32f)
+            textSize = (baseUnit * 0.032f).coerceIn(16f, 38f)
         }
+    }
+
+    /**
+     * Renders `Bitmap` frames via OpenGL ES 2.0 onto `MediaCodec`'s `inputSurface` and stamps
+     * explicit synthetic timestamps with `EGLExt.eglPresentationTimeANDROID` so hardware rate
+     * control and muxed frame PTS stay locked cleanly at `FPS`.
+     */
+    private class EglBitmapSurfaceRenderer(
+        inputSurface: Surface,
+        private val width: Int,
+        private val height: Int
+    ) {
+        private var eglDisplay: EGLDisplay = EGL14.EGL_NO_DISPLAY
+        private var eglContext: EGLContext = EGL14.EGL_NO_CONTEXT
+        private var eglSurface: EGLSurface = EGL14.EGL_NO_SURFACE
+        private var programId: Int = 0
+        private var textureId: Int = 0
+        private var textureAllocated = false
+        private var aPosHandle = -1
+        private var aTexHandle = -1
+        private var uTexHandle = -1
+
+        private val quadVertices: FloatBuffer = makeFloatBuffer(
+            floatArrayOf(
+                -1f, -1f,
+                1f, -1f,
+                -1f, 1f,
+                1f, 1f
+            )
+        )
+        private val quadTexCoords: FloatBuffer = makeFloatBuffer(
+            floatArrayOf(
+                0f, 1f,
+                1f, 1f,
+                0f, 0f,
+                1f, 0f
+            )
+        )
+
+        init {
+            try {
+                eglDisplay = EGL14.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY)
+                check(eglDisplay != EGL14.EGL_NO_DISPLAY) { "eglGetDisplay failed" }
+
+                val vers = IntArray(2)
+                check(EGL14.eglInitialize(eglDisplay, vers, 0, vers, 1)) { "eglInitialize failed" }
+
+                val config = chooseEglConfig(eglDisplay)
+                val ctxAttribs = intArrayOf(EGL14.EGL_CONTEXT_CLIENT_VERSION, 2, EGL14.EGL_NONE)
+                eglContext = EGL14.eglCreateContext(eglDisplay, config, EGL14.EGL_NO_CONTEXT, ctxAttribs, 0)
+                check(eglContext != EGL14.EGL_NO_CONTEXT) { "eglCreateContext failed" }
+
+                val surfAttribs = intArrayOf(EGL14.EGL_NONE)
+                eglSurface = EGL14.eglCreateWindowSurface(eglDisplay, config, inputSurface, surfAttribs, 0)
+                check(eglSurface != EGL14.EGL_NO_SURFACE) { "eglCreateWindowSurface failed" }
+
+                check(EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) { "eglMakeCurrent failed" }
+
+                val vs = compileShader(
+                    GLES20.GL_VERTEX_SHADER,
+                    """
+                    attribute vec2 aPosition;
+                    attribute vec2 aTexCoord;
+                    varying vec2 vTexCoord;
+                    void main() {
+                        gl_Position = vec4(aPosition, 0.0, 1.0);
+                        vTexCoord = aTexCoord;
+                    }
+                    """.trimIndent()
+                )
+                val fs = compileShader(
+                    GLES20.GL_FRAGMENT_SHADER,
+                    """
+                    precision mediump float;
+                    varying vec2 vTexCoord;
+                    uniform sampler2D uTexture;
+                    void main() {
+                        gl_FragColor = texture2D(uTexture, vTexCoord);
+                    }
+                    """.trimIndent()
+                )
+                programId = GLES20.glCreateProgram()
+                GLES20.glAttachShader(programId, vs)
+                GLES20.glAttachShader(programId, fs)
+                GLES20.glLinkProgram(programId)
+                val linkStatus = IntArray(1)
+                GLES20.glGetProgramiv(programId, GLES20.GL_LINK_STATUS, linkStatus, 0)
+                GLES20.glDeleteShader(vs)
+                GLES20.glDeleteShader(fs)
+                check(linkStatus[0] == GLES20.GL_TRUE) { "GLES program link failed" }
+
+                aPosHandle = GLES20.glGetAttribLocation(programId, "aPosition")
+                aTexHandle = GLES20.glGetAttribLocation(programId, "aTexCoord")
+                uTexHandle = GLES20.glGetUniformLocation(programId, "uTexture")
+
+                val texIds = IntArray(1)
+                GLES20.glGenTextures(1, texIds, 0)
+                textureId = texIds[0]
+                GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_LINEAR)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE)
+                GLES20.glTexParameteri(GLES20.GL_TEXTURE_2D, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE)
+            } catch (err: Throwable) {
+                release()
+                throw err
+            }
+        }
+
+        fun drawBitmap(bitmap: Bitmap, ptsNs: Long) {
+            if (EGL14.eglGetCurrentContext() != eglContext ||
+                EGL14.eglGetCurrentSurface(EGL14.EGL_DRAW) != eglSurface
+            ) {
+                EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)
+            }
+            GLES20.glViewport(0, 0, width, height)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)
+            GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, textureId)
+            GLES20.glPixelStorei(GLES20.GL_UNPACK_ALIGNMENT, 4)
+            if (!textureAllocated) {
+                GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0)
+                textureAllocated = true
+            } else {
+                GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, bitmap)
+            }
+
+            GLES20.glUseProgram(programId)
+            GLES20.glUniform1i(uTexHandle, 0)
+
+            quadVertices.position(0)
+            GLES20.glEnableVertexAttribArray(aPosHandle)
+            GLES20.glVertexAttribPointer(aPosHandle, 2, GLES20.GL_FLOAT, false, 0, quadVertices)
+
+            quadTexCoords.position(0)
+            GLES20.glEnableVertexAttribArray(aTexHandle)
+            GLES20.glVertexAttribPointer(aTexHandle, 2, GLES20.GL_FLOAT, false, 0, quadTexCoords)
+
+            GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
+
+            GLES20.glDisableVertexAttribArray(aPosHandle)
+            GLES20.glDisableVertexAttribArray(aTexHandle)
+
+            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNs)
+            EGL14.eglSwapBuffers(eglDisplay, eglSurface)
+        }
+
+        fun release() {
+            if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
+                runCatching {
+                    EGL14.eglMakeCurrent(
+                        eglDisplay,
+                        EGL14.EGL_NO_SURFACE,
+                        EGL14.EGL_NO_SURFACE,
+                        EGL14.EGL_NO_CONTEXT
+                    )
+                }
+                if (textureId != 0) {
+                    runCatching { GLES20.glDeleteTextures(1, intArrayOf(textureId), 0) }
+                    textureId = 0
+                }
+                if (programId != 0) {
+                    runCatching { GLES20.glDeleteProgram(programId) }
+                    programId = 0
+                }
+                if (eglSurface != EGL14.EGL_NO_SURFACE) {
+                    runCatching { EGL14.eglDestroySurface(eglDisplay, eglSurface) }
+                    eglSurface = EGL14.EGL_NO_SURFACE
+                }
+                if (eglContext != EGL14.EGL_NO_CONTEXT) {
+                    runCatching { EGL14.eglDestroyContext(eglDisplay, eglContext) }
+                    eglContext = EGL14.EGL_NO_CONTEXT
+                }
+                runCatching { EGL14.eglTerminate(eglDisplay) }
+                eglDisplay = EGL14.EGL_NO_DISPLAY
+            }
+        }
+
+        private fun chooseEglConfig(display: EGLDisplay): EGLConfig {
+            val attribsPrimary = intArrayOf(
+                EGL14.EGL_RED_SIZE, 8,
+                EGL14.EGL_GREEN_SIZE, 8,
+                EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_ALPHA_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                EGL_RECORDABLE_ANDROID, 1,
+                EGL14.EGL_NONE
+            )
+            val attribsFallback = intArrayOf(
+                EGL14.EGL_RED_SIZE, 8,
+                EGL14.EGL_GREEN_SIZE, 8,
+                EGL14.EGL_BLUE_SIZE, 8,
+                EGL14.EGL_ALPHA_SIZE, 8,
+                EGL14.EGL_RENDERABLE_TYPE, EGL14.EGL_OPENGL_ES2_BIT,
+                EGL14.EGL_NONE
+            )
+            val configs = arrayOfNulls<EGLConfig>(1)
+            val numConfigs = IntArray(1)
+            if (EGL14.eglChooseConfig(display, attribsPrimary, 0, configs, 0, 1, numConfigs, 0) &&
+                numConfigs[0] > 0 && configs[0] != null
+            ) {
+                return configs[0]!!
+            }
+            check(
+                EGL14.eglChooseConfig(display, attribsFallback, 0, configs, 0, 1, numConfigs, 0) &&
+                    numConfigs[0] > 0 && configs[0] != null
+            ) { "eglChooseConfig failed" }
+            return configs[0]!!
+        }
+
+        private fun compileShader(type: Int, src: String): Int {
+            val shader = GLES20.glCreateShader(type)
+            GLES20.glShaderSource(shader, src)
+            GLES20.glCompileShader(shader)
+            val status = IntArray(1)
+            GLES20.glGetShaderiv(shader, GLES20.GL_COMPILE_STATUS, status, 0)
+            check(status[0] == GLES20.GL_TRUE) { "GLES shader compile failed: ${GLES20.glGetShaderInfoLog(shader)}" }
+            return shader
+        }
+
+        private fun makeFloatBuffer(data: FloatArray): FloatBuffer =
+            ByteBuffer.allocateDirect(data.size * 4)
+                .order(ByteOrder.nativeOrder())
+                .asFloatBuffer()
+                .apply {
+                    put(data)
+                    position(0)
+                }
     }
 }

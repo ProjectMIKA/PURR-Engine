@@ -43,9 +43,45 @@ enum class MangaReadingOrder(val label: String) {
 }
 
 @Serializable
-enum class MangaVideoAspect(val label: String, val widthPx: Int, val heightPx: Int) {
-    LANDSCAPE_16_9("16:9 LANDSCAPE (1280x720)", 1280, 720),
-    VERTICAL_9_16("9:16 VERTICAL (720x1280)", 720, 1280)
+enum class MangaVideoAspect(
+    val label: String,
+    val shortLabel: String,
+    val widthPx: Int,
+    val heightPx: Int
+) {
+    VERTICAL_9_16("PORTRAIT (9:16)", "PORTRAIT 9:16", 720, 1280),
+    LANDSCAPE_16_9("LANDSCAPE (16:9)", "LANDSCAPE 16:9", 1280, 720);
+
+    fun resolveDimensions(quality: MangaVideoQuality): Pair<Int, Int> = when (this) {
+        VERTICAL_9_16 -> quality.shortSidePx to quality.longSidePx
+        LANDSCAPE_16_9 -> quality.longSidePx to quality.shortSidePx
+    }
+}
+
+@Serializable
+enum class MangaVideoQuality(
+    val label: String,
+    val shortLabel: String,
+    val shortSidePx: Int,
+    val longSidePx: Int,
+    val videoBitrateBps: Int,
+    val audioBitrateBps: Int,
+    val maxPageDecodeDimPx: Int
+) {
+    SD_480P("480P (SD • FAST)", "480P", 480, 848, 3_500_000, 128_000, 2560),
+    HD_720P("720P (HD • DEFAULT)", "720P", 720, 1280, 8_000_000, 128_000, 3200),
+    FHD_1080P("1080P (FULL HD • CRISP)", "1080P", 1080, 1920, 14_000_000, 160_000, 4096)
+}
+
+@Serializable
+enum class MangaPanelCameraEffect(val label: String) {
+    AUTO("AUTO (Deterministic)"),
+    READABILITY_HOLD("CRISP HOLD"),
+    READING_AXIS_PAN("READING SWEEP"),
+    DRAMATIC_PUSH_IN("DRAMATIC PUSH-IN"),
+    REVEAL_PULL_BACK("SPLASH PULL-BACK"),
+    IMPACT_SHAKE_ZOOM("IMPACT BURST"),
+    DIAGONAL_DRIFT("KEN BURNS DRIFT")
 }
 
 @Serializable
@@ -118,6 +154,7 @@ data class MangaPanelNode(
     val cameraStartRect: MangaNormalizedRect,
     val cameraEndRect: MangaNormalizedRect,
     val atmosphere: MangaAtmospherePreset = MangaAtmospherePreset.AUTO,
+    val cameraEffect: MangaPanelCameraEffect = MangaPanelCameraEffect.AUTO,
     val sceneMood: String = "",
     val gemmaThoughtTrace: String = "",
     val lines: List<MangaSpeechLine> = emptyList()
@@ -232,8 +269,9 @@ data class MangaSeriesProject(
     val createdAtEpochMs: Long,
     val updatedAtEpochMs: Long,
     val readingOrder: MangaReadingOrder = MangaReadingOrder.RTL_MANGA,
-    val videoAspect: MangaVideoAspect = MangaVideoAspect.LANDSCAPE_16_9,
+    val videoAspect: MangaVideoAspect = MangaVideoAspect.VERTICAL_9_16,
     val burnInSubtitles: Boolean = true,
+    val videoQuality: MangaVideoQuality = MangaVideoQuality.HD_720P,
     val enableAtmosphereFx: Boolean = true,
     val powerUserVisionUrl: String = "",
     val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO,
@@ -380,6 +418,261 @@ object MangaEmotionalPacer {
 
             else -> MangaAtmospherePreset.NONE
         }
+    }
+}
+
+/**
+ * ✨ DETERMINISTIC PANEL CAMERA & MOTION FX ENGINE (Zero-LLM, Zero-Hallucination) ✨
+ *
+ * Computes repeatable camera choreography directly from panel geometry (`area`, `aspect`),
+ * output aspect ratio, reading direction, and scene/dialogue intensity.
+ * Protects comic speech bubbles via entry/exit read holds and full-margin framing.
+ */
+object MangaDeterministicEffectsEngine {
+
+    data class PanelCameraFrameState(
+        val sourceCropRect: MangaNormalizedRect,
+        val zoomScale: Float = 1.0f,
+        val panOffsetXFrac: Float = 0f,
+        val panOffsetYFrac: Float = 0f,
+        val shakeOffsetXFrac: Float = 0f,
+        val shakeOffsetYFrac: Float = 0f,
+        val impactFlashAlpha: Float = 0f,
+        val showSpeedLines: Boolean = false
+    )
+
+    private val IMPACT_KEYWORDS = listOf(
+        "anger", "shout", "battle", "furious", "rage", "fierce", "scream",
+        "explosion", "attack", "blast", "clash", "shock", "punch", "strike", "smash", "power"
+    )
+
+    fun resolveCameraEffect(
+        panel: MangaPanelNode,
+        totalPanelsOnPage: Int,
+        videoAspect: MangaVideoAspect
+    ): MangaPanelCameraEffect {
+        if (panel.cameraEffect != MangaPanelCameraEffect.AUTO) {
+            return panel.cameraEffect
+        }
+
+        val rect = panel.panelRect.clamped()
+        val area = rect.width * rect.height
+        val panelAspect = rect.width / rect.height.coerceAtLeast(0.05f)
+
+        val dialogueCorpus = buildString {
+            append(panel.sceneMood)
+            append(' ')
+            panel.lines.forEach { ln ->
+                append(ln.emotionTag)
+                append(' ')
+                append(ln.rawText)
+                append(' ')
+                append(ln.sanitizedText)
+                append(' ')
+            }
+        }.lowercase(Locale.ROOT)
+
+        val hasBurstPunctuation = "?!" in dialogueCorpus ||
+            "!?" in dialogueCorpus ||
+            "!!" in dialogueCorpus
+        if ((hasBurstPunctuation || IMPACT_KEYWORDS.any { it in dialogueCorpus }) && panel.lines.isNotEmpty()) {
+            return MangaPanelCameraEffect.IMPACT_SHAKE_ZOOM
+        }
+
+        val wideInPortrait = videoAspect == MangaVideoAspect.VERTICAL_9_16 &&
+            panelAspect >= 1.35f &&
+            rect.width >= 0.50f
+        val tallInLandscape = videoAspect == MangaVideoAspect.LANDSCAPE_16_9 &&
+            panelAspect <= 0.70f &&
+            rect.height >= 0.50f
+        if (wideInPortrait || tallInLandscape) {
+            return MangaPanelCameraEffect.READING_AXIS_PAN
+        }
+
+        val seed = ((panel.pageIndex * 31 + panel.panelIndex * 17) and 0x7FFFFFFF)
+        return when {
+            area >= 0.45f || totalPanelsOnPage == 1 -> {
+                if (seed % 2 == 0) MangaPanelCameraEffect.REVEAL_PULL_BACK
+                else MangaPanelCameraEffect.DRAMATIC_PUSH_IN
+            }
+            area < 0.18f -> MangaPanelCameraEffect.READABILITY_HOLD
+            area >= 0.30f -> {
+                if (seed % 2 == 0) MangaPanelCameraEffect.DRAMATIC_PUSH_IN
+                else MangaPanelCameraEffect.DIAGONAL_DRIFT
+            }
+            else -> MangaPanelCameraEffect.DIAGONAL_DRIFT
+        }
+    }
+
+    fun computeViewportState(
+        panel: MangaPanelNode,
+        effect: MangaPanelCameraEffect,
+        progress: Float,
+        readingOrder: MangaReadingOrder,
+        videoAspect: MangaVideoAspect,
+        stageAspect: Float
+    ): PanelCameraFrameState {
+        val rawT = progress.coerceIn(0f, 1f)
+        // Entry (0..14%) and exit (86..100%) hold plateaus let viewers read first/last speech bubbles cleanly.
+        val easedT = when {
+            rawT <= 0.14f -> 0f
+            rawT >= 0.86f -> 1f
+            else -> {
+                val u = (rawT - 0.14f) / 0.72f
+                if (u < 0.5f) 4f * u * u * u else 1f - (-2f * u + 2f).let { it * it * it } / 2f
+            }
+        }
+
+        val resolvedEffect = if (effect == MangaPanelCameraEffect.AUTO) {
+            resolveCameraEffect(panel, totalPanelsOnPage = 2, videoAspect = videoAspect)
+        } else {
+            effect
+        }
+
+        val rect = panel.panelRect.clamped()
+        val panelAspect = rect.width / rect.height.coerceAtLeast(0.05f)
+        val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
+
+        return when (resolvedEffect) {
+            MangaPanelCameraEffect.READABILITY_HOLD -> {
+                PanelCameraFrameState(
+                    sourceCropRect = rect,
+                    zoomScale = 1.0f
+                )
+            }
+
+            MangaPanelCameraEffect.READING_AXIS_PAN -> {
+                when {
+                    panelAspect > stageAspect * 1.15f -> {
+                        val windowW = (rect.width * 0.72f).coerceIn(rect.width * 0.55f, rect.width)
+                        val minLeft = rect.left
+                        val maxLeft = (rect.right - windowW).coerceAtLeast(rect.left)
+                        val startLeft = if (rtl) maxLeft else minLeft
+                        val endLeft = if (rtl) minLeft else maxLeft
+                        val curLeft = startLeft + (endLeft - startLeft) * easedT
+                        val crop = MangaNormalizedRect(
+                            left = curLeft,
+                            top = rect.top,
+                            right = (curLeft + windowW).coerceAtMost(rect.right),
+                            bottom = rect.bottom
+                        ).clamped()
+                        PanelCameraFrameState(
+                            sourceCropRect = crop,
+                            zoomScale = (rect.width / windowW).coerceIn(1.0f, 1.85f),
+                            panOffsetXFrac = ((crop.centerX - rect.centerX) / rect.width.coerceAtLeast(0.01f))
+                        )
+                    }
+                    panelAspect < stageAspect * 0.85f -> {
+                        val windowH = (rect.height * 0.72f).coerceIn(rect.height * 0.55f, rect.height)
+                        val minTop = rect.top
+                        val maxTop = (rect.bottom - windowH).coerceAtLeast(rect.top)
+                        val curTop = minTop + (maxTop - minTop) * easedT
+                        val crop = MangaNormalizedRect(
+                            left = rect.left,
+                            top = curTop,
+                            right = rect.right,
+                            bottom = (curTop + windowH).coerceAtMost(rect.bottom)
+                        ).clamped()
+                        PanelCameraFrameState(
+                            sourceCropRect = crop,
+                            zoomScale = (rect.height / windowH).coerceIn(1.0f, 1.85f),
+                            panOffsetYFrac = ((crop.centerY - rect.centerY) / rect.height.coerceAtLeast(0.01f))
+                        )
+                    }
+                    else -> {
+                        val dx = rect.width * 0.025f
+                        val startL = if (rtl) rect.left + dx else rect.left
+                        val endL = if (rtl) rect.left else rect.left + dx
+                        val curL = startL + (endL - startL) * easedT
+                        PanelCameraFrameState(
+                            sourceCropRect = MangaNormalizedRect(
+                                left = curL,
+                                top = rect.top,
+                                right = curL + (rect.width - dx),
+                                bottom = rect.bottom
+                            ).clamped(),
+                            zoomScale = 1.03f,
+                            panOffsetXFrac = if (rtl) 0.02f - 0.04f * easedT else -0.02f + 0.04f * easedT
+                        )
+                    }
+                }
+            }
+
+            MangaPanelCameraEffect.DRAMATIC_PUSH_IN -> {
+                val insetFrac = 0.032f * easedT
+                PanelCameraFrameState(
+                    sourceCropRect = insetRect(rect, insetFrac),
+                    zoomScale = 1.0f + 0.04f * easedT
+                )
+            }
+
+            MangaPanelCameraEffect.REVEAL_PULL_BACK -> {
+                val insetFrac = 0.045f * (1f - easedT)
+                PanelCameraFrameState(
+                    sourceCropRect = insetRect(rect, insetFrac),
+                    zoomScale = 1.06f - 0.06f * easedT
+                )
+            }
+
+            MangaPanelCameraEffect.IMPACT_SHAKE_ZOOM -> {
+                val activeShake = rawT in 0f..0.28f
+                val decay = if (activeShake) kotlin.math.exp(-rawT * 9.0f) else 0f
+                val shakeX = if (activeShake) kotlin.math.sin(rawT * 52f) * 0.012f * decay else 0f
+                val shakeY = if (activeShake) kotlin.math.cos(rawT * 43f) * 0.009f * decay else 0f
+                val flash = if (rawT < 0.09f) (1f - rawT / 0.09f) * 0.25f else 0f
+                val microInset = 0.018f * (1f - easedT)
+                PanelCameraFrameState(
+                    sourceCropRect = insetRect(rect, microInset),
+                    zoomScale = if (activeShake) 1.04f else 1.01f,
+                    shakeOffsetXFrac = shakeX,
+                    shakeOffsetYFrac = shakeY,
+                    impactFlashAlpha = flash,
+                    showSpeedLines = true
+                )
+            }
+
+            MangaPanelCameraEffect.DIAGONAL_DRIFT,
+            MangaPanelCameraEffect.AUTO -> {
+                val sx = rect.width * 0.015f
+                val sy = rect.height * 0.015f
+                val startRect = MangaNormalizedRect(
+                    left = rect.left + if (rtl) sx * 0.8f else sx * 0.2f,
+                    top = rect.top + sy * 0.2f,
+                    right = rect.right - if (rtl) sx * 0.2f else sx * 0.8f,
+                    bottom = rect.bottom - sy * 0.8f
+                ).clamped()
+                val endRect = MangaNormalizedRect(
+                    left = rect.left + if (rtl) sx * 0.2f else sx * 0.8f,
+                    top = rect.top + sy * 0.8f,
+                    right = rect.right - if (rtl) sx * 0.8f else sx * 0.2f,
+                    bottom = rect.bottom - sy * 0.2f
+                ).clamped()
+                val curCrop = MangaNormalizedRect(
+                    left = startRect.left + (endRect.left - startRect.left) * easedT,
+                    top = startRect.top + (endRect.top - startRect.top) * easedT,
+                    right = startRect.right + (endRect.right - startRect.right) * easedT,
+                    bottom = startRect.bottom + (endRect.bottom - startRect.bottom) * easedT
+                ).clamped()
+                PanelCameraFrameState(
+                    sourceCropRect = curCrop,
+                    zoomScale = 1.02f,
+                    panOffsetXFrac = if (rtl) 0.01f - 0.02f * easedT else -0.01f + 0.02f * easedT,
+                    panOffsetYFrac = -0.01f + 0.02f * easedT
+                )
+            }
+        }
+    }
+
+    private fun insetRect(rect: MangaNormalizedRect, frac: Float): MangaNormalizedRect {
+        val f = frac.coerceIn(0f, 0.20f)
+        val dx = rect.width * f
+        val dy = rect.height * f
+        return MangaNormalizedRect(
+            left = rect.left + dx,
+            top = rect.top + dy,
+            right = rect.right - dx,
+            bottom = rect.bottom - dy
+        ).clamped()
     }
 }
 
@@ -618,15 +911,15 @@ object MangaBfsPanelSlicer {
     }
 
     /**
-     * Ported from GachaSwipe `photoViewerCamera.js`: generates a subtle 6% zoomed-in Ken Burns
-     * drift pair biased from reading entry corner to exit corner.
+     * Ported from GachaSwipe `photoViewerCamera.js`: generates a bubble-safe 1.5% zoomed-in Ken Burns
+     * drift pair biased from reading entry corner to exit corner without clipping speech bubbles.
      */
     fun computeKenBurnsPair(
         panelRect: MangaNormalizedRect,
         readingOrder: MangaReadingOrder
     ): Pair<MangaNormalizedRect, MangaNormalizedRect> {
-        val shrinkX = panelRect.width * 0.06f
-        val shrinkY = panelRect.height * 0.06f
+        val shrinkX = panelRect.width * 0.015f
+        val shrinkY = panelRect.height * 0.015f
         val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
         val start = if (rtl) {
             MangaNormalizedRect(

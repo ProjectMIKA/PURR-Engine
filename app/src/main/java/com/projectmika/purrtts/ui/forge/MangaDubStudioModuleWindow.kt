@@ -58,12 +58,15 @@ import com.projectmika.purrtts.core.manga.MangaChapterEntry
 import com.projectmika.purrtts.core.manga.MangaChapterStatus
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
+import com.projectmika.purrtts.core.manga.MangaDeterministicEffectsEngine
 import com.projectmika.purrtts.core.manga.MangaJobTelemetry
+import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaPipelineStage
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSeriesProject
 import com.projectmika.purrtts.core.manga.MangaTelemetryUtils
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
+import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
@@ -134,6 +137,15 @@ fun MangaDubStudioModuleWindowBody(
     var selectedReadingOrder by remember(activeProject?.id) {
         mutableStateOf(activeProject?.readingOrder ?: MangaReadingOrder.RTL_MANGA)
     }
+    var selectedVideoAspect by remember(activeProject?.id, activeProject?.videoAspect) {
+        mutableStateOf(activeProject?.videoAspect ?: MangaVideoAspect.VERTICAL_9_16)
+    }
+    var selectedBurnSubtitles by remember(activeProject?.id, activeProject?.burnInSubtitles) {
+        mutableStateOf(activeProject?.burnInSubtitles ?: true)
+    }
+    var selectedVideoQuality by remember(activeProject?.id, activeProject?.videoQuality) {
+        mutableStateOf(activeProject?.videoQuality ?: MangaVideoQuality.HD_720P)
+    }
     var selectedVisionTier by remember(activeProject?.id, activeProject?.preferredVisionModel) {
         mutableStateOf(activeProject?.preferredVisionModel ?: MangaVisionModelTier.AUTO)
     }
@@ -184,7 +196,10 @@ fun MangaDubStudioModuleWindowBody(
                 seriesTitleInput = seriesTitleInput,
                 readingOrder = selectedReadingOrder,
                 autoProduceMp4 = autoCookFullMp4,
-                pauseOnFlags = pauseOnFlags
+                pauseOnFlags = pauseOnFlags,
+                videoAspect = selectedVideoAspect,
+                burnInSubtitles = selectedBurnSubtitles,
+                videoQuality = selectedVideoQuality
             )
         }
     }
@@ -497,6 +512,120 @@ fun MangaDubStudioModuleWindowBody(
                 }
             )
         }
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Front-Surface Output Controls: Aspect Ratio (Portrait default), Subtitles (On/Off), Quality (480p / 720p default / 1080p)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.DeepWellBg)
+                .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.35f), RoundedCornerShape(6.dp))
+                .padding(8.dp),
+            verticalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "ASPECT:",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    modifier = Modifier.width(62.dp)
+                )
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    MangaVideoAspect.entries.forEach { asp ->
+                        MikaTagPill(
+                            label = asp.shortLabel,
+                            selected = selectedVideoAspect == asp,
+                            activeColor = MikaColors.NeonCyan,
+                            onClick = {
+                                selectedVideoAspect = asp
+                                activeProject?.let { viewModel.updateMangaProjectConfig(it.id, videoAspect = asp) }
+                            }
+                        )
+                    }
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "SUBTITLES:",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    modifier = Modifier.width(62.dp)
+                )
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    MikaTagPill(
+                        label = "ON",
+                        selected = selectedBurnSubtitles,
+                        activeColor = MikaColors.TerminalGreen,
+                        onClick = {
+                            selectedBurnSubtitles = true
+                            activeProject?.let { viewModel.updateMangaProjectConfig(it.id, burnInSubtitles = true) }
+                        }
+                    )
+                    MikaTagPill(
+                        label = "OFF",
+                        selected = !selectedBurnSubtitles,
+                        activeColor = MikaColors.MikaAmber,
+                        onClick = {
+                            selectedBurnSubtitles = false
+                            activeProject?.let { viewModel.updateMangaProjectConfig(it.id, burnInSubtitles = false) }
+                        }
+                    )
+                }
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "QUALITY:",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    modifier = Modifier.width(62.dp)
+                )
+                FlowRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    MangaVideoQuality.entries.forEach { qual ->
+                        val pillText = if (qual == MangaVideoQuality.HD_720P) "720P [DEF]" else qual.shortLabel
+                        MikaTagPill(
+                            label = pillText,
+                            selected = selectedVideoQuality == qual,
+                            activeColor = MikaColors.SsrGold,
+                            onClick = {
+                                selectedVideoQuality = qual
+                                activeProject?.let { viewModel.updateMangaProjectConfig(it.id, videoQuality = qual) }
+                            }
+                        )
+                    }
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
 
         Row(
@@ -735,7 +864,7 @@ fun MangaDubStudioModuleWindowBody(
                     }
                 }
 
-                // Reading Order + Video Aspect + Toggles
+                // Reading Order + Video Aspect + Output Quality + Toggles
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp)
@@ -762,18 +891,41 @@ fun MangaDubStudioModuleWindowBody(
                             label = asp.label,
                             selected = activeProject.videoAspect == asp,
                             activeColor = MikaColors.NeonCyan,
-                            onClick = { viewModel.updateMangaProjectConfig(activeProject.id, videoAspect = asp) }
+                            onClick = {
+                                selectedVideoAspect = asp
+                                viewModel.updateMangaProjectConfig(activeProject.id, videoAspect = asp)
+                            }
+                        )
+                    }
+                }
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    MangaVideoQuality.entries.forEach { qual ->
+                        MikaTagPill(
+                            label = qual.label,
+                            selected = activeProject.videoQuality == qual,
+                            activeColor = MikaColors.SsrGold,
+                            onClick = {
+                                selectedVideoQuality = qual
+                                viewModel.updateMangaProjectConfig(activeProject.id, videoQuality = qual)
+                            }
                         )
                     }
                 }
 
                 SimplePurrToggle(
                     title = "BURN-IN SUBTITLE HUD",
-                    subtitle = "Draws speaker badge & dialogue pill on rendered frames",
+                    subtitle = "Draws speaker badge & dialogue pill cleanly below each panel",
                     checked = activeProject.burnInSubtitles,
                     accent = MikaColors.NeonCyan,
                     icon = CyberIconType.BOOK_NARRATOR,
-                    onToggle = { viewModel.updateMangaProjectConfig(activeProject.id, burnInSubtitles = it) }
+                    onToggle = {
+                        selectedBurnSubtitles = it
+                        viewModel.updateMangaProjectConfig(activeProject.id, burnInSubtitles = it)
+                    }
                 )
                 SimplePurrToggle(
                     title = "GACHA ATMOSPHERE PARTICLE FX",
@@ -963,6 +1115,13 @@ fun MangaDubStudioModuleWindowBody(
 
                             page?.panels?.forEach { panel ->
                                 var showThought by remember(panel.id) { mutableStateOf(false) }
+                                val resolvedCam = remember(panel, page.panels.size, activeProject.videoAspect) {
+                                    MangaDeterministicEffectsEngine.resolveCameraEffect(
+                                        panel = panel,
+                                        totalPanelsOnPage = page.panels.size,
+                                        videoAspect = activeProject.videoAspect
+                                    )
+                                }
                                 Column(
                                     modifier = Modifier
                                         .fillMaxWidth()
@@ -978,11 +1137,11 @@ fun MangaDubStudioModuleWindowBody(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "PANEL ${panel.panelIndex + 1} // ${panel.sceneMood.ifBlank { "SCENE" }.uppercase()}",
+                                            text = "PANEL ${panel.panelIndex + 1} // ${panel.sceneMood.ifBlank { "SCENE" }.uppercase()} • FX: ${resolvedCam.label}",
                                             color = MikaColors.NeonCyan,
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Black,
-                                            fontSize = 9.5.sp,
+                                            fontSize = 9.sp,
                                             modifier = Modifier.weight(1f)
                                         )
                                         if (panel.gemmaThoughtTrace.isNotBlank()) {
@@ -1001,6 +1160,28 @@ fun MangaDubStudioModuleWindowBody(
                                             fontFamily = FontFamily.Monospace,
                                             fontSize = 8.5.sp
                                         )
+                                    }
+
+                                    FlowRow(
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        MangaPanelCameraEffect.entries.forEach { camFx ->
+                                            MikaTagPill(
+                                                label = camFx.label,
+                                                selected = panel.cameraEffect == camFx,
+                                                activeColor = MikaColors.NeonPurple,
+                                                onClick = {
+                                                    viewModel.updateMangaPanelCameraEffect(
+                                                        projectId = activeProject.id,
+                                                        chapterId = activeChapter.id,
+                                                        pageIndex = safePageIdx,
+                                                        panelId = panel.id,
+                                                        cameraEffect = camFx
+                                                    )
+                                                }
+                                            )
+                                        }
                                     }
 
                                     FlowRow(

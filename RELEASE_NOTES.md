@@ -1,3 +1,30 @@
+# 🌌 PURR-TTS v1.9.2 // Synchronized Panel Pacing, Crisp Quality & Deterministic FX Engine
+
+### ✨ What's New since v1.9.1
+
+Fixes the `.MP4` panel pacing & compression quality issues in Manga Dub Studio, makes speech bubbles crystal clear with zero subtitle overlap, adds a zero-hallucination **Deterministic Panel Camera Engine**, and puts **Aspect Ratio**, **Subtitles**, and **Output Quality** right on the front surface! 🎬📖🔥
+
+* **⏱️ Fixed Panel Desync / End-Frame Freeze (`MangaMotionVideoMuxer`)**:
+  * Replaced unthrottled wall-clock `Surface.unlockCanvasAndPost()` timestamps with an OpenGL ES 2.0 `EglBitmapSurfaceRenderer` stamping exact synthetic 24 FPS `EGLExt.eglPresentationTimeANDROID` timestamps plus deterministic muxer `presentationTimeUs` enforcement.
+  * Every panel now stays on screen cleanly for the full duration of its spoken voiceover + emotional pauses (zero fast-forwarding through panels or sitting frozen on the final panel).
+* **💎 High-Res Bubble Readability & Output Quality (`480p` / `720p` [Default] / `1080p`)**:
+  * Unlocked full native 24 FPS hardware bitrate headroom (**3.5 Mbps** `480p` / **8 Mbps** `720p` / **14 Mbps** `1080p`), raised page decode resolution up to `3200px` (`720p`) and `4096px` (`1080p`), trimmed edge crops to `1.5%`, and reserved a dedicated bottom band when subtitles are enabled so subtitle pills never cover panel speech bubbles.
+* **🎥 Deterministic Panel Camera & Motion FX Engine (`MangaDeterministicEffectsEngine`)**:
+  * Zero-LLM, zero-hallucination engine that chooses repeatable panel choreography from panel geometry (`area`, `aspect`), output aspect ratio, reading direction (`RTL_MANGA` / `LTR_COMIC` / `WEBTOON_VERTICAL`), and dialogue/mood triggers (`READABILITY_HOLD`, `READING_AXIS_PAN` with entry/exit hold plateaus, `DRAMATIC_PUSH_IN`, `REVEAL_PULL_BACK`, `IMPACT_SHAKE_ZOOM` with anime speed lines, and `DIAGONAL_DRIFT`).
+* **🎛️ Front-Surface Output Controls (`MangaDubStudioModuleWindow`)**:
+  * **Aspect Ratio**: **Portrait `9:16`** (Default) or **Landscape `16:9`**.
+  * **Subtitles**: **On** (Default) or **Off**.
+  * **Output Quality**: **`480P`**, **`720P`** (Default), or **`1080P`**.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `28`).
+2. **`PURR-TTS_V1.9.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.1 // Direct Gemma 4 Vision Binding, 2-Phase VoiceDesign & Auto-Cook UI
 
 ### ✨ What's New since v1.9.0

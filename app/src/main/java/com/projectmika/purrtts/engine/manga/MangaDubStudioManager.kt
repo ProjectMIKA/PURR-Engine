@@ -19,6 +19,7 @@ import com.projectmika.purrtts.core.manga.MangaEmotionalPacer
 import com.projectmika.purrtts.core.manga.MangaJobTelemetry
 import com.projectmika.purrtts.core.manga.MangaNormalizedRect
 import com.projectmika.purrtts.core.manga.MangaPageEntry
+import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaPanelNode
 import com.projectmika.purrtts.core.manga.MangaPipelineStage
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
@@ -27,6 +28,7 @@ import com.projectmika.purrtts.core.manga.MangaSpeechLine
 import com.projectmika.purrtts.core.manga.MangaTelemetryUtils
 import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
+import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.DownloadState
@@ -314,6 +316,9 @@ class MangaDubStudioManager(
         readingOrder: MangaReadingOrder,
         autoProduceMp4: Boolean = true,
         pauseOnFlags: Boolean = true,
+        videoAspect: MangaVideoAspect? = null,
+        burnInSubtitles: Boolean? = null,
+        videoQuality: MangaVideoQuality? = null,
         onComplete: (String) -> Unit
     ) {
         if (_isBusy.value) {
@@ -350,6 +355,9 @@ class MangaDubStudioManager(
                 val initialProj = existingProject?.copy(
                     updatedAtEpochMs = now,
                     readingOrder = readingOrder,
+                    videoAspect = videoAspect ?: existingProject.videoAspect,
+                    burnInSubtitles = burnInSubtitles ?: existingProject.burnInSubtitles,
+                    videoQuality = videoQuality ?: existingProject.videoQuality,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
                 ) ?: MangaSeriesProject(
@@ -358,6 +366,9 @@ class MangaDubStudioManager(
                     createdAtEpochMs = now,
                     updatedAtEpochMs = now,
                     readingOrder = readingOrder,
+                    videoAspect = videoAspect ?: MangaVideoAspect.VERTICAL_9_16,
+                    burnInSubtitles = burnInSubtitles ?: true,
+                    videoQuality = videoQuality ?: MangaVideoQuality.HD_720P,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
                 )
@@ -1070,11 +1081,39 @@ class MangaDubStudioManager(
         }
     }
 
+    fun updatePanelCameraEffect(
+        projectId: String,
+        chapterId: String,
+        pageIndex: Int,
+        panelId: String,
+        cameraEffect: MangaPanelCameraEffect
+    ) {
+        mutateProject(projectId) { proj ->
+            proj.copy(
+                updatedAtEpochMs = System.currentTimeMillis(),
+                chapters = proj.chapters.map { ch ->
+                    if (ch.id != chapterId) ch
+                    else ch.copy(
+                        pages = ch.pages.map { pg ->
+                            if (pg.pageIndex != pageIndex) pg
+                            else pg.copy(
+                                panels = pg.panels.map { pan ->
+                                    if (pan.id != panelId) pan else pan.copy(cameraEffect = cameraEffect)
+                                }
+                            )
+                        }
+                    )
+                }
+            )
+        }
+    }
+
     fun updateProjectConfig(
         projectId: String,
         readingOrder: MangaReadingOrder? = null,
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
+        videoQuality: MangaVideoQuality? = null,
         enableAtmosphereFx: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
@@ -1087,6 +1126,7 @@ class MangaDubStudioManager(
                 readingOrder = readingOrder ?: proj.readingOrder,
                 videoAspect = videoAspect ?: proj.videoAspect,
                 burnInSubtitles = burnInSubtitles ?: proj.burnInSubtitles,
+                videoQuality = videoQuality ?: proj.videoQuality,
                 enableAtmosphereFx = enableAtmosphereFx ?: proj.enableAtmosphereFx,
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
                 preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
@@ -1333,6 +1373,9 @@ class MangaDubStudioManager(
         val outMp4File = File(projectDir(projectId), "exports/${safeBase}.mp4").apply {
             parentFile?.mkdirs()
         }
+        appendLog(
+            "🎬 MUX CONFIG: ${proj.videoAspect.shortLabel} • ${proj.videoQuality.shortLabel} • SUBS=${if (proj.burnInSubtitles) "ON" else "OFF"}"
+        )
         var lastMuxStageLog = ""
         val renderRes = MangaMotionVideoMuxer.renderChapterMp4(
             context = context,
@@ -1340,7 +1383,8 @@ class MangaDubStudioManager(
             aspect = proj.videoAspect,
             burnInSubtitles = proj.burnInSubtitles,
             enableAtmosphereFx = proj.enableAtmosphereFx,
-            destMp4File = outMp4File
+            destMp4File = outMp4File,
+            quality = proj.videoQuality
         ) { p, label ->
             val prefix = label.substringBefore('(').trim()
             val shouldLog = prefix != lastMuxStageLog

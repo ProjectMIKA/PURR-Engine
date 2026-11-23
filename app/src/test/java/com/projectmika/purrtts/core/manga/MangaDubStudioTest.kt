@@ -356,4 +356,180 @@ class MangaDubStudioTest {
         assertEquals(VoiceGender.FEMALE, updated[1].gender)
         assertEquals(1.04f, updated[1].pitchScale, 0.001f)
     }
+
+    @Test
+    fun `project defaults use portrait 9_16 aspect, subtitles on, and 720p quality while resolving dimensions accurately`() {
+        val defaultProj = MangaSeriesProject(
+            id = "proj_def",
+            seriesTitle = "Portrait Test",
+            createdAtEpochMs = 1000L,
+            updatedAtEpochMs = 2000L
+        )
+        assertEquals(MangaVideoAspect.VERTICAL_9_16, defaultProj.videoAspect)
+        assertTrue(defaultProj.burnInSubtitles)
+        assertEquals(MangaVideoQuality.HD_720P, defaultProj.videoQuality)
+
+        // Legacy project JSON without aspect/quality fields falls back to Portrait + 720p defaults
+        val parser = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val legacy = parser.decodeFromString<MangaSeriesProject>(
+            """{"id":"old","seriesTitle":"Old","createdAtEpochMs":1,"updatedAtEpochMs":2}"""
+        )
+        assertEquals(MangaVideoAspect.VERTICAL_9_16, legacy.videoAspect)
+        assertTrue(legacy.burnInSubtitles)
+        assertEquals(MangaVideoQuality.HD_720P, legacy.videoQuality)
+
+        assertEquals(480 to 848, MangaVideoAspect.VERTICAL_9_16.resolveDimensions(MangaVideoQuality.SD_480P))
+        assertEquals(720 to 1280, MangaVideoAspect.VERTICAL_9_16.resolveDimensions(MangaVideoQuality.HD_720P))
+        assertEquals(1080 to 1920, MangaVideoAspect.VERTICAL_9_16.resolveDimensions(MangaVideoQuality.FHD_1080P))
+
+        assertEquals(848 to 480, MangaVideoAspect.LANDSCAPE_16_9.resolveDimensions(MangaVideoQuality.SD_480P))
+        assertEquals(1280 to 720, MangaVideoAspect.LANDSCAPE_16_9.resolveDimensions(MangaVideoQuality.HD_720P))
+        assertEquals(1920 to 1080, MangaVideoAspect.LANDSCAPE_16_9.resolveDimensions(MangaVideoQuality.FHD_1080P))
+    }
+
+    @Test
+    fun `deterministic effects engine selects repeatable camera effects from panel geometry and context`() {
+        val shoutPanel = MangaPanelNode(
+            id = "p_shout",
+            pageIndex = 0,
+            panelIndex = 0,
+            panelRect = MangaNormalizedRect(0.05f, 0.05f, 0.95f, 0.45f),
+            cameraStartRect = MangaNormalizedRect(0.05f, 0.05f, 0.95f, 0.45f),
+            cameraEndRect = MangaNormalizedRect(0.05f, 0.05f, 0.95f, 0.45f),
+            sceneMood = "intense clash",
+            lines = listOf(
+                MangaSpeechLine(
+                    id = "l1",
+                    bubbleIndex = 1,
+                    speakerId = "c1",
+                    speakerName = "VEGETA_X",
+                    rawText = "OUT OF MY WAY!!",
+                    sanitizedText = "Out of my way!",
+                    emotionTag = "anger shout"
+                )
+            )
+        )
+        assertEquals(
+            MangaPanelCameraEffect.IMPACT_SHAKE_ZOOM,
+            MangaDeterministicEffectsEngine.resolveCameraEffect(shoutPanel, 2, MangaVideoAspect.VERTICAL_9_16)
+        )
+        val impactState = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = shoutPanel,
+            effect = MangaPanelCameraEffect.IMPACT_SHAKE_ZOOM,
+            progress = 0.04f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.65f
+        )
+        assertTrue(impactState.showSpeedLines)
+        assertTrue(impactState.impactFlashAlpha > 0f)
+        assertTrue(impactState.shakeOffsetXFrac != 0f || impactState.shakeOffsetYFrac != 0f)
+
+        val wideCalmPanel = MangaPanelNode(
+            id = "p_wide",
+            pageIndex = 0,
+            panelIndex = 1,
+            panelRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            cameraStartRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            cameraEndRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            sceneMood = "calm street",
+            lines = listOf(
+                MangaSpeechLine(
+                    id = "l2",
+                    bubbleIndex = 1,
+                    speakerId = "c2",
+                    speakerName = "KAEL",
+                    rawText = "Wait a moment.",
+                    sanitizedText = "Wait a moment.",
+                    emotionTag = "calm"
+                )
+            )
+        )
+        assertEquals(
+            MangaPanelCameraEffect.READING_AXIS_PAN,
+            MangaDeterministicEffectsEngine.resolveCameraEffect(wideCalmPanel, 3, MangaVideoAspect.VERTICAL_9_16)
+        )
+
+        val compactPanel = wideCalmPanel.copy(
+            id = "p_small",
+            panelRect = MangaNormalizedRect(0.10f, 0.10f, 0.45f, 0.45f)
+        )
+        assertEquals(
+            MangaPanelCameraEffect.READABILITY_HOLD,
+            MangaDeterministicEffectsEngine.resolveCameraEffect(compactPanel, 4, MangaVideoAspect.VERTICAL_9_16)
+        )
+
+        val splashPanel = wideCalmPanel.copy(
+            id = "p_splash",
+            panelRect = MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f)
+        )
+        val firstSplash = MangaDeterministicEffectsEngine.resolveCameraEffect(splashPanel, 1, MangaVideoAspect.VERTICAL_9_16)
+        val secondSplash = MangaDeterministicEffectsEngine.resolveCameraEffect(splashPanel, 1, MangaVideoAspect.VERTICAL_9_16)
+        assertEquals(firstSplash, secondSplash)
+        assertTrue(
+            firstSplash == MangaPanelCameraEffect.REVEAL_PULL_BACK ||
+                firstSplash == MangaPanelCameraEffect.DRAMATIC_PUSH_IN
+        )
+    }
+
+    @Test
+    fun `deterministic reading axis pan sweeps wide panels right-to-left for manga and left-to-right for comic`() {
+        val widePanel = MangaPanelNode(
+            id = "pan_sweep",
+            pageIndex = 0,
+            panelIndex = 0,
+            panelRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            cameraStartRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f),
+            cameraEndRect = MangaNormalizedRect(0.04f, 0.10f, 0.96f, 0.40f)
+        )
+
+        val rtlStart = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = widePanel,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 0.0f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.65f
+        )
+        val rtlHold = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = widePanel,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 0.10f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.65f
+        )
+        val rtlEnd = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = widePanel,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 1.0f,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.65f
+        )
+
+        // Full vertical height stays unclipped; entry plateau holds at initial framing; sweep goes Right -> Left
+        assertEquals(0.10f, rtlStart.sourceCropRect.top, 0.001f)
+        assertEquals(0.40f, rtlStart.sourceCropRect.bottom, 0.001f)
+        assertEquals(rtlStart.sourceCropRect.left, rtlHold.sourceCropRect.left, 0.0001f)
+        assertTrue(rtlStart.sourceCropRect.centerX > rtlEnd.sourceCropRect.centerX)
+
+        val ltrStart = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = widePanel,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 0.0f,
+            readingOrder = MangaReadingOrder.LTR_COMIC,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.65f
+        )
+        val ltrEnd = MangaDeterministicEffectsEngine.computeViewportState(
+            panel = widePanel,
+            effect = MangaPanelCameraEffect.READING_AXIS_PAN,
+            progress = 1.0f,
+            readingOrder = MangaReadingOrder.LTR_COMIC,
+            videoAspect = MangaVideoAspect.VERTICAL_9_16,
+            stageAspect = 0.65f
+        )
+        assertTrue(ltrStart.sourceCropRect.centerX < ltrEnd.sourceCropRect.centerX)
+    }
 }
