@@ -75,22 +75,131 @@ class ModelCatalogManager(
         // freshest known-good expected hash before the baked pin is ever consulted.
         scope.launch { runCatching { refreshManifest(force = false) } }
 
-        // ✨ SELF-HEALING COMPANION MIGRATION (v1.6.1): if a companion spec changed (e.g. the
-        // Matcha vocoder switched 22kHz -> 16kHz), existing INSTALLED cartridges are missing the
-        // new companion file — re-fetch it silently in the background so the engine never mounts
-        // a stale/mismatched asset.
+        // ✨ SELF-HEALING STARTUP INTEGRITY & COMPANION MIGRATION (v1.8.8):
+        // Verify every cartridge persisted as INSTALLED actually has intact extracted weights
+        // and complete dependencies (tokens.txt, espeak-ng-data/phontab.., companion vocoder).
+        // Auto re-extract if the verified .tar.bz2 sits on disk; otherwise clear phantom state.
         scope.launch {
-            catalog.filter { it.companionUrl.isNotBlank() }.forEach { spec ->
-                val state = repository.state.value.modelStates[spec.id] ?: return@forEach
-                if (state.state != DownloadState.INSTALLED) return@forEach
-                val extractDir = resolveSherpaExtractDir(spec)
-                val companion = File(extractDir, spec.companionFileName)
-                if (!companion.exists() || companion.length() == 0L) {
-                    Log.i(TAG, "Companion migration: fetching ${spec.companionFileName} for ${spec.id}")
-                    runCatching { downloadCompanionAsset(spec, extractDir) }
-                        .onFailure { Log.w(TAG, "Companion migration failed for ${spec.id}: ${it.message}") }
+            verifyInstalledBundlesAtStartup()
+        }
+    }
+
+    private suspend fun verifyInstalledBundlesAtStartup() = withContext(Dispatchers.IO) {
+        catalog.forEach { spec ->
+            if (spec.isBuiltInOsCartridge) return@forEach
+            val state = repository.state.value.modelStates[spec.id] ?: return@forEach
+            if (state.state != DownloadState.INSTALLED) return@forEach
+
+            when {
+                spec.isArchiveTarBz2 && spec.sherpaFamily != null -> {
+                    val extractDir = resolveSherpaExtractDir(spec)
+                    if (!hasCompleteSherpaExtract(spec, extractDir)) {
+                        val archiveFile = resolveDestinationFile(spec)
+                        if (archiveFile.isFile && archiveFile.length() > 1024L) {
+                            Log.i(TAG, "[SELF_HEAL] Re-extracting incomplete Sherpa bundle ${spec.id} from ${archiveFile.name}")
+                            val recovered = runCatching {
+                                extractDir.deleteRecursively()
+                                extractTarBz2(archiveFile, extractDir)
+                                hasCompleteSherpaExtract(spec, extractDir)
+                            }.getOrDefault(false)
+                            if (!recovered) {
+                                Log.w(TAG, "[SELF_HEAL] Re-extract incomplete for ${spec.id}; resetting to NOT_INSTALLED")
+                                repository.updateModelState(
+                                    spec.id,
+                                    ModelBundleState(
+                                        specId = spec.id,
+                                        state = DownloadState.NOT_INSTALLED,
+                                        errorMessage = "Incomplete extract detected — tap DOWNLOAD to repair"
+                                    )
+                                )
+                                return@forEach
+                            }
+                        } else {
+                            Log.w(TAG, "[SELF_HEAL] Missing extracted weights & archive for ${spec.id}; resetting state")
+                            repository.updateModelState(
+                                spec.id,
+                                ModelBundleState(
+                                    specId = spec.id,
+                                    state = DownloadState.NOT_INSTALLED,
+                                    errorMessage = "Model files missing on disk — tap DOWNLOAD to restore"
+                                )
+                            )
+                            return@forEach
+                        }
+                    }
+
+                    if (spec.companionUrl.isNotBlank()) {
+                        val companion = File(extractDir, spec.companionFileName)
+                        if (!companion.exists() || companion.length() <= 1024L) {
+                            Log.i(TAG, "Companion migration: fetching ${spec.companionFileName} for ${spec.id}")
+                            runCatching { downloadCompanionAsset(spec, extractDir) }
+                                .onFailure { Log.w(TAG, "Companion migration failed for ${spec.id}: ${it.message}") }
+                        }
+                    }
+                }
+                spec.extraAssets.isNotEmpty() || spec.backend == BackendType.ONNX_NATIVE || spec.backend == BackendType.QWEN3_NATIVE -> {
+                    val dir = resolveNativeModelDir(spec.id)
+                    val primaryOk = File(dir, spec.fileName).let { it.isFile && it.length() > 0L }
+                    val extrasOk = spec.extraAssets.all { asset ->
+                        File(dir, asset.relativePath).let { it.isFile && it.length() > 0L }
+                    }
+                    if (!primaryOk || !extrasOk) {
+                        Log.w(TAG, "[SELF_HEAL] Native bundle ${spec.id} missing asset files; marking NOT_INSTALLED")
+                        repository.updateModelState(
+                            spec.id,
+                            ModelBundleState(
+                                specId = spec.id,
+                                state = DownloadState.NOT_INSTALLED,
+                                errorMessage = "Incomplete bundle files — tap DOWNLOAD to resume"
+                            )
+                        )
+                    }
+                }
+                spec.backend == BackendType.LITERT_NPU_GPU -> {
+                    val target = resolveDestinationFile(spec)
+                    if (!target.isFile || target.length() <= 1024L) {
+                        repository.updateModelState(
+                            spec.id,
+                            ModelBundleState(specId = spec.id, state = DownloadState.NOT_INSTALLED)
+                        )
+                    }
                 }
             }
+        }
+    }
+
+    private fun hasCompleteSherpaExtract(spec: ModelBundleSpec, extractDir: File): Boolean {
+        if (!extractDir.exists() || !extractDir.isDirectory) return false
+        val files = extractDir.walkTopDown()
+            .filter {
+                it.isFile &&
+                    it.length() > 0L &&
+                    !it.absolutePath.contains("${File.separator}espeak-ng-data${File.separator}")
+            }
+            .toList()
+        if (files.none { it.extension.equals("onnx", ignoreCase = true) }) return false
+        val espeakDir = extractDir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
+        if (espeakDir != null) {
+            val espeakValid = File(espeakDir, "phontab").isFile &&
+                File(espeakDir, "phonindex").isFile &&
+                File(espeakDir, "phondata").isFile &&
+                File(espeakDir, "intonations").isFile
+            if (!espeakValid) return false
+        }
+        return when (spec.sherpaFamily) {
+            SherpaModelFamily.KOKORO,
+            SherpaModelFamily.KITTEN_TTS -> files.any { it.name == "voices.bin" } && files.any { it.name == "tokens.txt" }
+            SherpaModelFamily.SUPERTONIC_3 -> files.any { it.name == "tts.json" } &&
+                files.any { it.name.contains("unicode_indexer") } &&
+                files.any { it.name.contains("voice") && it.extension.equals("bin", true) }
+            SherpaModelFamily.POCKET_TTS -> files.any { it.name.contains("lm_flow") } &&
+                files.any { it.name.contains("lm_main") } &&
+                files.any { it.name.contains("vocab") && it.extension.equals("json", true) }
+            SherpaModelFamily.ZIPVOICE,
+            SherpaModelFamily.MATCHA,
+            SherpaModelFamily.PIPER,
+            SherpaModelFamily.MELO_TTS -> files.any { it.name == "tokens.txt" }
+            null -> true
         }
     }
 
@@ -255,7 +364,9 @@ class ModelCatalogManager(
                         sha256Verified = true
                     )
                 )
-                extractTarBz2(finalFile, resolveSherpaExtractDir(spec))
+                val extractDir = resolveSherpaExtractDir(spec)
+                runCatching { extractDir.deleteRecursively() }
+                extractTarBz2(finalFile, extractDir)
             }
 
             // ✨ COMPANION ASSET (v1.6.0): Matcha's Vocos vocoder — download, verify, place.

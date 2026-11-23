@@ -41,16 +41,54 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `tools category hosts TOOL-01 through TOOL-07 including Neon Theme Engine`() {
-        assertEquals(7, toolsModules.size)
+    fun `tools category hosts TOOL-01 through TOOL-10 including Neon Theme Engine and Studio Suite`() {
+        assertEquals(10, toolsModules.size)
         assertEquals(
-            (1..7).map { idx -> "TOOL-%02d".format(idx) },
+            (1..10).map { idx -> "TOOL-%02d".format(idx) },
             toolsModules.map { it.romCode }
         )
         val themeTool = toolsModules.first { it.id == "tool_theme_engine" }
         assertTrue(themeTool.isBuiltInOsCartridge)
         assertEquals(CartridgeCategory.TOOLS, themeTool.category)
         assertTrue("tool_theme_engine" in PurrForgeState().slottedCartridges)
+
+        val studioIds = setOf("tool_script_studio", "tool_voice_benchmark", "tool_srt_batch_studio")
+        studioIds.forEach { id ->
+            val mod = toolsModules.first { it.id == id }
+            assertTrue(mod.isBuiltInOsCartridge)
+            assertEquals(CartridgeCategory.TOOLS, mod.category)
+            assertTrue(id in PurrForgeState().slottedCartridges)
+        }
+    }
+
+    @Test
+    fun `script parser and srt subtitle formatter format multi-voice lines and timecodes accurately`() {
+        val script = """
+            // scene header
+            HOST_A: Hello listeners! [pause:450ms]
+            [HOST_B] Glad to be here tonight.
+            Plain narrator line.
+        """.trimIndent()
+        val lines = PurrScriptParser.parse(script, defaultPauseMs = 200)
+        assertEquals(3, lines.size)
+        assertEquals("HOST_A", lines[0].speakerTag)
+        assertEquals("Hello listeners!", lines[0].text)
+        assertEquals(450, lines[0].pauseAfterMs)
+        assertEquals("HOST_B", lines[1].speakerTag)
+        assertEquals(200, lines[1].pauseAfterMs)
+        assertEquals("NARRATOR", lines[2].speakerTag)
+        assertEquals(listOf("HOST_A", "HOST_B", "NARRATOR"), PurrScriptParser.discoverSpeakers(lines))
+
+        val cues = listOf(
+            PurrSubtitleCue(index = 1, startMs = 0L, endMs = 1520L, text = "First cue"),
+            PurrSubtitleCue(index = 2, startMs = 1820L, endMs = 3665L, text = "Second cue")
+        )
+        val srt = PurrSrtFormatter.renderSrt(cues)
+        assertTrue(srt.contains("00:00:00,000 --> 00:00:01,520"))
+        assertTrue(srt.contains("00:00:01,820 --> 00:00:03,665"))
+        val vtt = PurrSrtFormatter.renderVtt(cues)
+        assertTrue(vtt.startsWith("WEBVTT"))
+        assertTrue(vtt.contains("00:00:00.000 --> 00:00:01.520"))
     }
 
     @Test

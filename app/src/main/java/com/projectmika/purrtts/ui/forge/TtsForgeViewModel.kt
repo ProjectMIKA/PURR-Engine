@@ -36,16 +36,23 @@ import com.projectmika.purrtts.core.purr.PurrCloneAudioCleaner
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
+import com.projectmika.purrtts.core.purr.PurrScriptCastSlot
+import com.projectmika.purrtts.core.purr.PurrScriptLine
+import com.projectmika.purrtts.core.purr.PurrSrtFormatter
+import com.projectmika.purrtts.core.purr.PurrSubtitleCue
 import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.PurrThemeConfig
 import com.projectmika.purrtts.core.purr.PurrUpdateChecker
 import com.projectmika.purrtts.core.purr.RuleCategory
 import com.projectmika.purrtts.core.purr.SavedVoiceDesign
+import com.projectmika.purrtts.core.purr.SegmentRole
+import com.projectmika.purrtts.core.purr.SentimentResult
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceDesignSpec
 import com.projectmika.purrtts.core.purr.VoiceGender
+import android.os.SystemClock
 import com.projectmika.purrtts.engine.CloneClipImporter
 import com.projectmika.purrtts.engine.TtsBackendRouter
 import com.projectmika.purrtts.engine.audiobook.AudiobookConstructorManager
@@ -170,8 +177,62 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     private val _exportStatusLabel = MutableStateFlow("IDLE // READY TO RENDER")
     val exportStatusLabel: StateFlow<String> = _exportStatusLabel.asStateFlow()
 
+    data class BenchmarkResult(
+        val slotLabel: String,
+        val voiceName: String,
+        val backendBadge: String,
+        val synthTimeMs: Long,
+        val audioDurationMs: Long,
+        val rtf: Float,
+        val summary: String,
+        val wavPath: String = ""
+    )
+
+    data class SrtBatchOutput(
+        val wavFile: ExportedAudioFile?,
+        val srtText: String,
+        val vttText: String,
+        val srtDownloadPath: String,
+        val vttDownloadPath: String,
+        val cueCount: Int,
+        val totalDurationMs: Long
+    )
+
+    private val _isRunningScriptStudio = MutableStateFlow(false)
+    val isRunningScriptStudio: StateFlow<Boolean> = _isRunningScriptStudio.asStateFlow()
+
+    private val _scriptStudioStatus = MutableStateFlow<String?>(null)
+    val scriptStudioStatus: StateFlow<String?> = _scriptStudioStatus.asStateFlow()
+
+    private val _scriptStudioActiveLineIndex = MutableStateFlow(-1)
+    val scriptStudioActiveLineIndex: StateFlow<Int> = _scriptStudioActiveLineIndex.asStateFlow()
+
+    private val _isRunningBenchmark = MutableStateFlow(false)
+    val isRunningBenchmark: StateFlow<Boolean> = _isRunningBenchmark.asStateFlow()
+
+    private val _benchmarkResultA = MutableStateFlow<BenchmarkResult?>(null)
+    val benchmarkResultA: StateFlow<BenchmarkResult?> = _benchmarkResultA.asStateFlow()
+
+    private val _benchmarkResultB = MutableStateFlow<BenchmarkResult?>(null)
+    val benchmarkResultB: StateFlow<BenchmarkResult?> = _benchmarkResultB.asStateFlow()
+
+    private val _isRunningSrtBatch = MutableStateFlow(false)
+    val isRunningSrtBatch: StateFlow<Boolean> = _isRunningSrtBatch.asStateFlow()
+
+    private val _srtBatchProgress = MutableStateFlow(0f)
+    val srtBatchProgress: StateFlow<Float> = _srtBatchProgress.asStateFlow()
+
+    private val _srtBatchStatus = MutableStateFlow("IDLE // READY")
+    val srtBatchStatus: StateFlow<String> = _srtBatchStatus.asStateFlow()
+
+    private val _srtBatchOutput = MutableStateFlow<SrtBatchOutput?>(null)
+    val srtBatchOutput: StateFlow<SrtBatchOutput?> = _srtBatchOutput.asStateFlow()
+
     private var activePlaybackJob: Job? = null
     private var activeExportJob: Job? = null
+    private var activeScriptJob: Job? = null
+    private var activeBenchmarkJob: Job? = null
+    private var activeSrtBatchJob: Job? = null
     private var activeToastJob: Job? = null
     private var activeAnimJob: Job? = null
 
@@ -1219,12 +1280,495 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         showToast("Deleted [${entry.fileName}]")
     }
 
-    private fun copyWavToPublicDownloads(wavFile: File, fileName: String): String {
+    private fun profileForVoiceDescriptor(
+        baseProfile: PurrProfile,
+        voice: VoiceDescriptor,
+        speedScale: Float = 1.0f,
+        pitchScale: Float = 1.0f
+    ): PurrProfile = baseProfile.copy(
+        primaryVoiceId = voice.id,
+        preferredBackend = voice.engine,
+        selectedCartridgeId = voice.cartridgeId,
+        sherpaFamily = voice.sherpaFamily ?: baseProfile.sherpaFamily,
+        baseSpeed = (baseProfile.baseSpeed * speedScale).coerceIn(0.6f, 1.8f),
+        basePitch = (baseProfile.basePitch * pitchScale).coerceIn(0.88f, 1.12f)
+    )
+
+    // =========================================================================
+    // ✨ TOOL-08: MULTI-VOICE SCRIPT & PODCAST STUDIO ACTIONS
+    // =========================================================================
+
+    fun auditionScriptScene(
+        lines: List<PurrScriptLine>,
+        castMap: Map<String, PurrScriptCastSlot>,
+        startIndex: Int = 0
+    ) {
+        if (lines.isEmpty()) {
+            showToast("Add at least one speaker line (`HOST: Hello!`) first!")
+            return
+        }
+        activePlaybackJob?.cancel()
+        activeScriptJob?.cancel()
+        backendRouter.proxyEngine.stopDirectAudition()
+        activeScriptJob = viewModelScope.launch(Dispatchers.IO) {
+            _isRunningScriptStudio.value = true
+            _isPlayingPreview.value = true
+            var audioTrack: AudioTrack? = null
+            try {
+                val voicesById = allAvailableVoices().associateBy { it.id }
+                val baseProfile = repository.currentProfile
+                val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+                val minBuf = AudioTrack.getMinBufferSize(
+                    sampleRate,
+                    AudioFormat.CHANNEL_OUT_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT
+                ).coerceAtLeast(4096)
+                audioTrack = AudioTrack.Builder()
+                    .setAudioAttributes(
+                        AudioAttributes.Builder()
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .build()
+                    )
+                    .setAudioFormat(
+                        AudioFormat.Builder()
+                            .setSampleRate(sampleRate)
+                            .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                            .setChannelMask(AudioFormat.CHANNEL_OUT_MONO)
+                            .build()
+                    )
+                    .setBufferSizeInBytes(minBuf * 2)
+                    .setTransferMode(AudioTrack.MODE_STREAM)
+                    .build()
+                audioTrack.play()
+
+                for (idx in startIndex.coerceIn(0, lines.lastIndex) until lines.size) {
+                    if (!isActive) break
+                    val line = lines[idx]
+                    _scriptStudioActiveLineIndex.value = idx
+                    val slot = castMap[line.speakerTag]
+                    val voiceDesc = slot?.voiceId?.let { voicesById[it] }
+                    _scriptStudioStatus.value = "READING [${line.speakerTag}] (${idx + 1}/${lines.size})..."
+                    val lineProfile = if (voiceDesc != null) {
+                        profileForVoiceDescriptor(
+                            baseProfile = baseProfile,
+                            voice = voiceDesc,
+                            speedScale = slot.speedScale,
+                            pitchScale = slot.pitchScale
+                        )
+                    } else {
+                        baseProfile
+                    }
+                    val outcome = backendRouter.synthesizeSpeechChunk(
+                        chunk = PurrChunk.Speech(
+                            text = line.text,
+                            role = SegmentRole.DIALOGUE,
+                            targetVoiceId = lineProfile.primaryVoiceId,
+                            speakingRate = lineProfile.baseSpeed,
+                            pitch = lineProfile.basePitch,
+                            volumeGain = 1.0f,
+                            sentiment = SentimentResult()
+                        ),
+                        profile = lineProfile
+                    )
+                    if (outcome.pcmFloat24k.isNotEmpty()) {
+                        val pcm = PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
+                        var offset = 0
+                        while (offset < pcm.size && isActive) {
+                            val step = minOf(4096, pcm.size - offset)
+                            audioTrack.write(pcm, offset, step)
+                            offset += step
+                        }
+                    } else {
+                        _scriptStudioStatus.value = outcome.engineSummary.ifBlank {
+                            "Voice offline for [${line.speakerTag}] — skipped turn"
+                        }
+                    }
+                    if (line.pauseAfterMs > 0 && isActive) {
+                        val sil = PurrDspProcessor.createSilencePcm16Le(sampleRate, line.pauseAfterMs)
+                        var offset = 0
+                        while (offset < sil.size && isActive) {
+                            val step = minOf(4096, sil.size - offset)
+                            audioTrack.write(sil, offset, step)
+                            offset += step
+                        }
+                    }
+                }
+                _scriptStudioStatus.value = "TABLE READ COMPLETE (${lines.size} TURNS)"
+            } catch (err: Exception) {
+                _scriptStudioStatus.value = "ERROR: ${err.message}"
+            } finally {
+                runCatching {
+                    audioTrack?.stop()
+                    audioTrack?.release()
+                }
+                _scriptStudioActiveLineIndex.value = -1
+                _isRunningScriptStudio.value = false
+                _isPlayingPreview.value = false
+                backendRouter.markIdle()
+            }
+        }
+    }
+
+    fun stopScriptStudio() {
+        activeScriptJob?.cancel()
+        backendRouter.proxyEngine.stopDirectAudition()
+        _scriptStudioActiveLineIndex.value = -1
+        _isRunningScriptStudio.value = false
+        _isPlayingPreview.value = false
+        _scriptStudioStatus.value = "STOPPED"
+        backendRouter.markIdle()
+    }
+
+    fun exportScriptSceneWav(
+        title: String,
+        lines: List<PurrScriptLine>,
+        castMap: Map<String, PurrScriptCastSlot>
+    ) {
+        if (lines.isEmpty() || _isRunningScriptStudio.value) return
+        activeScriptJob?.cancel()
+        activeScriptJob = viewModelScope.launch(Dispatchers.IO) {
+            _isRunningScriptStudio.value = true
+            try {
+                val voicesById = allAvailableVoices().associateBy { it.id }
+                val baseProfile = repository.currentProfile
+                val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+                val segments = ArrayList<PurrDspProcessor.ExportAudioSegment>(lines.size * 2)
+                var speechRendered = 0
+
+                for ((idx, line) in lines.withIndex()) {
+                    if (!isActive) return@launch
+                    _scriptStudioActiveLineIndex.value = idx
+                    _scriptStudioStatus.value = "RENDERING [${line.speakerTag}] ${idx + 1}/${lines.size}..."
+                    val slot = castMap[line.speakerTag]
+                    val voiceDesc = slot?.voiceId?.let { voicesById[it] }
+                    val lineProfile = if (voiceDesc != null) {
+                        profileForVoiceDescriptor(
+                            baseProfile = baseProfile,
+                            voice = voiceDesc,
+                            speedScale = slot.speedScale,
+                            pitchScale = slot.pitchScale
+                        )
+                    } else {
+                        baseProfile
+                    }
+                    val outcome = backendRouter.synthesizeSpeechChunk(
+                        chunk = PurrChunk.Speech(
+                            text = line.text,
+                            role = SegmentRole.DIALOGUE,
+                            targetVoiceId = lineProfile.primaryVoiceId,
+                            speakingRate = lineProfile.baseSpeed,
+                            pitch = lineProfile.basePitch,
+                            volumeGain = 1.0f,
+                            sentiment = SentimentResult()
+                        ),
+                        profile = lineProfile
+                    )
+                    if (outcome.pcmFloat24k.isNotEmpty()) {
+                        segments += PurrDspProcessor.ExportAudioSegment(outcome.pcmFloat24k, isSilence = false)
+                        speechRendered++
+                    }
+                    if (line.pauseAfterMs > 0) {
+                        val gapSamples = ((line.pauseAfterMs * sampleRate) / 1000).coerceAtLeast(1)
+                        segments += PurrDspProcessor.ExportAudioSegment(FloatArray(gapSamples), isSilence = true)
+                    }
+                }
+
+                if (speechRendered == 0) {
+                    _scriptStudioStatus.value = "FAILED // NO AUDIO PRODUCED"
+                    showToast("No active engine produced scene audio!")
+                    return@launch
+                }
+
+                val mastered = PurrDspProcessor.stitchAndMasterAudiobook(
+                    segments = segments,
+                    sampleRate = sampleRate,
+                    normalizeLoudness = true,
+                    smoothTransitions = true
+                )
+                val safeTitle = sanitizeFileBasename(title, "PURR_Scene")
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val fileName = "${safeTitle}_$timestamp.wav"
+                val exportDir = File(app.filesDir, "exported_audio").apply { mkdirs() }
+                val localWav = File(exportDir, fileName)
+                val pcm16 = PurrDspProcessor.float32ToPcm16Le(mastered)
+                writePcm16MonoWav(localWav, pcm16, pcm16.size, sampleRate)
+                val publicLabel = copyFileToPublicDownloads(localWav, fileName, "audio/wav")
+                val durationSec = mastered.size.toFloat() / sampleRate.toFloat()
+                repository.registerExportedAudio(
+                    ExportedAudioFile(
+                        id = "script_${System.currentTimeMillis()}",
+                        title = title.trim().ifEmpty { safeTitle },
+                        fileName = fileName,
+                        localPath = localWav.absolutePath,
+                        publicDownloadPath = publicLabel,
+                        durationSec = durationSec,
+                        sizeBytes = localWav.length(),
+                        chunkCount = speechRendered,
+                        voiceLabel = "Multi-Cast (${castMap.size} voices)",
+                        createdAtEpochMs = System.currentTimeMillis()
+                    )
+                )
+                _scriptStudioStatus.value = "EXPORTED ${"%.1f".format(durationSec)}s -> $fileName"
+                showToast(if (publicLabel.isNotBlank()) "[SAVED] $publicLabel" else "[EXPORTED] $fileName")
+            } catch (err: Exception) {
+                _scriptStudioStatus.value = "EXPORT ERROR: ${err.message}"
+                showToast("Scene export failed: ${err.message}")
+            } finally {
+                _scriptStudioActiveLineIndex.value = -1
+                _isRunningScriptStudio.value = false
+                backendRouter.markIdle()
+            }
+        }
+    }
+
+    // =========================================================================
+    // ✨ TOOL-09: VOICE A/B BENCHMARK & PHONETIC LAB ACTIONS
+    // =========================================================================
+
+    fun runVoiceAbBenchmark(
+        prompt: String,
+        voiceA: VoiceDescriptor,
+        voiceB: VoiceDescriptor
+    ) {
+        val cleanPrompt = prompt.trim()
+        if (cleanPrompt.isEmpty() || _isRunningBenchmark.value) return
+        activeBenchmarkJob?.cancel()
+        activeBenchmarkJob = viewModelScope.launch(Dispatchers.IO) {
+            _isRunningBenchmark.value = true
+            _benchmarkResultA.value = null
+            _benchmarkResultB.value = null
+            try {
+                val baseProfile = repository.currentProfile
+                val resA = synthesizeBenchmarkSlot("SLOT_A", cleanPrompt, voiceA, baseProfile)
+                _benchmarkResultA.value = resA
+                if (!isActive) return@launch
+                val resB = synthesizeBenchmarkSlot("SLOT_B", cleanPrompt, voiceB, baseProfile)
+                _benchmarkResultB.value = resB
+                showToast("Benchmark complete: A=${"%.2f".format(resA.rtf)} RTF • B=${"%.2f".format(resB.rtf)} RTF")
+            } catch (err: Exception) {
+                showToast("Benchmark failed: ${err.message}")
+            } finally {
+                _isRunningBenchmark.value = false
+                backendRouter.markIdle()
+            }
+        }
+    }
+
+    private suspend fun synthesizeBenchmarkSlot(
+        slotLabel: String,
+        prompt: String,
+        voice: VoiceDescriptor,
+        baseProfile: PurrProfile
+    ): BenchmarkResult {
+        val prof = profileForVoiceDescriptor(baseProfile, voice)
+        val t0 = SystemClock.elapsedRealtime()
+        val outcome = backendRouter.synthesizeSpeechChunk(
+            chunk = PurrChunk.Speech(
+                text = prompt,
+                role = SegmentRole.DIALOGUE,
+                targetVoiceId = voice.id,
+                speakingRate = prof.baseSpeed,
+                pitch = prof.basePitch,
+                volumeGain = 1.0f,
+                sentiment = SentimentResult()
+            ),
+            profile = prof
+        )
+        val elapsedMs = (SystemClock.elapsedRealtime() - t0).coerceAtLeast(1L)
+        val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+        val audioMs = if (outcome.pcmFloat24k.isNotEmpty()) {
+            (outcome.pcmFloat24k.size * 1000L) / sampleRate.toLong()
+        } else {
+            0L
+        }
+        val rtf = if (audioMs > 0L) elapsedMs.toFloat() / audioMs.toFloat() else 0f
+        var wavPath = ""
+        if (outcome.pcmFloat24k.isNotEmpty()) {
+            val benchDir = File(app.filesDir, "bench_cache").apply { mkdirs() }
+            val wavFile = File(benchDir, "${slotLabel.lowercase(Locale.US)}.wav")
+            val pcm = PurrDspProcessor.float32ToPcm16Le(outcome.pcmFloat24k)
+            writePcm16MonoWav(wavFile, pcm, pcm.size, sampleRate)
+            wavPath = wavFile.absolutePath
+        }
+        return BenchmarkResult(
+            slotLabel = slotLabel,
+            voiceName = voice.displayName,
+            backendBadge = outcome.hardwareBadge.terminalLabel,
+            synthTimeMs = elapsedMs,
+            audioDurationMs = audioMs,
+            rtf = rtf,
+            summary = outcome.engineSummary,
+            wavPath = wavPath
+        )
+    }
+
+    fun playBenchmarkResult(result: BenchmarkResult) {
+        playWavFileInternal(
+            wavFile = File(result.wavPath),
+            label = "[${result.slotLabel}] ${result.voiceName}",
+            summary = "RTF ${"%.2f".format(result.rtf)} • ${result.synthTimeMs}ms"
+        )
+    }
+
+    // =========================================================================
+    // ✨ TOOL-10: SRT SUBTITLE & BATCH QUEUE GENERATOR ACTIONS
+    // =========================================================================
+
+    fun renderSrtBatchQueue(
+        title: String,
+        cues: List<String>,
+        interCueGapMs: Int = 300,
+        normalizeLoudness: Boolean = true
+    ) {
+        if (cues.isEmpty()) {
+            showToast("Enter at least one subtitle cue line!")
+            return
+        }
+        if (_isRunningSrtBatch.value) return
+        activeSrtBatchJob?.cancel()
+        activeSrtBatchJob = viewModelScope.launch(Dispatchers.IO) {
+            _isRunningSrtBatch.value = true
+            _srtBatchProgress.value = 0.02f
+            _srtBatchStatus.value = "PREPARING ${cues.size} CUES..."
+            try {
+                val activeProfile = repository.currentProfile
+                val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
+                val segments = ArrayList<PurrDspProcessor.ExportAudioSegment>(cues.size * 2)
+                val timedCues = ArrayList<PurrSubtitleCue>(cues.size)
+                var timelineMs = 0L
+
+                cues.forEachIndexed { idx, lineText ->
+                    if (!isActive) return@launch
+                    _srtBatchProgress.value = ((idx + 1).toFloat() / (cues.size + 1).toFloat()).coerceIn(0.05f, 0.92f)
+                    _srtBatchStatus.value = "SYNTHESIZING CUE ${idx + 1}/${cues.size}..."
+                    val outcome = backendRouter.synthesizeSpeechChunk(
+                        chunk = PurrChunk.Speech(
+                            text = lineText,
+                            role = SegmentRole.DIALOGUE,
+                            targetVoiceId = activeProfile.primaryVoiceId,
+                            speakingRate = activeProfile.baseSpeed,
+                            pitch = activeProfile.basePitch,
+                            volumeGain = 1.0f,
+                            sentiment = SentimentResult()
+                        ),
+                        profile = activeProfile
+                    )
+                    if (outcome.pcmFloat24k.isNotEmpty()) {
+                        val cueDurationMs = ((outcome.pcmFloat24k.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(100L)
+                        val startMs = timelineMs
+                        val endMs = timelineMs + cueDurationMs
+                        timedCues += PurrSubtitleCue(
+                            index = timedCues.size + 1,
+                            startMs = startMs,
+                            endMs = endMs,
+                            text = lineText
+                        )
+                        segments += PurrDspProcessor.ExportAudioSegment(outcome.pcmFloat24k, isSilence = false)
+                        timelineMs = endMs
+                        if (interCueGapMs > 0 && idx < cues.lastIndex) {
+                            val gapSamples = ((interCueGapMs * sampleRate) / 1000).coerceAtLeast(1)
+                            segments += PurrDspProcessor.ExportAudioSegment(FloatArray(gapSamples), isSilence = true)
+                            timelineMs += interCueGapMs.toLong()
+                        }
+                    }
+                }
+
+                if (timedCues.isEmpty()) {
+                    _srtBatchStatus.value = "FAILED // NO AUDIO PRODUCED"
+                    showToast("No TTS cartridge produced audio for batch cues!")
+                    return@launch
+                }
+
+                _srtBatchProgress.value = 0.96f
+                _srtBatchStatus.value = "MASTERING WAV & TIMECODES..."
+                val mastered = PurrDspProcessor.stitchAndMasterAudiobook(
+                    segments = segments,
+                    sampleRate = sampleRate,
+                    normalizeLoudness = normalizeLoudness,
+                    smoothTransitions = true
+                )
+                val safeBase = sanitizeFileBasename(title, "PURR_Captions")
+                val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date())
+                val stem = "${safeBase}_$timestamp"
+                val exportDir = File(app.filesDir, "exported_audio").apply { mkdirs() }
+
+                val wavFile = File(exportDir, "$stem.wav")
+                val pcm16 = PurrDspProcessor.float32ToPcm16Le(mastered)
+                writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
+                val wavDownloadPath = copyFileToPublicDownloads(wavFile, "$stem.wav", "audio/wav")
+
+                val srtText = PurrSrtFormatter.renderSrt(timedCues)
+                val vttText = PurrSrtFormatter.renderVtt(timedCues)
+                val srtFile = File(exportDir, "$stem.srt").apply { writeText(srtText) }
+                val vttFile = File(exportDir, "$stem.vtt").apply { writeText(vttText) }
+                val srtDownloadPath = copyFileToPublicDownloads(srtFile, "$stem.srt", "text/plain")
+                val vttDownloadPath = copyFileToPublicDownloads(vttFile, "$stem.vtt", "text/vtt")
+
+                val durationSec = mastered.size.toFloat() / sampleRate.toFloat()
+                val voiceLabel = allAvailableVoices()
+                    .firstOrNull { it.id == activeProfile.primaryVoiceId }
+                    ?.displayName ?: activeProfile.primaryVoiceId
+                val audioRecord = ExportedAudioFile(
+                    id = "srt_${System.currentTimeMillis()}",
+                    title = title.trim().ifEmpty { safeBase },
+                    fileName = "$stem.wav",
+                    localPath = wavFile.absolutePath,
+                    publicDownloadPath = wavDownloadPath,
+                    durationSec = durationSec,
+                    sizeBytes = wavFile.length(),
+                    chunkCount = timedCues.size,
+                    voiceLabel = voiceLabel,
+                    createdAtEpochMs = System.currentTimeMillis()
+                )
+                repository.registerExportedAudio(audioRecord)
+
+                _srtBatchOutput.value = SrtBatchOutput(
+                    wavFile = audioRecord,
+                    srtText = srtText,
+                    vttText = vttText,
+                    srtDownloadPath = srtDownloadPath,
+                    vttDownloadPath = vttDownloadPath,
+                    cueCount = timedCues.size,
+                    totalDurationMs = timelineMs
+                )
+                _srtBatchProgress.value = 1f
+                _srtBatchStatus.value = "READY // ${timedCues.size} CUES (${"%.1f".format(durationSec)}s)"
+                showToast("Exported $stem.wav + .srt + .vtt (${timedCues.size} cues)")
+            } catch (err: Exception) {
+                _srtBatchStatus.value = "ERROR: ${err.message}"
+                showToast("SRT batch failed: ${err.message}")
+            } finally {
+                _isRunningSrtBatch.value = false
+                backendRouter.markIdle()
+            }
+        }
+    }
+
+    fun cancelSrtBatch() {
+        activeSrtBatchJob?.cancel()
+        _isRunningSrtBatch.value = false
+        _srtBatchProgress.value = 0f
+        _srtBatchStatus.value = "CANCELLED // READY"
+        backendRouter.markIdle()
+    }
+
+    private fun sanitizeFileBasename(rawTitle: String, fallback: String): String = rawTitle.trim()
+        .ifEmpty { fallback }
+        .replace(Regex("[^a-zA-Z0-9._-]+"), "_")
+        .trim('_')
+        .ifEmpty { fallback }
+        .take(36)
+
+    private fun copyWavToPublicDownloads(wavFile: File, fileName: String): String =
+        copyFileToPublicDownloads(wavFile, fileName, "audio/wav")
+
+    private fun copyFileToPublicDownloads(sourceFile: File, fileName: String, mimeType: String): String {
         return runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 val values = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, "audio/wav")
+                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
                     put(MediaStore.Downloads.RELATIVE_PATH, "${Environment.DIRECTORY_DOWNLOADS}/PURR-TTS")
                     put(MediaStore.Downloads.IS_PENDING, 1)
                 }
@@ -1232,7 +1776,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 val uri = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
                 if (uri != null) {
                     resolver.openOutputStream(uri)?.use { out ->
-                        FileInputStream(wavFile).use { input -> input.copyTo(out) }
+                        FileInputStream(sourceFile).use { input -> input.copyTo(out) }
                     }
                     values.clear()
                     values.put(MediaStore.Downloads.IS_PENDING, 0)
@@ -1246,7 +1790,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 "PURR-TTS"
             ).apply { mkdirs() }
             val dest = File(downloadsDir, fileName)
-            wavFile.copyTo(dest, overwrite = true)
+            sourceFile.copyTo(dest, overwrite = true)
             "Downloads/PURR-TTS/$fileName"
         }.getOrElse { "" }
     }

@@ -159,6 +159,30 @@ private enum class ActiveOsModule(
         badge = "TOOL-07",
         iconType = OsModuleIconType.THEME_ENGINE,
         accentResolver = { MikaColors.NeonCyan }
+    ),
+    SCRIPT_STUDIO(
+        toolCartridgeId = "tool_script_studio",
+        title = "SCRIPT & PODCAST STUDIO",
+        subtitle = "Multi-Voice Cast & Scene WAV",
+        badge = "TOOL-08",
+        iconType = OsModuleIconType.SCRIPT_STUDIO,
+        accentResolver = { MikaColors.NeonPink }
+    ),
+    VOICE_BENCHMARK(
+        toolCartridgeId = "tool_voice_benchmark",
+        title = "VOICE A/B BENCHMARK",
+        subtitle = "RTF Meter & Phonetic Stress Lab",
+        badge = "TOOL-09",
+        iconType = OsModuleIconType.VOICE_BENCHMARK,
+        accentResolver = { MikaColors.TerminalGreen }
+    ),
+    SRT_BATCH_STUDIO(
+        toolCartridgeId = "tool_srt_batch_studio",
+        title = "SRT SUBTITLE & BATCH",
+        subtitle = "Timed .SRT/.VTT + Batch WAV",
+        badge = "TOOL-10",
+        iconType = OsModuleIconType.SRT_BATCH_STUDIO,
+        accentResolver = { MikaColors.SsrGold }
     );
 
     fun accentColor(): Color = accentResolver()
@@ -277,6 +301,9 @@ fun PurrRulebookTab(
                                                 } else {
                                                     "RETRO"
                                                 }
+                                                ActiveOsModule.SCRIPT_STUDIO -> "MULTI-CAST WAV"
+                                                ActiveOsModule.VOICE_BENCHMARK -> "A/B RTF LAB"
+                                                ActiveOsModule.SRT_BATCH_STUDIO -> ".SRT/.VTT QUEUE"
                                             },
                                             onClick = { openedModule = mod }
                                         )
@@ -525,6 +552,23 @@ fun PurrRulebookTab(
                                 )
                                 ActiveOsModule.THEME_ENGINE -> ThemeEngineModuleWindowBody(
                                     forgeState = forgeState,
+                                    viewModel = viewModel
+                                )
+                                ActiveOsModule.SCRIPT_STUDIO -> ScriptStudioModuleWindowBody(
+                                    forgeState = forgeState,
+                                    activeProfile = activeProfile,
+                                    availableVoices = viewModel.allAvailableVoices(),
+                                    viewModel = viewModel
+                                )
+                                ActiveOsModule.VOICE_BENCHMARK -> VoiceBenchmarkModuleWindowBody(
+                                    forgeState = forgeState,
+                                    activeProfile = activeProfile,
+                                    availableVoices = viewModel.allAvailableVoices(),
+                                    viewModel = viewModel
+                                )
+                                ActiveOsModule.SRT_BATCH_STUDIO -> SrtBatchStudioModuleWindowBody(
+                                    activeProfile = activeProfile,
+                                    isPlayingPreview = isPlayingPreview,
                                     viewModel = viewModel
                                 )
                             }

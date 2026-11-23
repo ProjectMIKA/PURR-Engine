@@ -149,23 +149,36 @@ class PurrProfileRepository(filesDir: File) {
             val fallbackSpec = fallbackCart?.let { id ->
                 PurrDefaultPresets.modelCatalog().firstOrNull { it.id == id }
             }
-            val availableVoices = PurrDefaultPresets.builtInVoices() + _discoveredSystemVoices.value
+            val availableVoices = computeAvailableVoices(
+                s.copy(slottedCartridges = nextSlotted)
+            )
             val fallbackVoice = if (fallbackCart != null) {
                 availableVoices.firstOrNull {
-                    it.cartridgeId == fallbackCart &&
-                        (it.requiredSubCartridgeId == null || isSubCartridgeEnabled(it.requiredSubCartridgeId))
-                }
+                    it.cartridgeId == fallbackCart
+                } ?: PurrDefaultPresets.builtInVoices().firstOrNull { it.cartridgeId == fallbackCart }
             } else {
                 null
             }
             val nextProfiles = s.profiles.map { p ->
-                if (!slotted && p.selectedCartridgeId == cartridgeId && fallbackCart != null) {
+                val needsSwitchOnEject = !slotted && p.selectedCartridgeId == cartridgeId && fallbackCart != null
+                val needsSubHeal = slotted && p.selectedCartridgeId == cartridgeId &&
+                    availableVoices.none { it.id == p.primaryVoiceId }
+                if (needsSwitchOnEject && fallbackCart != null) {
                     p.copy(
                         selectedCartridgeId = fallbackCart,
                         preferredBackend = fallbackVoice?.engine ?: fallbackSpec?.backend ?: p.preferredBackend,
-                        sherpaFamily = fallbackSpec?.sherpaFamily ?: p.sherpaFamily,
+                        sherpaFamily = fallbackVoice?.sherpaFamily ?: fallbackSpec?.sherpaFamily ?: p.sherpaFamily,
                         primaryVoiceId = fallbackVoice?.id ?: p.primaryVoiceId
                     )
+                } else if (needsSubHeal) {
+                    val healed = availableVoices.firstOrNull { it.cartridgeId == cartridgeId }
+                    if (healed != null) {
+                        p.copy(
+                            preferredBackend = healed.engine,
+                            sherpaFamily = healed.sherpaFamily ?: p.sherpaFamily,
+                            primaryVoiceId = healed.id
+                        )
+                    } else p
                 } else {
                     p
                 }
@@ -190,6 +203,12 @@ class PurrProfileRepository(filesDir: File) {
     fun isVoiceDesignModuleActive(): Boolean = isCartridgeSlotted("tool_voice_design")
 
     fun isAudiobookConstructorModuleActive(): Boolean = isCartridgeSlotted("tool_audiobook_constructor")
+
+    fun isScriptStudioModuleActive(): Boolean = isCartridgeSlotted("tool_script_studio")
+
+    fun isVoiceBenchmarkModuleActive(): Boolean = isCartridgeSlotted("tool_voice_benchmark")
+
+    fun isSrtBatchModuleActive(): Boolean = isCartridgeSlotted("tool_srt_batch_studio")
 
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
@@ -410,30 +429,34 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
-    fun allAvailableVoices(): List<VoiceDescriptor> {
-        val state = _state.value
+    fun allAvailableVoices(): List<VoiceDescriptor> = computeAvailableVoices(_state.value)
+
+    private fun computeAvailableVoices(state: PurrForgeState): List<VoiceDescriptor> {
         val catalog = PurrDefaultPresets.modelCatalog()
+        val addOnChipIds = setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert")
+        val hubCartridgesWithStandaloneSubs = setOf(
+            "rom_kokoro_sherpa", "rom_piper", "rom_kitten_tts", "rom_qwen3_custom_06b",
+            "rom_pocket_tts", "rom_zipvoice", "rom_inflect_v2",
+            "rom_icefall_vits", "rom_coqui_vits", "rom_meta_mms",
+            "rom_mimic3_neural"
+        )
         val base = PurrDefaultPresets.builtInVoices().filter { v ->
             val subOk = v.requiredSubCartridgeId == null ||
-                isSubCartridgeEnabled(v.requiredSubCartridgeId) ||
+                (v.requiredSubCartridgeId in state.enabledSubCartridges &&
+                    state.modelStates[v.requiredSubCartridgeId]?.state == DownloadState.INSTALLED) ||
                 state.modelStates[v.requiredSubCartridgeId]?.state == DownloadState.INSTALLED
             val baseHubOk = if (v.requiredSubCartridgeId != null) {
                 true
-            } else {
-                when (v.cartridgeId) {
-                    "rom_piper", "rom_kitten_tts", "rom_qwen3_custom_06b",
-                    "rom_pocket_tts", "rom_zipvoice", "rom_inflect_v2",
-                    "rom_icefall_vits", "rom_coqui_vits", "rom_meta_mms",
-                    "rom_mimic3_neural" -> {
-                        val baseInstalled = state.modelStates[v.cartridgeId]?.state == DownloadState.INSTALLED
-                        val anyStandaloneSubInstalled = catalog.any { sub ->
-                            sub.parentCartridgeId == v.cartridgeId &&
-                                state.modelStates[sub.id]?.state == DownloadState.INSTALLED
-                        }
-                        baseInstalled || !anyStandaloneSubInstalled
-                    }
-                    else -> true
+            } else if (v.cartridgeId in hubCartridgesWithStandaloneSubs) {
+                val baseInstalled = state.modelStates[v.cartridgeId]?.state == DownloadState.INSTALLED
+                val anyStandaloneSubInstalled = catalog.any { sub ->
+                    sub.parentCartridgeId == v.cartridgeId &&
+                        sub.id !in addOnChipIds &&
+                        state.modelStates[sub.id]?.state == DownloadState.INSTALLED
                 }
+                baseInstalled || !anyStandaloneSubInstalled
+            } else {
+                true
             }
             subOk && baseHubOk
         }
@@ -593,6 +616,11 @@ class PurrProfileRepository(filesDir: File) {
             if (decoded.knownToolCatalogVersion < 3 || "tool_theme_engine" !in decoded.modelStates) {
                 nextSlotted += "tool_theme_engine"
             }
+            if (decoded.knownToolCatalogVersion < 4 || "tool_script_studio" !in decoded.modelStates) {
+                nextSlotted += "tool_script_studio"
+                nextSlotted += "tool_voice_benchmark"
+                nextSlotted += "tool_srt_batch_studio"
+            }
             for ((legacyId, hubId) in legacyCartridgeToHub) {
                 if (normalizedModelStates[legacyId]?.state == DownloadState.INSTALLED) {
                     nextEnabledSubs += legacyId
@@ -674,7 +702,7 @@ class PurrProfileRepository(filesDir: File) {
                 profiles = remappedProfiles,
                 slottedCartridges = nextSlotted,
                 enabledSubCartridges = nextEnabledSubs,
-                knownToolCatalogVersion = 3
+                knownToolCatalogVersion = 4
             )
         }.getOrElse {
             PurrForgeState()

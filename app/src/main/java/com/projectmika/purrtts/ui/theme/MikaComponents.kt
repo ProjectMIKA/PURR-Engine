@@ -1714,7 +1714,10 @@ enum class OsModuleIconType {
     AUDIO_EXPORTER,
     VOICE_DESIGN,
     AUDIOBOOK_CONSTRUCTOR,
-    THEME_ENGINE
+    THEME_ENGINE,
+    SCRIPT_STUDIO,
+    VOICE_BENCHMARK,
+    SRT_BATCH_STUDIO
 }
 
 /**
@@ -1970,6 +1973,85 @@ fun MikaOsModuleIcon(
                     drawCircle(MikaColors.NeonPink.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.84f, h * 0.50f))
                     drawCircle(MikaColors.TerminalGreen.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.50f, h * 0.84f))
                     drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = nodeR, center = Offset(w * 0.16f, h * 0.50f))
+                }
+
+                OsModuleIconType.SCRIPT_STUDIO -> {
+                    // Multi-Speaker Dialogue Script Studio: dual interlocking speech balloons + waveform turns
+                    val leftBubble = Path().apply {
+                        moveTo(w * 0.10f, h * 0.16f)
+                        lineTo(w * 0.64f, h * 0.16f)
+                        lineTo(w * 0.64f, h * 0.50f)
+                        lineTo(w * 0.32f, h * 0.50f)
+                        lineTo(w * 0.18f, h * 0.62f)
+                        lineTo(w * 0.18f, h * 0.50f)
+                        lineTo(w * 0.10f, h * 0.50f)
+                        close()
+                    }
+                    drawPath(leftBubble, color = drawColor, style = stroke)
+                    val rightBubble = Path().apply {
+                        moveTo(w * 0.36f, h * 0.44f)
+                        lineTo(w * 0.90f, h * 0.44f)
+                        lineTo(w * 0.90f, h * 0.78f)
+                        lineTo(w * 0.82f, h * 0.78f)
+                        lineTo(w * 0.82f, h * 0.90f)
+                        lineTo(w * 0.68f, h * 0.78f)
+                        lineTo(w * 0.36f, h * 0.78f)
+                        close()
+                    }
+                    drawPath(rightBubble, color = MikaColors.NeonCyan.copy(alpha = activeAlpha), style = thinStroke)
+                    drawLine(drawColor, Offset(w * 0.22f, h * 0.33f), Offset(w * 0.52f, h * 0.33f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.SsrGold.copy(alpha = activeAlpha), Offset(w * 0.48f, h * 0.61f), Offset(w * 0.78f, h * 0.61f), strokeWidth = (2.0f * s).dp.toPx(), cap = StrokeCap.Round)
+                }
+
+                OsModuleIconType.VOICE_BENCHMARK -> {
+                    // Voice A/B Benchmark Meter: dual A/B comparison bars + speed gauge needle
+                    drawArc(
+                        color = drawColor.copy(alpha = 0.40f),
+                        startAngle = 180f,
+                        sweepAngle = 180f,
+                        useCenter = false,
+                        topLeft = Offset(w * 0.14f, h * 0.14f),
+                        size = Size(w * 0.72f, h * 0.72f),
+                        style = thinStroke
+                    )
+                    // Gauge needle
+                    drawLine(
+                        color = MikaColors.NeonPink.copy(alpha = activeAlpha),
+                        start = Offset(w * 0.50f, h * 0.50f),
+                        end = Offset(w * 0.74f, h * 0.28f),
+                        strokeWidth = (2.1f * s).dp.toPx(),
+                        cap = StrokeCap.Round
+                    )
+                    drawCircle(color = MikaColors.NeonCyan.copy(alpha = activeAlpha), radius = (3.0f * s).dp.toPx(), center = Offset(w * 0.50f, h * 0.50f))
+                    // Dual A / B latency comparison tracks at bottom
+                    drawRoundRect(
+                        color = drawColor,
+                        topLeft = Offset(w * 0.16f, h * 0.64f),
+                        size = Size(w * 0.68f, h * 0.10f),
+                        cornerRadius = CornerRadius((3f * s).dp.toPx())
+                    )
+                    drawRoundRect(
+                        color = MikaColors.NeonCyan.copy(alpha = activeAlpha),
+                        topLeft = Offset(w * 0.16f, h * 0.80f),
+                        size = Size(w * 0.46f, h * 0.10f),
+                        cornerRadius = CornerRadius((3f * s).dp.toPx())
+                    )
+                }
+
+                OsModuleIconType.SRT_BATCH_STUDIO -> {
+                    // SRT Subtitle & Batch Queue: clapper/caption timeline bars + precision clock node
+                    drawRoundRect(
+                        color = drawColor,
+                        topLeft = Offset(w * 0.12f, h * 0.16f),
+                        size = Size(w * 0.76f, h * 0.68f),
+                        cornerRadius = CornerRadius((5f * s).dp.toPx()),
+                        style = stroke
+                    )
+                    drawLine(drawColor.copy(alpha = 0.45f), Offset(w * 0.12f, h * 0.36f), Offset(w * 0.88f, h * 0.36f), strokeWidth = (1.6f * s).dp.toPx())
+                    // Timed subtitle bars inside frame
+                    drawLine(MikaColors.NeonCyan.copy(alpha = activeAlpha), Offset(w * 0.24f, h * 0.50f), Offset(w * 0.76f, h * 0.50f), strokeWidth = (2.4f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawLine(MikaColors.NeonPink.copy(alpha = activeAlpha), Offset(w * 0.24f, h * 0.66f), Offset(w * 0.60f, h * 0.66f), strokeWidth = (2.4f * s).dp.toPx(), cap = StrokeCap.Round)
+                    drawCircle(MikaColors.TerminalGreen.copy(alpha = activeAlpha), radius = (2.8f * s).dp.toPx(), center = Offset(w * 0.74f, h * 0.66f))
                 }
             }
         }

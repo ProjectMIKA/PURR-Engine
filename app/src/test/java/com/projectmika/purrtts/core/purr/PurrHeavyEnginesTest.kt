@@ -298,6 +298,9 @@ class PurrHeavyEnginesTest {
             )
             val repo = PurrProfileRepository(repoDir)
             assertTrue("tool_theme_engine" in repo.state.value.slottedCartridges)
+            assertTrue("tool_script_studio" in repo.state.value.slottedCartridges)
+            assertTrue("tool_voice_benchmark" in repo.state.value.slottedCartridges)
+            assertTrue("tool_srt_batch_studio" in repo.state.value.slottedCartridges)
 
             repo.setCatalogSortMode(CartridgeSortMode.SIZE)
             repo.setCatalogFilterMode(CartridgeFilterMode.DOWNLOADED)

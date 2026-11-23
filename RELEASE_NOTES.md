@@ -1,3 +1,28 @@
+# 🌌 PURR-TTS v1.8.8 // Bulletproof Mount Repairs & All-In-One Studio Suite
+
+### ✨ What's New since v1.8.7
+
+Eliminated `"failed to mount"` failures across all 16 TTS hubs and cloning packs, added startup self-healing for incomplete bundle extracts, and shipped 3 major All-In-One TTS Studio modules (`TOOL-08..TOOL-10`)! 🔧🎙️🎬
+
+* **🔧 BULLETPROOF ENGINE MOUNTING & `"failed to mount"` FIXES**:
+  * **Smart Hub / Sub-Cartridge / Cloned Fallback Resolver**: Fixed mount misses when a hub (`ROM-02`, `ROM-06`, `ROM-07`, `ROM-08`, `ROM-09`, `ROM-10`, `ROM-11`, `ROM-14`) or cloning bay (`CLN-01`, `CLN-02`) only has standalone sub-cartridges installed (e.g., Kokoro FP32 / v1.1 without base INT8, or Pocket FP32 / ZipVoice Full clones without base), eliminating stale empty-directory mount errors.
+  * **Rule FST Ordering & 180MB FAR OOM Guard**: Fixed `ROM-16` (`AISHELL-3`), `SUB-07I` (`Matcha ZH+EN`), and `Kokoro` rule normalizers — enabled `phone -> date -> number` FST ordering cleanly for Matcha and omitted redundant 180MB `rule.far` loads when fast `.fst` rules exist so Android doesn't hit native memory mount failures.
+  * **Single-Lexicon VITS / MeloTTS Contract & `espeak-ng-data` Validation**: Fixed comma-joined lexicon passing on VITS / MeloTTS (`std::ifstream` requires a single path), preferred fast `.int8.onnx` graphs (`ROM-12` VCTK), excluded `espeak-ng-data/` internals from asset scans, verified complete `phontab/phonindex/phondata/intonations` sets, and added sibling Matcha vocoder lookup + detailed missing-asset diagnostics.
+  * **Startup Bundle Self-Healing**: `ModelCatalogManager` now audits every `INSTALLED` bundle on boot, automatically re-extracts intact `.tar.bz2` archives if weights or `espeak-ng-data` were left incomplete, downloads missing companion vocoders, and clears phantom `INSTALLED` badges cleanly.
+* **🎛️ THREE NEW ALL-IN-ONE TTS STUDIO MODULES (`TOOL-08..TOOL-10`)**:
+  * **🎙️ `TOOL-08` Multi-Voice Script & Podcast Studio**: Cast up to multiple named speakers (`HOST_A`, `HOST_B`, `NARRATOR`, `GUEST`, etc.) to any installed voices across any engines with per-speaker rate & pitch trim, run live table-reads with line highlighting, or export mastered multi-voice `.WAV` scenes.
+  * **⚡ `TOOL-09` Voice A/B Benchmark & Phonetic Lab**: Head-to-head Voice A vs Voice B comparison on identical prompts with exact wall-clock latency (`ms`), audio duration (`s`), Real-Time Factor (`RTF`), hardware offload badge, instant cached A/B playback, and built-in phonetic stress-test prompts.
+  * **🎬 `TOOL-10` SRT Subtitle & Batch Queue Generator**: Synthesizes multi-line voiceover queues cue-by-cue with exact 24kHz sample timestamps, exports synchronized `.SRT` & `.VTT` subtitle files alongside mastered `.WAV` audio straight to `Downloads/PURR-TTS/`, and includes one-tap clipboard copy + caption inspector.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.8_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `24`).
+2. **`PURR-TTS_V1.8.8.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.7 // The Full 16-Bay Fleet & Neon HUD Polish
 
 ### ✨ What's New since v1.8.6

@@ -545,6 +545,24 @@ data class PurrForgeState(
             state = DownloadState.INSTALLED,
             sha256Verified = true,
             localPath = "builtin://tool/theme_engine"
+        ),
+        "tool_script_studio" to ModelBundleState(
+            specId = "tool_script_studio",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/script_studio"
+        ),
+        "tool_voice_benchmark" to ModelBundleState(
+            specId = "tool_voice_benchmark",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/voice_benchmark"
+        ),
+        "tool_srt_batch_studio" to ModelBundleState(
+            specId = "tool_srt_batch_studio",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/srt_batch_studio"
         )
     ),
     val slottedCartridges: Set<String> = setOf(
@@ -556,11 +574,14 @@ data class PurrForgeState(
         "tool_audio_exporter",
         "tool_voice_design",
         "tool_audiobook_constructor",
-        "tool_theme_engine"
+        "tool_theme_engine",
+        "tool_script_studio",
+        "tool_voice_benchmark",
+        "tool_srt_batch_studio"
     ),
     val enabledSubCartridges: Set<String> = emptySet(),
     val savedVoiceDesigns: List<SavedVoiceDesign> = emptyList(),
-    val knownToolCatalogVersion: Int = 3,
+    val knownToolCatalogVersion: Int = 4,
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
     val seenTutorialVersion: Int = 0,
@@ -3041,6 +3062,66 @@ object PurrDefaultPresets {
             unlocksSummary = "ENABLES: Neon Theme Engine OS Module for full-app Retro / Neon Glow customization.",
             category = CartridgeCategory.TOOLS,
             releaseOrder = 14
+        ),
+        ModelBundleSpec(
+            id = "tool_script_studio",
+            romCode = "TOOL-08",
+            badge = "DIALOGUE_FORGE",
+            accentHex = 0xFFFF107A,
+            name = "MULTI_VOICE_SCRIPT_STUDIO",
+            subtitle = "Multi-Speaker Podcast & Scene Cast Studio • Any-Engine Voice Casting + Mastered WAV",
+            description = "Assign up to 4 named speakers (Narrator, Host A, Host B, Guest) to any installed voices across Kokoro, Qwen3, Piper, Mimic3, VCTK or Clones. Parse screenplay scripts (`Speaker: line`), audition live table-reads, or export mastered multi-voice .WAV scenes.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/script_studio",
+            fileName = "script_studio.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Multi-Voice Cast Router & Mastered Scene Stitcher • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Multi-Voice Script & Podcast Studio OS Module (`TOOL-08`).",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 16
+        ),
+        ModelBundleSpec(
+            id = "tool_voice_benchmark",
+            romCode = "TOOL-09",
+            badge = "AB_BENCHMARK",
+            accentHex = 0xFF00FF9D,
+            name = "VOICE_AB_BENCHMARK_LAB",
+            subtitle = "Side-by-Side Engine A/B Comparator • Hardware RTF & Latency Meter + Phonetic Stress Lab",
+            description = "Compare any two voices across any installed engines head-to-head on the exact same prompt. Measures synthesis latency, audio duration, Real-Time Factor (RTF), speed multiplier & active accelerator telemetry.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/voice_benchmark",
+            fileName = "voice_benchmark.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Precision RTF / Latency Profiler & Phonetic Stress Corpus • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Voice A/B Benchmark & Phonetic Lab OS Module (`TOOL-09`).",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 16
+        ),
+        ModelBundleSpec(
+            id = "tool_srt_batch_studio",
+            romCode = "TOOL-10",
+            badge = "SRT_CAPTION_FORGE",
+            accentHex = 0xFFFFB703,
+            name = "SRT_SUBTITLE_BATCH_STUDIO",
+            subtitle = "Batch Voiceover Queue + Frame-Accurate .SRT & .VTT Timed Captions + Mastered WAV",
+            description = "Synthesizes multi-line voiceover queues cue-by-cue while computing sample-exact start/end timestamps. Exports mastered .WAV audio alongside standard .SRT and .VTT subtitle files directly to Downloads/PURR-TTS/.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/srt_batch_studio",
+            fileName = "srt_batch_studio.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Sample-Exact Timecode Generator (.SRT / .VTT + .WAV) • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: SRT Subtitle & Batch Queue Studio OS Module (`TOOL-10`).",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 16
         )
     )
 }

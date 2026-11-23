@@ -87,20 +87,134 @@ class SherpaOnnxEngine(
     override val isModelReady: Boolean
         get() = modelsBaseDir.listFiles()?.any { it.isDirectory && it.listFiles()?.isNotEmpty() == true } == true
 
+    private data class MountTarget(
+        val family: SherpaModelFamily,
+        val subCartridgeId: String?,
+        val speakerIndex: Int,
+        val voiceDisplayName: String?,
+        val cartridgeId: String?
+    )
+
     fun isFamilyInstalled(family: SherpaModelFamily, subCartridgeId: String? = null): Boolean {
         val dir = familyDir(family, subCartridgeId)
-        return dir.walkTopDown().any { it.extension.equals("onnx", ignoreCase = true) }
+        return hasMinimumRequiredAssets(dir, family)
+    }
+
+    private fun isCompleteEspeakDir(dir: File): Boolean =
+        dir.isDirectory &&
+            dir.name == "espeak-ng-data" &&
+            File(dir, "phontab").isFile &&
+            File(dir, "phonindex").isFile &&
+            File(dir, "phondata").isFile &&
+            File(dir, "intonations").isFile
+
+    private fun hasMinimumRequiredAssets(dir: File, family: SherpaModelFamily): Boolean {
+        if (!dir.exists() || !dir.isDirectory) return false
+        val files = dir.walkTopDown()
+            .filter { it.isFile && it.length() > 0L && !it.absolutePath.contains("${File.separator}espeak-ng-data${File.separator}") }
+            .toList()
+        if (files.none { it.extension.equals("onnx", ignoreCase = true) }) return false
+        return when (family) {
+            SherpaModelFamily.KOKORO -> files.any { it.name == "voices.bin" } &&
+                files.any { it.name == "tokens.txt" } &&
+                dir.walkTopDown().any { isCompleteEspeakDir(it) }
+            SherpaModelFamily.KITTEN_TTS -> files.any { it.name == "voices.bin" } &&
+                files.any { it.name == "tokens.txt" } &&
+                dir.walkTopDown().any { isCompleteEspeakDir(it) }
+            SherpaModelFamily.SUPERTONIC_3 -> {
+                files.any { it.name.contains("duration_predictor") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("text_encoder") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("vector_estimator") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("vocoder") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name == "tts.json" } &&
+                    files.any { it.name.contains("unicode_indexer") } &&
+                    files.any { it.name.contains("voice") && it.extension.equals("bin", true) }
+            }
+            SherpaModelFamily.POCKET_TTS -> {
+                files.any { it.name.contains("lm_flow") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("lm_main") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("encoder") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("decoder") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("text_conditioner") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("vocab") && it.extension.equals("json", true) } &&
+                    files.any { it.name.contains("token_scores") && it.extension.equals("json", true) }
+            }
+            SherpaModelFamily.ZIPVOICE -> {
+                files.any { it.name == "tokens.txt" } &&
+                    files.any { it.name.contains("encoder") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("decoder") && it.extension.equals("onnx", true) } &&
+                    files.any { it.name.contains("vocoder") && it.extension.equals("onnx", true) }
+            }
+            SherpaModelFamily.MATCHA -> files.any { it.name == "tokens.txt" } &&
+                files.any { it.extension.equals("onnx", true) && !isVocoderOnnx(it) }
+            SherpaModelFamily.PIPER,
+            SherpaModelFamily.MELO_TTS -> files.any { it.name == "tokens.txt" }
+        }
+    }
+
+    private fun isVocoderOnnx(file: File): Boolean =
+        file.name.contains("vocos", ignoreCase = true) ||
+            file.name.contains("hifigan", ignoreCase = true) ||
+            file.name.contains("vocoder", ignoreCase = true)
+
+    private fun resolveMountTarget(voiceId: String, profile: PurrProfile): MountTarget {
+        val cleanVoiceId = voiceId.substringAfter(':')
+        val allBuiltIn = PurrDefaultPresets.builtInVoices()
+        val requestedDesc = allBuiltIn.firstOrNull { it.id == cleanVoiceId }
+        val requestedFamily = requestedDesc?.sherpaFamily ?: inferFamilyFromVoice(voiceId, profile.sherpaFamily)
+        val requestedSub = requestedDesc?.requiredSubCartridgeId
+            ?: requestedDesc?.cartridgeId?.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
+
+        // If the requested voice's directory has valid assets, use it directly.
+        if (hasMinimumRequiredAssets(familyDir(requestedFamily, requestedSub), requestedFamily)) {
+            return MountTarget(
+                family = requestedFamily,
+                subCartridgeId = requestedSub,
+                speakerIndex = requestedDesc?.speakerIndex ?: inferSpeakerFallback(cleanVoiceId),
+                voiceDisplayName = requestedDesc?.displayName,
+                cartridgeId = requestedDesc?.cartridgeId ?: profile.selectedCartridgeId
+            )
+        }
+
+        // Hub fallback: if user slotted a hub where only a standalone sub-cartridge (or base) is installed,
+        // route cleanly to the first installed variant under that same hub instead of mounting an empty folder.
+        val targetHubId = requestedDesc?.cartridgeId ?: profile.selectedCartridgeId
+        val installedSibling = allBuiltIn.firstOrNull { candidate ->
+            candidate.cartridgeId == targetHubId &&
+                candidate.sherpaFamily != null &&
+                run {
+                    val cSub = candidate.requiredSubCartridgeId
+                        ?: candidate.cartridgeId.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
+                    hasMinimumRequiredAssets(familyDir(candidate.sherpaFamily, cSub), candidate.sherpaFamily)
+                }
+        }
+        if (installedSibling != null && installedSibling.sherpaFamily != null) {
+            val resolvedSub = installedSibling.requiredSubCartridgeId
+                ?: installedSibling.cartridgeId.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
+            return MountTarget(
+                family = installedSibling.sherpaFamily,
+                subCartridgeId = resolvedSub,
+                speakerIndex = installedSibling.speakerIndex,
+                voiceDisplayName = installedSibling.displayName,
+                cartridgeId = installedSibling.cartridgeId
+            )
+        }
+
+        return MountTarget(
+            family = requestedFamily,
+            subCartridgeId = requestedSub,
+            speakerIndex = requestedDesc?.speakerIndex ?: inferSpeakerFallback(cleanVoiceId),
+            voiceDisplayName = requestedDesc?.displayName,
+            cartridgeId = requestedDesc?.cartridgeId ?: profile.selectedCartridgeId
+        )
     }
 
     override suspend fun warmup(profile: PurrProfile) {
         mutex.withLock {
-            val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
-            val voiceDesc = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
-            val dirKey = voiceDesc?.requiredSubCartridgeId
-                ?: voiceDesc?.cartridgeId?.takeIf { it != "rom_piper" && it != "rom_kokoro_sherpa" && it != "rom_kitten_tts" }
+            val target = resolveMountTarget(profile.primaryVoiceId, profile)
             ensureFamilyLoadedLocked(
-                family = voiceDesc?.sherpaFamily ?: profile.sherpaFamily,
-                subCartridgeId = dirKey
+                family = target.family,
+                subCartridgeId = target.subCartridgeId
             )
         }
         resetIdleTimer()
@@ -125,11 +239,9 @@ class SherpaOnnxEngine(
             )
         }
 
-        val cleanVoiceId = voiceId.substringAfter(':')
-        val voiceDesc = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
-        val targetFamily = voiceDesc?.sherpaFamily ?: inferFamilyFromVoice(voiceId, profile.sherpaFamily)
-        val subCartridgeId = voiceDesc?.requiredSubCartridgeId
-            ?: voiceDesc?.cartridgeId?.takeIf { it != "rom_piper" && it != "rom_kokoro_sherpa" && it != "rom_kitten_tts" }
+        val mountTarget = resolveMountTarget(voiceId, profile)
+        val targetFamily = mountTarget.family
+        val subCartridgeId = mountTarget.subCartridgeId
 
         mutex.withLock {
             ensureFamilyLoadedLocked(targetFamily, subCartridgeId)
@@ -138,14 +250,14 @@ class SherpaOnnxEngine(
                 // ✨ TRUST RENEWAL UX (v1.8.1): name the CARTRIDGE to slam, not just the voice —
                 // "Af Heart cartridge not installed" sent users hunting for a voice they had
                 // already downloaded while the actual missing piece was its parent ROM bay.
-                val voiceLabel = voiceDesc?.displayName ?: targetFamily.label
+                val voiceLabel = mountTarget.voiceDisplayName ?: targetFamily.label
                 val cartridgeLabel = cartridgeLabelFor(
-                    cartridgeId = voiceDesc?.cartridgeId,
-                    subCartridgeId = voiceDesc?.requiredSubCartridgeId,
+                    cartridgeId = mountTarget.cartridgeId,
+                    subCartridgeId = subCartridgeId,
                     family = targetFamily
                 )
                 val mountReason = lastMountError
-                val summary = if (!mountReason.isNullOrBlank() && isFamilyInstalled(targetFamily, subCartridgeId)) {
+                val summary = if (!mountReason.isNullOrBlank() && familyDir(targetFamily, subCartridgeId).walkTopDown().any { it.extension.equals("onnx", true) }) {
                     "$cartridgeLabel failed to mount: $mountReason"
                 } else {
                     "$voiceLabel offline — $cartridgeLabel cartridge not installed (download it in Tab 3)"
@@ -161,7 +273,7 @@ class SherpaOnnxEngine(
 
             val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
             val compensatedSpeed = (speakingRate / clampedPitch).coerceIn(0.6f, 1.8f)
-            val speakerId = resolveSpeakerId(voiceId, targetFamily)
+            val speakerId = mountTarget.speakerIndex
             var genResult = runCatching {
                 tts.generate(text = text, sid = speakerId, speed = compensatedSpeed)
             }
@@ -214,7 +326,7 @@ class SherpaOnnxEngine(
                 pcmFloat24k = PurrDspProcessor.shiftPitchCubic(resampled, clampedPitch),
                 sampleRateHz = SAMPLE_RATE_HZ,
                 hardwareBadge = activeBadge,
-                engineSummary = "sherpa-onnx • ${voiceDesc?.displayName ?: targetFamily.label} (${finalGenerated.sampleRate}Hz -> 24kHz)$suffix"
+                engineSummary = "sherpa-onnx • ${mountTarget.voiceDisplayName ?: targetFamily.label} (${finalGenerated.sampleRate}Hz -> 24kHz)$suffix"
             )
         }
     }
@@ -227,18 +339,38 @@ class SherpaOnnxEngine(
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
         resetIdleTimer()
 
+        // If the exact cloning variant isn't installed (e.g. clone saved with base Pocket INT8
+        // while Pocket FP32 Studio is installed, or vice versa), fall back to sibling engine in family.
+        val preferredEngineId = clonedVoice.resolvedCloneEngineId
+        val effectiveEngineId = if (hasMinimumRequiredAssets(familyDir(clonedVoice.family, preferredEngineId), clonedVoice.family)) {
+            preferredEngineId
+        } else {
+            val siblingId = when (clonedVoice.family) {
+                SherpaModelFamily.POCKET_TTS -> if (preferredEngineId == "sub_pocket_fp32") "rom_pocket_tts" else "sub_pocket_fp32"
+                SherpaModelFamily.ZIPVOICE -> if (preferredEngineId == "sub_zipvoice_full") "rom_zipvoice" else "sub_zipvoice_full"
+                else -> preferredEngineId
+            }
+            if (hasMinimumRequiredAssets(familyDir(clonedVoice.family, siblingId), clonedVoice.family)) siblingId else preferredEngineId
+        }
+
         mutex.withLock {
-            ensureFamilyLoadedLocked(clonedVoice.family, clonedVoice.resolvedCloneEngineId)
+            ensureFamilyLoadedLocked(clonedVoice.family, effectiveEngineId)
             val tts = activeOfflineTts
             if (tts == null) {
                 // ✨ TRUST RENEWAL UX (v1.8.1): name the clone engine cartridge that is missing.
-                val cloneSpec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == clonedVoice.resolvedCloneEngineId }
+                val cloneSpec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == effectiveEngineId }
                 val cartridgeLabel = cloneSpec?.let { "${it.romCode} ${it.name}" } ?: clonedVoice.family.label
+                val mountReason = lastMountError
+                val summary = if (!mountReason.isNullOrBlank() && familyDir(clonedVoice.family, effectiveEngineId).walkTopDown().any { it.extension.equals("onnx", true) }) {
+                    "$cartridgeLabel failed to mount: $mountReason"
+                } else {
+                    "$cartridgeLabel cartridge not installed (needed by clone ${clonedVoice.displayName} — download it in Tab 3)"
+                }
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
                     sampleRateHz = SAMPLE_RATE_HZ,
                     hardwareBadge = HardwareStatusBadge.IDLE,
-                    engineSummary = "$cartridgeLabel cartridge not installed (needed by clone ${clonedVoice.displayName} — download it in Tab 3)",
+                    engineSummary = summary,
                     isFallbackNeuralPreview = true
                 )
             }
@@ -263,7 +395,7 @@ class SherpaOnnxEngine(
 
             if ((generated == null || generated.samples.isEmpty()) && activeUsedNnapi) {
                 Log.w(TAG, "[NNAPI_FALLBACK] ${clonedVoice.family.label} clone failed under NNAPI; retrying CPU")
-                ensureFamilyLoadedLocked(clonedVoice.family, clonedVoice.resolvedCloneEngineId, forceCpu = true)
+                ensureFamilyLoadedLocked(clonedVoice.family, effectiveEngineId, forceCpu = true)
                 activeOfflineTts?.let { cpuTts ->
                     genResult = runCatching {
                         if (refSamples.isNotEmpty()) {
@@ -397,7 +529,13 @@ class SherpaOnnxEngine(
         lastMountError = null
 
         val dir = familyDir(family, subCartridgeId)
-        val files = dir.walkTopDown().filter { it.isFile }.toList()
+        val files = dir.walkTopDown()
+            .filter {
+                it.isFile &&
+                    it.length() > 0L &&
+                    !it.absolutePath.contains("${File.separator}espeak-ng-data${File.separator}")
+            }
+            .toList()
         if (files.none { it.extension.equals("onnx", ignoreCase = true) }) {
             // ✨ TRUST RENEWAL (v1.8.1): say WHY the mount refused — support gold when a user
             // swears they downloaded a cartridge but every voice fail-softs to OS speech.
@@ -407,32 +545,93 @@ class SherpaOnnxEngine(
         }
 
         val tokensPath = files.firstOrNull { it.name == "tokens.txt" }?.absolutePath.orEmpty()
-        val dataDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }?.absolutePath.orEmpty()
-        val lexicons = files.filter { it.name.startsWith("lexicon") && it.extension == "txt" }
-            .sortedBy { f ->
-                when (f.name) {
-                    "lexicon-us-en.txt" -> 0
-                    "lexicon-gb-en.txt" -> 1
-                    "lexicon-zh.txt" -> 2
-                    else -> 3
-                }
-            }
-            .joinToString(",") { it.absolutePath }
-        val ruleFsts = files.filter { it.extension.equals("fst", ignoreCase = true) }
-            .sortedBy { it.name }
-            .joinToString(",") { it.absolutePath }
-        val ruleFars = files.filter { it.extension.equals("far", ignoreCase = true) }
-            .sortedBy { it.name }
-            .joinToString(",") { it.absolutePath }
+        val rawEspeakDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
+        val dataDir = if (rawEspeakDir != null && isCompleteEspeakDir(rawEspeakDir)) {
+            rawEspeakDir.absolutePath
+        } else {
+            ""
+        }
+        if (rawEspeakDir != null && dataDir.isEmpty()) {
+            lastMountError = "Incomplete espeak-ng-data in ${dir.name} (missing phontab/phonindex/phondata/intonations) — re-download cartridge"
+            Log.w(TAG, "[MOUNT_MISS] $lastMountError")
+            return
+        }
+
+        val sortedLexiconFiles = files.filter { it.name.startsWith("lexicon") && it.extension.equals("txt", ignoreCase = true) }
+            .sortedWith(
+                compareBy<File>(
+                    { f ->
+                        when (f.name) {
+                            "lexicon.txt" -> 0
+                            "lexicon-us-en.txt" -> 1
+                            "lexicon-gb-en.txt" -> 2
+                            "lexicon-zh.txt" -> 3
+                            else -> 4
+                        }
+                    },
+                    { it.name }
+                )
+            )
+        val multiLexicons = sortedLexiconFiles.joinToString(",") { it.absolutePath }
+        val singleLexicon = sortedLexiconFiles.firstOrNull()?.absolutePath.orEmpty()
+
+        // Order rule FSTs properly (`phone*` -> `date*` -> `number*` -> `new_heteronym*` -> others)
+        // matching k2-fsa's upstream generate-tts-apk-script pipeline. For MeloTTS ZH-EN exclude
+        // `number.fst` if absent or keep only upstream rules; NEVER load redundant 180MB rule.far
+        // when `.fst` rule files are already present (prevents mobile OOM / mount timeout).
+        val ruleFstList = files.filter { it.extension.equals("fst", ignoreCase = true) }
+            .sortedWith(
+                compareBy<File>(
+                    { f ->
+                        val n = f.name.lowercase()
+                        when {
+                            n.startsWith("phone") -> 0
+                            n.startsWith("date") -> 1
+                            n.startsWith("number") -> 2
+                            n.startsWith("new_heteronym") -> 3
+                            else -> 4
+                        }
+                    },
+                    { it.name }
+                )
+            )
+        val ruleFsts = ruleFstList.joinToString(",") { it.absolutePath }
+        val ruleFars = if (ruleFsts.isEmpty()) {
+            files.filter { it.extension.equals("far", ignoreCase = true) }
+                .sortedBy { it.name }
+                .joinToString(",") { it.absolutePath }
+        } else {
+            ""
+        }
 
         val threads = if (smartOffload) hardwareProfile.optimalCpuThreads else 4
 
+        fun pickPreferredOnnx(candidates: List<File>): String {
+            val best = candidates.firstOrNull { it.name.contains("int8", ignoreCase = true) }
+                ?: candidates.firstOrNull()
+            return best?.absolutePath.orEmpty()
+        }
+
+        fun resolveMatchaVocoder(): String {
+            val local = files.firstOrNull {
+                it.extension.equals("onnx", ignoreCase = true) && isVocoderOnnx(it)
+            }?.absolutePath.orEmpty()
+            if (local.isNotEmpty()) return local
+            // Check sibling Matcha dir (matcha / matcha_rom_matcha_en) for matching vocoder filename
+            val expectedVocoder = if (dir.name == "matcha") "vocos-16khz-univ.onnx" else "vocos-22khz-univ.onnx"
+            val siblingCandidate = listOf("matcha", "matcha_rom_matcha_en")
+                .map { File(modelsBaseDir, "$it/$expectedVocoder") }
+                .firstOrNull { it.isFile && it.length() > 1024L }
+            return siblingCandidate?.absolutePath.orEmpty()
+        }
+
         fun buildConfigForProvider(providerName: String): OfflineTtsModelConfig? = when (family) {
             SherpaModelFamily.KOKORO -> {
-                val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
+                val onnx = pickPreferredOnnx(files.filter { it.extension.equals("onnx", ignoreCase = true) })
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
-                if (onnx.isEmpty() || voices.isEmpty()) {
-                    Log.w(TAG, "[MOUNT_MISS] kokoro missing required assets (onnx=$onnx, voices=$voices)")
+                if (onnx.isEmpty() || voices.isEmpty() || tokensPath.isEmpty() || dataDir.isEmpty()) {
+                    lastMountError = "Missing Kokoro asset (onnx=${onnx.isNotEmpty()}, voices=${voices.isNotEmpty()}, tokens=${tokensPath.isNotEmpty()}, espeak=${dataDir.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError")
                     null
                 } else {
                     OfflineTtsModelConfig(
@@ -441,7 +640,7 @@ class SherpaOnnxEngine(
                             voices = voices,
                             tokens = tokensPath,
                             dataDir = dataDir,
-                            lexicon = lexicons
+                            lexicon = multiLexicons
                         ),
                         numThreads = threads,
                         provider = providerName
@@ -449,10 +648,11 @@ class SherpaOnnxEngine(
                 }
             }
             SherpaModelFamily.KITTEN_TTS -> {
-                val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
+                val onnx = pickPreferredOnnx(files.filter { it.extension.equals("onnx", ignoreCase = true) })
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
                 if (onnx.isEmpty() || voices.isEmpty() || tokensPath.isEmpty() || dataDir.isEmpty()) {
-                    Log.w(TAG, "KittenTTS missing required asset (onnx=$onnx, voices=$voices, tokens=$tokensPath, dataDir=$dataDir)")
+                    lastMountError = "Missing KittenTTS asset (onnx=${onnx.isNotEmpty()}, voices=${voices.isNotEmpty()}, tokens=${tokensPath.isNotEmpty()}, espeak=${dataDir.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError")
                     null
                 } else {
                     OfflineTtsModelConfig(
@@ -469,14 +669,16 @@ class SherpaOnnxEngine(
                 }
             }
             SherpaModelFamily.SUPERTONIC_3 -> {
-                val dur = files.firstOrNull { it.name.contains("duration_predictor") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val txtEnc = files.firstOrNull { it.name.contains("text_encoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val vecEst = files.firstOrNull { it.name.contains("vector_estimator") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val voc = files.firstOrNull { it.name.contains("vocoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
+                val dur = files.firstOrNull { it.name.contains("duration_predictor") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val txtEnc = files.firstOrNull { it.name.contains("text_encoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val vecEst = files.firstOrNull { it.name.contains("vector_estimator") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val voc = files.firstOrNull { it.name.contains("vocoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
                 val ttsJson = files.firstOrNull { it.name == "tts.json" }?.absolutePath.orEmpty()
                 val uniIdx = files.firstOrNull { it.name.contains("unicode_indexer") }?.absolutePath.orEmpty()
-                val vStyle = files.firstOrNull { it.name.contains("voice") && it.extension == "bin" }?.absolutePath.orEmpty()
-                if (dur.isEmpty() || txtEnc.isEmpty() || vecEst.isEmpty() || voc.isEmpty()) {
+                val vStyle = files.firstOrNull { it.name.contains("voice") && it.extension.equals("bin", true) }?.absolutePath.orEmpty()
+                if (dur.isEmpty() || txtEnc.isEmpty() || vecEst.isEmpty() || voc.isEmpty() || ttsJson.isEmpty() || uniIdx.isEmpty() || vStyle.isEmpty()) {
+                    lastMountError = "Missing Supertonic 3 asset (dp=${dur.isNotEmpty()}, enc=${txtEnc.isNotEmpty()}, vec=${vecEst.isNotEmpty()}, voc=${voc.isNotEmpty()}, json=${ttsJson.isNotEmpty()}, idx=${uniIdx.isNotEmpty()}, voice=${vStyle.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError")
                     null
                 } else {
                     OfflineTtsModelConfig(
@@ -495,28 +697,20 @@ class SherpaOnnxEngine(
                 }
             }
             SherpaModelFamily.MATCHA -> {
-                // Acoustic model + Vocos/HiFi-GAN vocoder (companion asset).
                 val acoustic = files.firstOrNull {
-                    it.extension.equals("onnx", ignoreCase = true) &&
-                        !it.name.contains("vocos", ignoreCase = true) &&
-                        !it.name.contains("hifigan", ignoreCase = true) &&
-                        !it.name.contains("vocoder", ignoreCase = true)
+                    it.extension.equals("onnx", ignoreCase = true) && !isVocoderOnnx(it)
                 }?.absolutePath.orEmpty()
-                val vocoder = files.firstOrNull {
-                    it.extension.equals("onnx", ignoreCase = true) &&
-                        (it.name.contains("vocos", ignoreCase = true) ||
-                            it.name.contains("hifigan", ignoreCase = true) ||
-                            it.name.contains("vocoder", ignoreCase = true))
-                }?.absolutePath.orEmpty()
-                if (acoustic.isEmpty() || vocoder.isEmpty()) {
-                    Log.w(TAG, "Matcha missing required asset (acoustic=$acoustic, vocoder=$vocoder)")
+                val vocoder = resolveMatchaVocoder()
+                if (acoustic.isEmpty() || vocoder.isEmpty() || tokensPath.isEmpty()) {
+                    lastMountError = "Missing Matcha asset (acoustic=${acoustic.isNotEmpty()}, vocoder=${vocoder.isNotEmpty()}, tokens=${tokensPath.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError in ${dir.absolutePath}")
                     null
                 } else {
                     OfflineTtsModelConfig(
                         matcha = OfflineTtsMatchaModelConfig(
                             acousticModel = acoustic,
                             vocoder = vocoder,
-                            lexicon = lexicons,
+                            lexicon = multiLexicons,
                             tokens = tokensPath,
                             dataDir = dataDir,
                             noiseScale = 0.667f,
@@ -529,9 +723,9 @@ class SherpaOnnxEngine(
             }
             SherpaModelFamily.PIPER,
             SherpaModelFamily.MELO_TTS -> {
-                val onnxFiles = files.filter { it.extension.equals("onnx", ignoreCase = true) }
-                val onnx = (onnxFiles.firstOrNull { it.name.contains("int8", ignoreCase = true) }
-                    ?: onnxFiles.firstOrNull())?.absolutePath.orEmpty()
+                val onnx = pickPreferredOnnx(files.filter { it.extension.equals("onnx", ignoreCase = true) })
+                // OfflineTtsVitsImpl (Lexicon / MeloTtsLexicon) takes a SINGLE file path (not comma-joined)
+                val vitsLexicon = if (dataDir.isNotEmpty() && family == SherpaModelFamily.PIPER) "" else singleLexicon
                 if (onnx.isEmpty() || tokensPath.isEmpty()) {
                     lastMountError = "Missing VITS asset (onnx=${onnx.isNotEmpty()}, tokens=${tokensPath.isNotEmpty()})"
                     Log.w(TAG, "[MOUNT_MISS] $lastMountError in ${dir.absolutePath}")
@@ -540,7 +734,7 @@ class SherpaOnnxEngine(
                     OfflineTtsModelConfig(
                         vits = OfflineTtsVitsModelConfig(
                             model = onnx,
-                            lexicon = lexicons,
+                            lexicon = vitsLexicon,
                             tokens = tokensPath,
                             dataDir = dataDir,
                             noiseScale = 0.667f,
@@ -553,14 +747,16 @@ class SherpaOnnxEngine(
                 }
             }
             SherpaModelFamily.POCKET_TTS -> {
-                val lmFlow = files.firstOrNull { it.name.contains("lm_flow") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val lmMain = files.firstOrNull { it.name.contains("lm_main") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val enc = files.firstOrNull { it.name.contains("encoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val dec = files.firstOrNull { it.name.contains("decoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val txtCond = files.firstOrNull { it.name.contains("text_conditioner") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val vocab = files.firstOrNull { it.name.contains("vocab") && it.extension == "json" }?.absolutePath.orEmpty()
-                val scores = files.firstOrNull { it.name.contains("token_scores") && it.extension == "json" }?.absolutePath.orEmpty()
-                if (lmFlow.isEmpty() || lmMain.isEmpty()) {
+                val lmFlow = files.firstOrNull { it.name.contains("lm_flow") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val lmMain = files.firstOrNull { it.name.contains("lm_main") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val enc = files.firstOrNull { it.name.contains("encoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val dec = files.firstOrNull { it.name.contains("decoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val txtCond = files.firstOrNull { it.name.contains("text_conditioner") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val vocab = files.firstOrNull { it.name.contains("vocab") && it.extension.equals("json", true) }?.absolutePath.orEmpty()
+                val scores = files.firstOrNull { it.name.contains("token_scores") && it.extension.equals("json", true) }?.absolutePath.orEmpty()
+                if (lmFlow.isEmpty() || lmMain.isEmpty() || enc.isEmpty() || dec.isEmpty() || txtCond.isEmpty() || vocab.isEmpty() || scores.isEmpty()) {
+                    lastMountError = "Missing Pocket TTS asset (flow=${lmFlow.isNotEmpty()}, main=${lmMain.isNotEmpty()}, enc=${enc.isNotEmpty()}, dec=${dec.isNotEmpty()}, cond=${txtCond.isNotEmpty()}, vocab=${vocab.isNotEmpty()}, scores=${scores.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError")
                     null
                 } else {
                     OfflineTtsModelConfig(
@@ -579,10 +775,12 @@ class SherpaOnnxEngine(
                 }
             }
             SherpaModelFamily.ZIPVOICE -> {
-                val enc = files.firstOrNull { it.name.contains("encoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val dec = files.firstOrNull { it.name.contains("decoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                val voc = files.firstOrNull { it.name.contains("vocoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                if (enc.isEmpty() || dec.isEmpty()) {
+                val enc = files.firstOrNull { it.name.contains("encoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val dec = files.firstOrNull { it.name.contains("decoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                val voc = files.firstOrNull { it.name.contains("vocoder") && it.extension.equals("onnx", true) }?.absolutePath.orEmpty()
+                if (enc.isEmpty() || dec.isEmpty() || voc.isEmpty() || tokensPath.isEmpty()) {
+                    lastMountError = "Missing ZipVoice asset (enc=${enc.isNotEmpty()}, dec=${dec.isNotEmpty()}, voc=${voc.isNotEmpty()}, tokens=${tokensPath.isNotEmpty()})"
+                    Log.w(TAG, "[MOUNT_MISS] $lastMountError")
                     null
                 } else {
                     OfflineTtsModelConfig(
@@ -592,7 +790,7 @@ class SherpaOnnxEngine(
                             decoder = dec,
                             vocoder = voc,
                             dataDir = dataDir,
-                            lexicon = lexicons
+                            lexicon = singleLexicon
                         ),
                         numThreads = threads,
                         provider = providerName
@@ -601,25 +799,14 @@ class SherpaOnnxEngine(
             }
         }
 
-        val ruleFarsArg = if (family in setOf(
-                SherpaModelFamily.KOKORO,
-                SherpaModelFamily.MELO_TTS,
-                SherpaModelFamily.PIPER
-            )
-        ) {
-            ruleFars
-        } else {
-            ""
-        }
-        val ruleFstsArg = when {
-            ruleFarsArg.isNotEmpty() -> ""
-            family in setOf(
-                SherpaModelFamily.KOKORO,
-                SherpaModelFamily.MELO_TTS,
-                SherpaModelFamily.PIPER
-            ) -> ruleFsts
-            else -> ""
-        }
+        val supportsTextRules = family in setOf(
+            SherpaModelFamily.KOKORO,
+            SherpaModelFamily.MATCHA,
+            SherpaModelFamily.MELO_TTS,
+            SherpaModelFamily.PIPER
+        )
+        val ruleFstsArg = if (supportsTextRules) ruleFsts else ""
+        val ruleFarsArg = if (supportsTextRules && ruleFsts.isEmpty()) ruleFars else ""
 
         // ✨ SMART HARDWARE OFFLOAD (v1.8.5): try NNAPI first when enabled & supported on
         // architectures with predictable shapes (Kokoro/Kitten/Supertonic/Pocket/ZipVoice).
@@ -668,14 +855,10 @@ class SherpaOnnxEngine(
         }
     }
 
-    private fun resolveSpeakerId(voiceId: String, family: SherpaModelFamily): Int {
+    private fun inferSpeakerFallback(voiceId: String): Int {
         val cleanVoiceId = voiceId.substringAfter(':')
         val descriptor = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
         if (descriptor != null) return descriptor.speakerIndex
-        if (family == SherpaModelFamily.KOKORO) {
-            return PurrDefaultPresets.kokoroVoices("rom_kokoro_sherpa", BackendType.SHERPA_ONNX)
-                .firstOrNull { it.id == cleanVoiceId }?.speakerIndex ?: 0
-        }
         return when {
             cleanVoiceId.endsWith("m1") -> 1
             else -> 0

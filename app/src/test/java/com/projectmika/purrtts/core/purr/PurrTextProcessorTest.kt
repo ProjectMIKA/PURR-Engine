@@ -299,7 +299,10 @@ class PurrTextProcessorTest {
             "tool_audio_exporter",
             "tool_voice_design",
             "tool_audiobook_constructor",
-            "tool_theme_engine"
+            "tool_theme_engine",
+            "tool_script_studio",
+            "tool_voice_benchmark",
+            "tool_srt_batch_studio"
         )
         val tools = catalog.filter { it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
