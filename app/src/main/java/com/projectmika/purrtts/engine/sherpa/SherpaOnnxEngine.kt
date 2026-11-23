@@ -15,9 +15,11 @@ import com.k2fsa.sherpa.onnx.OfflineTtsVitsModelConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsZipVoiceModelConfig
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
+import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrDefaultPresets
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
+import com.projectmika.purrtts.core.purr.PurrHardwareProbe
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.engine.PurrSynthesizer
@@ -54,6 +56,8 @@ import kotlinx.coroutines.withContext
 class SherpaOnnxEngine(
     private val context: Context,
     private val clonedVoicesProvider: () -> List<ClonedVoiceProfile>,
+    private val smartOffloadProvider: () -> Boolean = { false },
+    private val hardwareProfile: HardwareProfile = PurrHardwareProbe.detectDevice(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -72,6 +76,8 @@ class SherpaOnnxEngine(
     private var idleJob: Job? = null
     private var activeOfflineTts: OfflineTts? = null
     private var activeMountKey: String? = null
+    private var activeSmartOffload: Boolean = false
+    private var activeUsedNnapi: Boolean = false
 
     val modelsBaseDir: File by lazy {
         File(context.filesDir, "models/sherpa").apply { mkdirs() }
@@ -89,9 +95,11 @@ class SherpaOnnxEngine(
         mutex.withLock {
             val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
             val voiceDesc = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
+            val dirKey = voiceDesc?.requiredSubCartridgeId
+                ?: voiceDesc?.cartridgeId?.takeIf { it != "rom_piper" && it != "rom_kokoro_sherpa" && it != "rom_kitten_tts" }
             ensureFamilyLoadedLocked(
                 family = voiceDesc?.sherpaFamily ?: profile.sherpaFamily,
-                subCartridgeId = voiceDesc?.requiredSubCartridgeId
+                subCartridgeId = dirKey
             )
         }
         resetIdleTimer()
@@ -120,6 +128,7 @@ class SherpaOnnxEngine(
         val voiceDesc = PurrDefaultPresets.builtInVoices().firstOrNull { it.id == cleanVoiceId }
         val targetFamily = voiceDesc?.sherpaFamily ?: inferFamilyFromVoice(voiceId, profile.sherpaFamily)
         val subCartridgeId = voiceDesc?.requiredSubCartridgeId
+            ?: voiceDesc?.cartridgeId?.takeIf { it != "rom_piper" && it != "rom_kokoro_sherpa" && it != "rom_kitten_tts" }
 
         mutex.withLock {
             ensureFamilyLoadedLocked(targetFamily, subCartridgeId)
@@ -160,17 +169,27 @@ class SherpaOnnxEngine(
                 )
             }
 
-            _statusFlow.value = HardwareStatusBadge.CPU_NEON
+            val activeBadge = if (activeSmartOffload && activeUsedNnapi) {
+                HardwareStatusBadge.NPU_ACTIVE
+            } else {
+                HardwareStatusBadge.CPU_NEON
+            }
+            _statusFlow.value = activeBadge
             val resampled = PurrDspProcessor.resampleMono(
                 samples = generated.samples,
                 fromRate = generated.sampleRate,
                 toRate = SAMPLE_RATE_HZ
             )
+            val suffix = if (activeSmartOffload) {
+                if (activeUsedNnapi) " • Smart NPU/NNAPI" else " • Smart Offload"
+            } else {
+                ""
+            }
             SynthesisOutcome(
                 pcmFloat24k = PurrDspProcessor.shiftPitchCubic(resampled, clampedPitch),
                 sampleRateHz = SAMPLE_RATE_HZ,
-                hardwareBadge = HardwareStatusBadge.CPU_NEON,
-                engineSummary = "sherpa-onnx • ${voiceDesc?.displayName ?: targetFamily.label} (${generated.sampleRate}Hz -> 24kHz)"
+                hardwareBadge = activeBadge,
+                engineSummary = "sherpa-onnx • ${voiceDesc?.displayName ?: targetFamily.label} (${generated.sampleRate}Hz -> 24kHz)$suffix"
             )
         }
     }
@@ -226,17 +245,27 @@ class SherpaOnnxEngine(
                 )
             }
 
-            _statusFlow.value = HardwareStatusBadge.CPU_NEON
+            val activeBadge = if (activeSmartOffload && activeUsedNnapi) {
+                HardwareStatusBadge.NPU_ACTIVE
+            } else {
+                HardwareStatusBadge.CPU_NEON
+            }
+            _statusFlow.value = activeBadge
             val resampled = PurrDspProcessor.resampleMono(
                 samples = generated.samples,
                 fromRate = generated.sampleRate,
                 toRate = SAMPLE_RATE_HZ
             )
+            val suffix = if (activeSmartOffload) {
+                if (activeUsedNnapi) " • Smart NPU/NNAPI" else " • Smart Offload"
+            } else {
+                ""
+            }
             SynthesisOutcome(
                 pcmFloat24k = PurrDspProcessor.shiftPitchCubic(resampled, clampedPitch),
                 sampleRateHz = SAMPLE_RATE_HZ,
-                hardwareBadge = HardwareStatusBadge.CPU_NEON,
-                engineSummary = "${clonedVoice.family.label} Cloned • ${clonedVoice.displayName}"
+                hardwareBadge = activeBadge,
+                engineSummary = "${clonedVoice.family.label} Cloned • ${clonedVoice.displayName}$suffix"
             )
         }
     }
@@ -246,6 +275,8 @@ class SherpaOnnxEngine(
             runCatching { activeOfflineTts?.release() }
             activeOfflineTts = null
             activeMountKey = null
+            activeSmartOffload = false
+            activeUsedNnapi = false
             _statusFlow.value = HardwareStatusBadge.IDLE
             Log.i(TAG, "[ONNX_EVICT] Released sherpa-onnx OfflineTts native memory.")
         }
@@ -276,7 +307,7 @@ class SherpaOnnxEngine(
         }
         SherpaModelFamily.MATCHA -> File(modelsBaseDir, "matcha")
         SherpaModelFamily.MELO_TTS -> File(modelsBaseDir, "melo_${subCartridgeId ?: "sub_melo_en"}")
-        SherpaModelFamily.PIPER -> if (subCartridgeId != null) {
+        SherpaModelFamily.PIPER -> if (subCartridgeId != null && subCartridgeId != "rom_piper") {
             File(modelsBaseDir, "piper_$subCartridgeId")
         } else {
             File(modelsBaseDir, "piper")
@@ -297,11 +328,14 @@ class SherpaOnnxEngine(
     }
 
     private fun ensureFamilyLoadedLocked(family: SherpaModelFamily, subCartridgeId: String? = null) {
-        val mountKey = subCartridgeId ?: family.name
+        val smartOffload = smartOffloadProvider()
+        val mountKey = "${subCartridgeId ?: family.name}|smart=$smartOffload"
         if (activeOfflineTts != null && activeMountKey == mountKey) return
         runCatching { activeOfflineTts?.release() }
         activeOfflineTts = null
         activeMountKey = mountKey
+        activeSmartOffload = smartOffload
+        activeUsedNnapi = false
 
         val dir = familyDir(family, subCartridgeId)
         val files = dir.walkTopDown().filter { it.isFile }.toList()
@@ -328,44 +362,48 @@ class SherpaOnnxEngine(
             .sortedBy { it.name }
             .joinToString(",") { it.absolutePath }
 
-        val modelConfig = when (family) {
+        val threads = if (smartOffload) hardwareProfile.optimalCpuThreads else 4
+
+        fun buildConfigForProvider(providerName: String): OfflineTtsModelConfig? = when (family) {
             SherpaModelFamily.KOKORO -> {
                 val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
                 if (onnx.isEmpty() || voices.isEmpty()) {
                     Log.w(TAG, "[MOUNT_MISS] kokoro missing required assets (onnx=$onnx, voices=$voices)")
-                    return
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        kokoro = OfflineTtsKokoroModelConfig(
+                            model = onnx,
+                            voices = voices,
+                            tokens = tokensPath,
+                            dataDir = dataDir,
+                            lexicon = lexicons
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
                 }
-                OfflineTtsModelConfig(
-                    kokoro = OfflineTtsKokoroModelConfig(
-                        model = onnx,
-                        voices = voices,
-                        tokens = tokensPath,
-                        dataDir = dataDir,
-                        lexicon = lexicons
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
             }
             SherpaModelFamily.KITTEN_TTS -> {
                 val onnx = files.firstOrNull { it.name.endsWith(".onnx") }?.absolutePath.orEmpty()
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()
                 if (onnx.isEmpty() || voices.isEmpty() || tokensPath.isEmpty() || dataDir.isEmpty()) {
                     Log.w(TAG, "KittenTTS missing required asset (onnx=$onnx, voices=$voices, tokens=$tokensPath, dataDir=$dataDir)")
-                    return
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        kitten = OfflineTtsKittenModelConfig(
+                            model = onnx,
+                            voices = voices,
+                            tokens = tokensPath,
+                            dataDir = dataDir,
+                            lengthScale = 1.0f
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
                 }
-                OfflineTtsModelConfig(
-                    kitten = OfflineTtsKittenModelConfig(
-                        model = onnx,
-                        voices = voices,
-                        tokens = tokensPath,
-                        dataDir = dataDir,
-                        lengthScale = 1.0f
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
             }
             SherpaModelFamily.SUPERTONIC_3 -> {
                 val dur = files.firstOrNull { it.name.contains("duration_predictor") && it.extension == "onnx" }?.absolutePath.orEmpty()
@@ -375,20 +413,23 @@ class SherpaOnnxEngine(
                 val ttsJson = files.firstOrNull { it.name == "tts.json" }?.absolutePath.orEmpty()
                 val uniIdx = files.firstOrNull { it.name.contains("unicode_indexer") }?.absolutePath.orEmpty()
                 val vStyle = files.firstOrNull { it.name.contains("voice") && it.extension == "bin" }?.absolutePath.orEmpty()
-                if (dur.isEmpty() || txtEnc.isEmpty() || vecEst.isEmpty() || voc.isEmpty()) return
-                OfflineTtsModelConfig(
-                    supertonic = OfflineTtsSupertonicModelConfig(
-                        durationPredictor = dur,
-                        textEncoder = txtEnc,
-                        vectorEstimator = vecEst,
-                        vocoder = voc,
-                        ttsJson = ttsJson,
-                        unicodeIndexer = uniIdx,
-                        voiceStyle = vStyle
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
+                if (dur.isEmpty() || txtEnc.isEmpty() || vecEst.isEmpty() || voc.isEmpty()) {
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        supertonic = OfflineTtsSupertonicModelConfig(
+                            durationPredictor = dur,
+                            textEncoder = txtEnc,
+                            vectorEstimator = vecEst,
+                            vocoder = voc,
+                            ttsJson = ttsJson,
+                            unicodeIndexer = uniIdx,
+                            voiceStyle = vStyle
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
+                }
             }
             SherpaModelFamily.MATCHA -> {
                 // Acoustic model + Vocos/HiFi-GAN vocoder (companion asset).
@@ -406,39 +447,43 @@ class SherpaOnnxEngine(
                 }?.absolutePath.orEmpty()
                 if (acoustic.isEmpty() || vocoder.isEmpty()) {
                     Log.w(TAG, "Matcha missing required asset (acoustic=$acoustic, vocoder=$vocoder)")
-                    return
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        matcha = OfflineTtsMatchaModelConfig(
+                            acousticModel = acoustic,
+                            vocoder = vocoder,
+                            lexicon = lexicons,
+                            tokens = tokensPath,
+                            dataDir = dataDir,
+                            noiseScale = 0.667f,
+                            lengthScale = 1.0f
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
                 }
-                OfflineTtsModelConfig(
-                    matcha = OfflineTtsMatchaModelConfig(
-                        acousticModel = acoustic,
-                        vocoder = vocoder,
-                        lexicon = lexicons,
-                        tokens = tokensPath,
-                        dataDir = dataDir,
-                        noiseScale = 0.667f,
-                        lengthScale = 1.0f
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
             }
             SherpaModelFamily.PIPER,
             SherpaModelFamily.MELO_TTS -> {
                 val onnx = files.firstOrNull { it.extension.equals("onnx", ignoreCase = true) }?.absolutePath.orEmpty()
-                if (onnx.isEmpty()) return
-                OfflineTtsModelConfig(
-                    vits = OfflineTtsVitsModelConfig(
-                        model = onnx,
-                        lexicon = lexicons,
-                        tokens = tokensPath,
-                        dataDir = dataDir,
-                        noiseScale = 0.667f,
-                        noiseScaleW = 0.8f,
-                        lengthScale = 1.0f
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
+                if (onnx.isEmpty()) {
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        vits = OfflineTtsVitsModelConfig(
+                            model = onnx,
+                            lexicon = lexicons,
+                            tokens = tokensPath,
+                            dataDir = dataDir,
+                            noiseScale = 0.667f,
+                            noiseScaleW = 0.8f,
+                            lengthScale = 1.0f
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
+                }
             }
             SherpaModelFamily.POCKET_TTS -> {
                 val lmFlow = files.firstOrNull { it.name.contains("lm_flow") && it.extension == "onnx" }?.absolutePath.orEmpty()
@@ -448,46 +493,69 @@ class SherpaOnnxEngine(
                 val txtCond = files.firstOrNull { it.name.contains("text_conditioner") && it.extension == "onnx" }?.absolutePath.orEmpty()
                 val vocab = files.firstOrNull { it.name.contains("vocab") && it.extension == "json" }?.absolutePath.orEmpty()
                 val scores = files.firstOrNull { it.name.contains("token_scores") && it.extension == "json" }?.absolutePath.orEmpty()
-                if (lmFlow.isEmpty() || lmMain.isEmpty()) return
-                OfflineTtsModelConfig(
-                    pocket = OfflineTtsPocketModelConfig(
-                        lmFlow = lmFlow,
-                        lmMain = lmMain,
-                        encoder = enc,
-                        decoder = dec,
-                        textConditioner = txtCond,
-                        vocabJson = vocab,
-                        tokenScoresJson = scores
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
+                if (lmFlow.isEmpty() || lmMain.isEmpty()) {
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        pocket = OfflineTtsPocketModelConfig(
+                            lmFlow = lmFlow,
+                            lmMain = lmMain,
+                            encoder = enc,
+                            decoder = dec,
+                            textConditioner = txtCond,
+                            vocabJson = vocab,
+                            tokenScoresJson = scores
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
+                }
             }
             SherpaModelFamily.ZIPVOICE -> {
                 val enc = files.firstOrNull { it.name.contains("encoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
                 val dec = files.firstOrNull { it.name.contains("decoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
                 val voc = files.firstOrNull { it.name.contains("vocoder") && it.extension == "onnx" }?.absolutePath.orEmpty()
-                if (enc.isEmpty() || dec.isEmpty()) return
-                OfflineTtsModelConfig(
-                    zipvoice = OfflineTtsZipVoiceModelConfig(
-                        tokens = tokensPath,
-                        encoder = enc,
-                        decoder = dec,
-                        vocoder = voc,
-                        dataDir = dataDir,
-                        lexicon = lexicons
-                    ),
-                    numThreads = 4,
-                    provider = "cpu"
-                )
+                if (enc.isEmpty() || dec.isEmpty()) {
+                    null
+                } else {
+                    OfflineTtsModelConfig(
+                        zipvoice = OfflineTtsZipVoiceModelConfig(
+                            tokens = tokensPath,
+                            encoder = enc,
+                            decoder = dec,
+                            vocoder = voc,
+                            dataDir = dataDir,
+                            lexicon = lexicons
+                        ),
+                        numThreads = threads,
+                        provider = providerName
+                    )
+                }
             }
         }
 
+        val ruleFstsArg = if (family == SherpaModelFamily.KOKORO || family == SherpaModelFamily.MELO_TTS) ruleFsts else ""
+
+        // ✨ SMART HARDWARE OFFLOAD (v1.8.5): try NNAPI first when enabled & supported, always
+        // failing soft to ARM64 CPU if a model graph rejects NNAPI delegation.
+        if (smartOffload && hardwareProfile.hasNnapi) {
+            val nnapiCfg = buildConfigForProvider("nnapi") ?: return
+            val nnapiAttempt = runCatching {
+                OfflineTts(assetManager = null, config = OfflineTtsConfig(model = nnapiCfg, ruleFsts = ruleFstsArg))
+            }
+            if (nnapiAttempt.isSuccess) {
+                activeOfflineTts = nnapiAttempt.getOrThrow()
+                activeUsedNnapi = true
+                _statusFlow.value = HardwareStatusBadge.NPU_ACTIVE
+                Log.i(TAG, "Mounted sherpa-onnx ${family.label} via NNAPI (Smart Offload) from ${dir.absolutePath}")
+                return
+            }
+            Log.w(TAG, "sherpa-onnx ${family.label} NNAPI mount failed, falling back to CPU: ${nnapiAttempt.exceptionOrNull()?.message}")
+        }
+
+        val cpuCfg = buildConfigForProvider("cpu") ?: return
         runCatching {
-            val config = OfflineTtsConfig(
-                model = modelConfig,
-                ruleFsts = if (family == SherpaModelFamily.KOKORO || family == SherpaModelFamily.MELO_TTS) ruleFsts else ""
-            )
+            val config = OfflineTtsConfig(model = cpuCfg, ruleFsts = ruleFstsArg)
             activeOfflineTts = OfflineTts(assetManager = null, config = config)
             _statusFlow.value = HardwareStatusBadge.CPU_NEON
             Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")

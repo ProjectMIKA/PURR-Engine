@@ -93,7 +93,7 @@ fun VoiceDesignModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Sculpt any original voice from scratch using natural-language attributes for Alibaba Qwen3-TTS 1.7B VoiceDesign (SUB-04B). Combine up to 3 textures, audition live, or lock into a reusable Clone voice.",
+            text = "Sculpt any original voice from scratch using natural-language attributes for Alibaba Qwen3-TTS 1.7B VoiceDesign (SUB-03A). Combine up to 3 textures, audition live, or lock into a reusable Clone voice.",
             color = MikaColors.CyanWhite.copy(alpha = 0.78f),
             fontFamily = FontFamily.Monospace,
             fontSize = 9.5.sp,
@@ -116,7 +116,7 @@ fun VoiceDesignModuleWindowBody(
                     MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.MikaAmber, size = 13.dp)
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "DOWNLOAD SUB-04B (QWEN3 1.7B VOICEDESIGN) IN BAY",
+                        text = "DOWNLOAD SUB-03A (QWEN3 1.7B VOICEDESIGN) IN BAY",
                         color = MikaColors.MikaAmber,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,

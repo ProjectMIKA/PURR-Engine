@@ -68,6 +68,7 @@ private val CLONE_ENGINE_OPTIONS = listOf(
 
 @Composable
 fun VoiceCloneStudioSheet(
+    installedEngineIds: Set<String>,
     isRecording: Boolean,
     recordingProgress: Float,
     lastRecordedWavPath: String?,
@@ -78,19 +79,28 @@ fun VoiceCloneStudioSheet(
     onToggleCleanAudio: (Boolean) -> Unit,
     onImportClip: (Uri) -> Unit,
     onRecordFiveSeconds: () -> Unit,
-    onRegisterClone: (String, SherpaModelFamily, VoiceGender, String, String, String) -> Unit,
+    onRegisterClone: (String, SherpaModelFamily, VoiceGender, String, String, String) -> Boolean,
     onDismiss: () -> Unit
 ) {
     val importLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
     ) { uri: Uri? -> uri?.let(onImportClip) }
     var displayName by remember { mutableStateOf("MIKA_CLONE_01") }
-    var selectedEngine by remember { mutableStateOf(CLONE_ENGINE_OPTIONS.first()) }
+    var selectedEngine by remember {
+        mutableStateOf(
+            CLONE_ENGINE_OPTIONS.firstOrNull { it.id in installedEngineIds }
+                ?: CLONE_ENGINE_OPTIONS.first()
+        )
+    }
     var selectedGender by remember { mutableStateOf(VoiceGender.FEMALE) }
     var transcript by remember {
         mutableStateOf("Hello Master, this reference sample captures my natural pitch and cadence.")
     }
     var tagsInput by remember { mutableStateOf("cute, teasing, cloned, american") }
+    val selectedEngineReady = selectedEngine.id in installedEngineIds
+    val hasReferenceAudio = !lastRecordedWavPath.isNullOrBlank() ||
+        !importedWavPath.isNullOrBlank() ||
+        (importStatus?.startsWith("READY:") == true)
 
     Dialog(onDismissRequest = onDismiss) {
         Column(
@@ -137,10 +147,36 @@ fun VoiceCloneStudioSheet(
                 label = "> CLONE_ENGINE_TARGET",
                 options = CLONE_ENGINE_OPTIONS,
                 selectedOption = selectedEngine,
-                optionLabel = { opt -> "${opt.label} • ${opt.badge}" },
+                optionLabel = { opt ->
+                    val statusTag = if (opt.id in installedEngineIds) "[READY]" else "[INSTALL IN BAY]"
+                    "${opt.label} • ${opt.badge} $statusTag"
+                },
                 onSelect = { selectedEngine = it },
                 accent = MikaColors.NeonPurple
             )
+
+            if (!selectedEngineReady) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(MikaColors.MikaAmber.copy(alpha = 0.14f))
+                        .border(1.dp, MikaColors.MikaAmber.copy(alpha = 0.7f), RoundedCornerShape(6.dp))
+                        .padding(horizontal = 10.dp, vertical = 7.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MikaCyberIcon(type = CyberIconType.ALERT_TRIANGLE, tint = MikaColors.MikaAmber, size = 13.dp)
+                    Text(
+                        text = "${selectedEngine.label} isn't downloaded yet! Grab it in CARTRIDGE BAY > CLONING so cloned speech uses the real engine instead of failing.",
+                        color = MikaColors.MikaAmber,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 8.5.sp,
+                        lineHeight = 12.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+            }
 
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 VoiceGender.entries.forEach { g ->
@@ -392,10 +428,17 @@ fun VoiceCloneStudioSheet(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
-                    .background(MikaColors.NeonPurple.copy(alpha = 0.22f))
-                    .border(1.dp, MikaColors.NeonPurple, RoundedCornerShape(6.dp))
+                    .background(
+                        if (hasReferenceAudio) MikaColors.NeonPurple.copy(alpha = 0.22f)
+                        else MikaColors.MikaAmber.copy(alpha = 0.12f)
+                    )
+                    .border(
+                        1.dp,
+                        if (hasReferenceAudio) MikaColors.NeonPurple else MikaColors.MikaAmber.copy(alpha = 0.6f),
+                        RoundedCornerShape(6.dp)
+                    )
                     .clickable {
-                        onRegisterClone(
+                        val registered = onRegisterClone(
                             displayName,
                             selectedEngine.family,
                             selectedGender,
@@ -403,14 +446,14 @@ fun VoiceCloneStudioSheet(
                             tagsInput,
                             selectedEngine.id
                         )
-                        onDismiss()
+                        if (registered) onDismiss()
                     }
                     .padding(vertical = 11.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "[ REGISTER_CLONED_VOICE_TO_FORGE ]",
-                    color = MikaColors.WarmCream,
+                    text = if (hasReferenceAudio) "[ REGISTER_CLONED_VOICE_TO_FORGE ]" else "[ RECORD OR IMPORT AUDIO FIRST ]",
+                    color = if (hasReferenceAudio) MikaColors.WarmCream else MikaColors.MikaAmber,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
                     fontSize = 11.sp,

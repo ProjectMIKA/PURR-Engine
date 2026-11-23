@@ -1,3 +1,24 @@
+# 🌌 PURR-TTS v1.8.5 // The Cloning Bay & Smart Offload
+
+### ✨ What's New since v1.8.4
+
+Clean collapsible racks, a dedicated Voice Cloning bay, smart hardware acceleration, and a wider neural voice lineup! 🎛️🧬🐾
+
+* **🧬 DEDICATED `CLONING` CATEGORY (`CLN-01..CLN-05`)**: Voice cloning cartridges now live in their own dedicated bay alongside `TTS` and `TOOLS` — hosting **Pocket TTS** (`CLN-01` + `SUB-C1A` FP32 Studio), **ZipVoice** (`CLN-02` + `SUB-C2A` Full Studio), **Chatterbox-Turbo 350M** (`CLN-03`), **Qwen3 0.6B Base Cloner** (`CLN-04`), and the **Voice Clone Studio** OS module (`CLN-05`). Existing v1.8.4 installations migrate cleanly without losing downloaded weights or saved clones.
+* **📂 COLLAPSIBLE SUB-MODULES WITH ANIMATED EXPANDERS**: Hub cartridges now hide their sub-modules inside clearly labeled expandable drawers (`[EXPAND]` / `[HIDE]`) with live chip counts (`N ON` / `N READY` / `N CHIPS`), collapsed content previews, bouncy rotating chevrons, and smooth `AnimatedVisibility` expand/shrink transitions.
+* **🔧 QWEN3 VOICE CLONE STUDIO FIX**: Eliminated silent fallback to default Android system TTS when targeting Qwen3 Base or other cloning engines — missing/incomplete models surface actionable cartridge status messages, Qwen3 Base verifies its speaker & codec encoders cleanly, retries x-vector-only cloning automatically if ICL transcript alignment returns empty, and Clone Studio blocks silent placeholder registrations while showing `[READY]` / `[INSTALL IN BAY]` tags per engine.
+* **⚡ SMART HARDWARE OFFLOAD `[EXPERIMENTAL]` + COMPACT SETTINGS**: Cleaned up the Settings sheet into a tighter scrollable terminal dialog with compact `[ON]`/`[OFF]` toggle pills instead of oversized switches, and added an experimental **Smart Hardware Offload** toggle powered by `PurrHardwareProbe` — automatically selecting Adreno OpenCL, Hexagon/NNAPI FP16, or XNNPACK per SoC/runtime with automatic CPU fallback if any graph rejects delegation.
+* **🎙️ NEW TTS ENGINES, 8-PER-ROW RACK & BAY SORT/FILTER**: Added **Inflect v2 Neural** (`ROM-08`: 21MB Nano + `SUB-08A` 41MB Micro), **Icefall VITS Studio** (`ROM-09`: 70MB LJSpeech Medium + `SUB-09A` 30MB Lite), **KittenTTS Micro v0.8** (`SUB-06B`), plus LAN Heavy-Model Proxy presets for **OuteTTS GGUF**, **Orpheus TTS**, **VibeVoice-Realtime-0.5B**, **Spark-TTS-0.5B**, and **CosyVoice 2**. The Motherboard Pin Rack now wraps cleanly at **8 bays per row**, and new **Filter** (`ALL` / `INSTALLED` / `UNINSTALLED` / `SLOTTED`) + **Sort** (`BAY` / `NAME` / `SIZE` / `NEWEST`) controls keep growing racks easy to navigate.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.8.5_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `21`).
+2. **`PURR-TTS_V1.8.5.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.4 // The Open Covenant
 
 ### ✨ What's New since v1.8.3

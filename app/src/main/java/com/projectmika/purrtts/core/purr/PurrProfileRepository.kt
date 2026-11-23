@@ -94,6 +94,12 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
+    // ✨ SMART HARDWARE OFFLOAD (v1.8.5): experimental device-level toggle — auto-selects
+    // Adreno OpenCL, Hexagon NPU / NNAPI FP16, or XNNPACK per SoC with safe CPU fallback.
+    fun setSmartHardwareOffload(enabled: Boolean) {
+        updateState { s -> s.copy(smartHardwareOffload = enabled) }
+    }
+
     // ✨ HARDWARE OFFLOAD (v1.8.3): global device-level accelerator state (Settings ▸
     // HARDWARE_OFFLOAD). Deliberately NOT per-vibe-preset — hardware doesn't change when you
     // switch personas; the Qwen3 engine re-mounts on the next synthesis after a flip.
@@ -123,7 +129,7 @@ class PurrProfileRepository(filesDir: File) {
         updateState { s ->
             val nextSlotted = if (slotted) s.slottedCartridges + cartridgeId else s.slottedCartridges - cartridgeId
             val ttsCatalogIds = PurrDefaultPresets.modelCatalog()
-                .filter { it.category == CartridgeCategory.TTS && !it.isSubCartridge }
+                .filter { !it.isSubCartridge && (it.category == CartridgeCategory.TTS || (it.category == CartridgeCategory.CLONING && !it.isBuiltInOsCartridge)) }
                 .map { it.id }
                 .toSet()
             val fallbackCart = nextSlotted.firstOrNull { it in ttsCatalogIds }
@@ -273,8 +279,10 @@ class PurrProfileRepository(filesDir: File) {
     fun registerClonedVoice(voice: ClonedVoiceProfile) {
         val engineId = voice.resolvedCloneEngineId
         val targetCart = when (engineId) {
-            "sub_qwen3_base_06b" -> "rom_qwen3_custom_06b"
-            else -> "rom_clone_hub"
+            "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
+            "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
+            "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
+            else -> "rom_pocket_tts"
         }
         val targetBackend = when (engineId) {
             "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
@@ -295,7 +303,7 @@ class PurrProfileRepository(filesDir: File) {
                     p
                 }
             }
-            val nextEnabledSubs = if (engineId.startsWith("sub_")) {
+            val nextEnabledSubs = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
                 s.enabledSubCartridges + engineId
             } else {
                 s.enabledSubCartridges
@@ -400,7 +408,8 @@ class PurrProfileRepository(filesDir: File) {
                 true
             } else {
                 when (v.cartridgeId) {
-                    "rom_piper", "rom_kitten_tts", "rom_qwen3_custom_06b" -> {
+                    "rom_piper", "rom_kitten_tts", "rom_qwen3_custom_06b",
+                    "rom_pocket_tts", "rom_zipvoice", "rom_inflect_v2", "rom_icefall_vits" -> {
                         val baseInstalled = state.modelStates[v.cartridgeId]?.state == DownloadState.INSTALLED
                         val anyStandaloneSubInstalled = catalog.any { sub ->
                             sub.parentCartridgeId == v.cartridgeId &&
@@ -416,7 +425,13 @@ class PurrProfileRepository(filesDir: File) {
         val sysVoices = _discoveredSystemVoices.value
         val cloned = state.clonedVoices.map { c ->
             val engineId = c.resolvedCloneEngineId
-            val cartId = if (engineId == "sub_qwen3_base_06b") "rom_qwen3_custom_06b" else "rom_clone_hub"
+            val cartId = when (engineId) {
+                "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
+                "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
+                "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
+                else -> "rom_pocket_tts"
+            }
+            val requiredSub = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) engineId else null
             val backend = when (engineId) {
                 "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
                 "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
@@ -434,7 +449,7 @@ class PurrProfileRepository(filesDir: File) {
                 displayName = "Clone ($engineTag) // ${c.displayName}",
                 engine = backend,
                 cartridgeId = cartId,
-                requiredSubCartridgeId = engineId,
+                requiredSubCartridgeId = requiredSub,
                 sherpaFamily = c.family,
                 gender = c.gender,
                 languageCode = c.languageCode,
@@ -537,14 +552,18 @@ class PurrProfileRepository(filesDir: File) {
                 "rom_kokoro_fp32" to "fp32_",
                 "rom_kokoro_v11" to "v11_"
             )
-            // ✨ v1.7.0 HUB MIGRATION: legacy standalone cartridges that became sub-cartridges under the 8-Bay Hub Rack.
+            // ✨ v1.7.0 HUB MIGRATION + v1.8.5 CLONING CATEGORY PROMOTION:
             val legacyCartridgeToHub = mapOf(
                 "rom_kokoro_fp32" to "rom_kokoro_sherpa",
                 "rom_kokoro_v11" to "rom_kokoro_sherpa",
-                "rom_pocket_tts" to "rom_clone_hub",
-                "rom_zipvoice" to "rom_clone_hub",
                 "rom_supertonic3" to "rom_piper",
                 "rom_matcha_zh_en" to "rom_piper"
+            )
+            val topLevelCloningIds = setOf(
+                "rom_pocket_tts",
+                "rom_zipvoice",
+                "sub_chatterbox_turbo",
+                "sub_qwen3_base_06b"
             )
             val catalogById = PurrDefaultPresets.modelCatalog().associateBy { it.id }
             val nextEnabledSubs = decoded.enabledSubCartridges.toMutableSet()
@@ -564,6 +583,23 @@ class PurrProfileRepository(filesDir: File) {
                     }
                 }
             }
+            // Promote cloning engines out of retired rom_clone_hub & rom_qwen3_custom_06b into CLONING bay
+            nextSlotted.remove("rom_clone_hub")
+            for (cloningId in topLevelCloningIds) {
+                if (normalizedModelStates[cloningId]?.state == DownloadState.INSTALLED) {
+                    nextSlotted += cloningId
+                    nextEnabledSubs.remove(cloningId)
+                }
+            }
+            if (normalizedModelStates["sub_pocket_fp32"]?.state == DownloadState.INSTALLED) {
+                nextSlotted += "rom_pocket_tts"
+                nextEnabledSubs += "sub_pocket_fp32"
+            }
+            if (normalizedModelStates["sub_zipvoice_full"]?.state == DownloadState.INSTALLED) {
+                nextSlotted += "rom_zipvoice"
+                nextEnabledSubs += "sub_zipvoice_full"
+            }
+            val clonedById = decoded.clonedVoices.associateBy { it.id }
             val remappedProfiles = decoded.profiles.map { profile ->
                 val prefix = premiumPrefixByCartridge[profile.selectedCartridgeId]
                 val prefixFixed = if (prefix == null) {
@@ -584,10 +620,35 @@ class PurrProfileRepository(filesDir: File) {
                     }
                 }
                 val migratedHub = legacyCartridgeToHub[prefixFixed.selectedCartridgeId]
-                if (migratedHub != null) {
+                val hubFixed = if (migratedHub != null) {
                     prefixFixed.copy(selectedCartridgeId = migratedHub)
                 } else {
                     prefixFixed
+                }
+                val clonedMatch = clonedById[hubFixed.primaryVoiceId]
+                when {
+                    clonedMatch != null -> {
+                        val targetCart = when (clonedMatch.resolvedCloneEngineId) {
+                            "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
+                            "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
+                            "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
+                            else -> "rom_pocket_tts"
+                        }
+                        if (hubFixed.selectedCartridgeId != targetCart) hubFixed.copy(selectedCartridgeId = targetCart) else hubFixed
+                    }
+                    hubFixed.selectedCartridgeId == "rom_clone_hub" -> {
+                        val targetCart = when {
+                            hubFixed.primaryVoiceId.startsWith("chatterbox") -> "sub_chatterbox_turbo"
+                            hubFixed.primaryVoiceId.startsWith("zipvoice") -> "rom_zipvoice"
+                            else -> "rom_pocket_tts"
+                        }
+                        hubFixed.copy(selectedCartridgeId = targetCart)
+                    }
+                    hubFixed.selectedCartridgeId == "rom_qwen3_custom_06b" &&
+                        hubFixed.primaryVoiceId == "qwen3_base_clone_default" -> {
+                        hubFixed.copy(selectedCartridgeId = "sub_qwen3_base_06b")
+                    }
+                    else -> hubFixed
                 }
             }
             decoded.copy(

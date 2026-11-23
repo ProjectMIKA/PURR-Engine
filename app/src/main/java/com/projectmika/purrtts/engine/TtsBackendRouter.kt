@@ -4,9 +4,11 @@ import android.content.Context
 import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.DspConfig
+import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
+import com.projectmika.purrtts.core.purr.PurrHardwareProbe
 import com.projectmika.purrtts.core.purr.PurrNeuralBypass
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrProfileRepository
@@ -42,19 +44,28 @@ class TtsBackendRouter(
         val vramCountdownSec: Int = 0
     )
 
+    val hardwareProfile: HardwareProfile = PurrHardwareProbe.detectDevice()
+
     val liteRtEngine = LiteRtKokoroEngine(context)
     val sherpaEngine = SherpaOnnxEngine(
         context = context,
-        clonedVoicesProvider = { repository.state.value.clonedVoices }
+        clonedVoicesProvider = { repository.state.value.clonedVoices },
+        smartOffloadProvider = { repository.state.value.smartHardwareOffload },
+        hardwareProfile = hardwareProfile
     )
     val onnxEngine = OnnxRuntimeEngine(
         context = context,
-        clonedVoicesProvider = { repository.state.value.clonedVoices }
+        clonedVoicesProvider = { repository.state.value.clonedVoices },
+        smartOffloadProvider = { repository.state.value.smartHardwareOffload },
+        hardwareProfile = hardwareProfile
     )
     val qwen3Engine = Qwen3TtsEngine(
         context = context,
         clonedVoicesProvider = { repository.state.value.clonedVoices },
-        gpuOffloadProvider = { repository.state.value.qwen3GpuOffload }
+        gpuOffloadProvider = {
+            repository.state.value.qwen3GpuOffload ||
+                (repository.state.value.smartHardwareOffload && hardwareProfile.hasAdrenoOpenCl)
+        }
     )
     val proxyEngine = ExternalProxyEngine(context)
 
@@ -84,11 +95,13 @@ class TtsBackendRouter(
                     profile.selectedCartridgeId in setOf(
                         "rom_kokoro_sherpa", "rom_kokoro_fp32", "rom_kokoro_v11"
                     )
+                val smartOffload = repository.state.value.smartHardwareOffload
                 val npuChipOn = isKokoroVoice &&
-                    repository.isSubCartridgeEnabled("rom_kokoro_npu_g2p") &&
+                    (repository.isSubCartridgeEnabled("rom_kokoro_npu_g2p") || smartOffload) &&
                     liteRtEngine.isNpuG2pReady
                 val gpuChipOn = isKokoroVoice &&
-                    repository.isSubCartridgeEnabled("rom_kokoro_litert")
+                    (repository.isSubCartridgeEnabled("rom_kokoro_litert") ||
+                        (smartOffload && hardwareProfile.hasAdrenoOpenCl && liteRtEngine.kokoroModelFile.exists()))
 
                 var litertOut: SynthesisOutcome? = null
                 if (npuChipOn || gpuChipOn) {
@@ -167,9 +180,17 @@ class TtsBackendRouter(
             }
         }
 
-        // Fail soft to real CORE_OS speech whenever a cartridge isn't downloaded or slotted yet (if ROM-01 is slotted)
+        // Never silently hijack explicit voice-clone, VoiceDesign, or Qwen3 requests with device
+        // OS speech when the user explicitly targeted them — surface the exact engine reason instead.
+        val cleanVoiceId = voiceId.substringAfter(':')
+        val isExplicitCloneOrDesign = repository.state.value.clonedVoices.any { it.id == voiceId || it.id == cleanVoiceId } ||
+            cleanVoiceId in setOf("qwen3_base_clone_default", "qwen3_design_custom")
+
+        // Fail soft to real CORE_OS speech whenever a standard cartridge isn't downloaded or slotted yet (if ROM-01 is slotted)
         if (rawOutcome.pcmFloat24k.isEmpty() &&
             selectedBackend != BackendType.CORE_OS &&
+            selectedBackend != BackendType.QWEN3_NATIVE &&
+            !isExplicitCloneOrDesign &&
             repository.isCartridgeSlotted("rom_core_os")
         ) {
             rawOutcome = proxyEngine.synthesizeChunk(

@@ -120,8 +120,8 @@ private enum class ActiveOsModule(
     CLONE_STUDIO(
         toolCartridgeId = "tool_clone_studio",
         title = "VOICE CLONE STUDIO",
-        subtitle = "5s Zero-Shot Recorder & Clones",
-        badge = "TOOL-04",
+        subtitle = "3-12s Zero-Shot Recorder & Clones",
+        badge = "CLN-05",
         iconType = OsModuleIconType.CLONE_STUDIO,
         accent = MikaColors.NeonPurple
     ),
@@ -129,7 +129,7 @@ private enum class ActiveOsModule(
         toolCartridgeId = "tool_audio_exporter",
         title = "AUDIO MEDIA EXPORTER",
         subtitle = "Text/Audiobook -> Mastered WAV",
-        badge = "TOOL-05",
+        badge = "TOOL-04",
         iconType = OsModuleIconType.AUDIO_EXPORTER,
         accent = MikaColors.SsrGold
     ),
@@ -137,7 +137,7 @@ private enum class ActiveOsModule(
         toolCartridgeId = "tool_voice_design",
         title = "QWEN3 VOICEDESIGN STUDIO",
         subtitle = "1.7B Structured Prompt Lab",
-        badge = "TOOL-06",
+        badge = "TOOL-05",
         iconType = OsModuleIconType.VOICE_DESIGN,
         accent = MikaColors.NeonPink
     ),
@@ -145,7 +145,7 @@ private enum class ActiveOsModule(
         toolCartridgeId = "tool_audiobook_constructor",
         title = "AUDIOBOOK CONSTRUCTOR",
         subtitle = "EPUB/PDF/TXT -> Chaptered .M4B",
-        badge = "TOOL-07",
+        badge = "TOOL-06",
         iconType = OsModuleIconType.AUDIOBOOK_CONSTRUCTOR,
         accent = MikaColors.NeonCyan
     )
@@ -153,7 +153,7 @@ private enum class ActiveOsModule(
 
 /**
  * ✨ TAB 2: CYBERDECK OS MODULES DESKTOP & WINDOW LAUNCHER ✨
- * Displays slotted Tool Cartridges (`TOOL-01`..`TOOL-07`) as custom OS vector icons.
+ * Displays slotted Tool & Cloning OS Cartridges (`TOOL-01`..`TOOL-06`, `CLN-05`) as custom OS vector icons.
  * Clicking an icon plays an animated window launch transition and opens that module's terminal window.
  */
 @OptIn(ExperimentalLayoutApi::class)

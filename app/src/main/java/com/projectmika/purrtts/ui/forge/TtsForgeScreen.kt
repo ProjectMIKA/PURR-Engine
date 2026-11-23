@@ -827,7 +827,13 @@ fun TtsForgeScreen(
             val isImportingClone by viewModel.isImportingClone.collectAsState()
             val importedCloneWav by viewModel.importedCloneWavPath.collectAsState()
             val cleanImportedAudio by viewModel.cleanImportedAudio.collectAsState()
+            val installedEngineIds = remember(forgeState.modelStates) {
+                forgeState.modelStates
+                    .filterValues { it.state == DownloadState.INSTALLED }
+                    .keys
+            }
             VoiceCloneStudioSheet(
+                installedEngineIds = installedEngineIds,
                 isRecording = isRecordingClone,
                 recordingProgress = recordingProgress,
                 lastRecordedWavPath = lastRecordedWav,
@@ -859,6 +865,9 @@ fun TtsForgeScreen(
                 versionCode = com.projectmika.purrtts.BuildConfig.VERSION_CODE,
                 updateCheckInFlight = updateCheckInFlight,
                 onCheckForUpdates = { viewModel.checkForAppUpdates() },
+                smartHardwareOffload = forgeState.smartHardwareOffload,
+                onSmartHardwareOffloadToggle = { viewModel.setSmartHardwareOffload(it) },
+                hardwareSummary = "${viewModel.hardwareProfile.socLabel} • ${viewModel.hardwareProfile.recommendedStrategyLabel}",
                 qwen3GpuOffload = forgeState.qwen3GpuOffload,
                 onQwen3GpuOffloadToggle = { viewModel.setQwen3GpuOffload(it) },
                 onReplayTutorial = {

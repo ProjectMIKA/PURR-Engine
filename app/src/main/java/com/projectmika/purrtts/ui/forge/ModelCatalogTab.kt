@@ -1,11 +1,24 @@
 package com.projectmika.purrtts.ui.forge
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -18,10 +31,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
@@ -47,6 +64,21 @@ import com.projectmika.purrtts.ui.theme.MikaTagPill
  * - Interactive Cyberdeck Motherboard Pin Rack Visualizer
  * - Physical Molded Cartridges with nested Expansion Sub-Cartridges (`SUB-02A/B` & `SUB-05A..F`)
  */
+private enum class CartridgeSortMode(val label: String) {
+    BAY_ORDER("BAY"),
+    NAME("NAME"),
+    SIZE("SIZE"),
+    NEWEST("NEWEST")
+}
+
+private enum class CartridgeFilterMode(val label: String) {
+    ALL("ALL"),
+    DOWNLOADED("INSTALLED"),
+    NOT_DOWNLOADED("UNINSTALLED"),
+    SLOTTED("SLOTTED")
+}
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun ModelCatalogTab(
     forgeState: PurrForgeState,
@@ -61,25 +93,69 @@ fun ModelCatalogTab(
 ) {
     val mainCatalog = remember(modelCatalog) { modelCatalog.filter { !it.isSubCartridge } }
     val ttsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TTS } }
+    val cloningCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.CLONING } }
     val toolsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TOOLS } }
-    val visibleCatalog = remember(ttsCatalog, toolsCatalog, selectedCategory) {
-        if (selectedCategory == CartridgeCategory.TTS) ttsCatalog else toolsCatalog
+    val categoryCatalog = remember(ttsCatalog, cloningCatalog, toolsCatalog, selectedCategory) {
+        when (selectedCategory) {
+            CartridgeCategory.TTS -> ttsCatalog
+            CartridgeCategory.CLONING -> cloningCatalog
+            CartridgeCategory.TOOLS -> toolsCatalog
+        }
     }
     val subCartridgesByParent = remember(modelCatalog) {
         modelCatalog.filter { it.isSubCartridge && !it.parentCartridgeId.isNullOrBlank() }
             .groupBy { it.parentCartridgeId!! }
     }
-    val slottedCount = visibleCatalog.count { it.id in forgeState.slottedCartridges }
-    val busLoadPct = if (visibleCatalog.isNotEmpty()) (slottedCount * 100) / visibleCatalog.size else 0
+    fun isSpecOrStandaloneSubInstalled(spec: ModelBundleSpec): Boolean {
+        if (spec.isBuiltInOsCartridge || forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED) {
+            return true
+        }
+        val childSubs = subCartridgesByParent[spec.id].orEmpty()
+        return childSubs.any { sub ->
+            sub.id !in setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert") &&
+                forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED
+        }
+    }
+    var sortMode by remember { mutableStateOf(CartridgeSortMode.BAY_ORDER) }
+    var filterMode by remember { mutableStateOf(CartridgeFilterMode.ALL) }
+    val visibleCatalog = remember(categoryCatalog, sortMode, filterMode, forgeState.modelStates, forgeState.slottedCartridges) {
+        val filtered = categoryCatalog.filter { spec ->
+            val installed = isSpecOrStandaloneSubInstalled(spec)
+            val slotted = installed && spec.id in forgeState.slottedCartridges
+            when (filterMode) {
+                CartridgeFilterMode.ALL -> true
+                CartridgeFilterMode.DOWNLOADED -> installed
+                CartridgeFilterMode.NOT_DOWNLOADED -> !installed
+                CartridgeFilterMode.SLOTTED -> slotted
+            }
+        }
+        when (sortMode) {
+            CartridgeSortMode.BAY_ORDER -> filtered
+            CartridgeSortMode.NAME -> filtered.sortedBy { it.name.lowercase() }
+            CartridgeSortMode.SIZE -> filtered.sortedBy { it.approximateSizeMb }
+            CartridgeSortMode.NEWEST -> filtered.sortedByDescending { it.releaseOrder }
+        }
+    }
+    // Collapsible sub-modules: only main cartridges show initially; users tap a parent's obvious
+    // expansion drawer to reveal and manage its nested sub-modules.
+    var expandedSubMenus by remember { mutableStateOf(setOf<String>()) }
+    val slottedCount = categoryCatalog.count { it.id in forgeState.slottedCartridges }
+    val busLoadPct = if (categoryCatalog.isNotEmpty()) (slottedCount * 100) / categoryCatalog.size else 0
+    val categoryAccent = when (selectedCategory) {
+        CartridgeCategory.TTS -> MikaColors.NeonCyan
+        CartridgeCategory.CLONING -> MikaColors.NeonPurple
+        CartridgeCategory.TOOLS -> MikaColors.NeonPink
+    }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-        // 0. Dual Category Switcher: TTS vs TOOLS
+        // 0. 3-Category Switcher: TTS | CLONING | TOOLS
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             val isTts = selectedCategory == CartridgeCategory.TTS
+            val isCloning = selectedCategory == CartridgeCategory.CLONING
             val isTools = selectedCategory == CartridgeCategory.TOOLS
             Row(
                 modifier = Modifier
@@ -93,14 +169,38 @@ fun ModelCatalogTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 MikaCyberIcon(type = CyberIconType.MIC_WAVE, tint = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText, size = 12.dp)
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = "TTS (${ttsCatalog.size})",
                     color = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
-                    fontSize = 10.sp,
-                    letterSpacing = 0.6.sp
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .weight(1f)
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(if (isCloning) MikaColors.NeonPurple.copy(alpha = 0.18f) else MikaColors.PanelBg)
+                    .border(1.5.dp, if (isCloning) MikaColors.NeonPurple else Color.White.copy(alpha = 0.16f), RoundedCornerShape(6.dp))
+                    .clickable { onSelectCategory(CartridgeCategory.CLONING) }
+                    .padding(vertical = 10.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MikaCyberIcon(type = CyberIconType.DNA_CLONE, tint = if (isCloning) MikaColors.NeonPurple else MikaColors.DimText, size = 12.dp)
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(
+                    text = "CLONE (${cloningCatalog.size})",
+                    color = if (isCloning) MikaColors.NeonPurple else MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1
                 )
             }
             Row(
@@ -115,20 +215,21 @@ fun ModelCatalogTab(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 MikaCyberIcon(type = CyberIconType.WRENCH_TOOL, tint = if (isTools) MikaColors.NeonPink else MikaColors.DimText, size = 12.dp)
-                Spacer(modifier = Modifier.width(6.dp))
+                Spacer(modifier = Modifier.width(5.dp))
                 Text(
                     text = "TOOLS (${toolsCatalog.size})",
                     color = if (isTools) MikaColors.NeonPink else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
-                    fontSize = 10.sp,
-                    letterSpacing = 0.6.sp
+                    fontSize = 9.5.sp,
+                    letterSpacing = 0.5.sp,
+                    maxLines = 1
                 )
             }
         }
 
         // 1. Cyberdeck Motherboard Pin Rack Visualizer
-        MikaGlowPanel(accent = if (selectedCategory == CartridgeCategory.TTS) MikaColors.NeonCyan else MikaColors.NeonPink) {
+        MikaGlowPanel(accent = categoryAccent) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -138,19 +239,22 @@ fun ModelCatalogTab(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                    val rackAccent = if (selectedCategory == CartridgeCategory.TTS) MikaColors.NeonCyan else MikaColors.NeonPink
                     MikaCyberIcon(
-                        type = if (selectedCategory == CartridgeCategory.TTS) CyberIconType.BUS_PLUG else CyberIconType.WRENCH_TOOL,
-                        tint = rackAccent,
+                        type = when (selectedCategory) {
+                            CartridgeCategory.TTS -> CyberIconType.BUS_PLUG
+                            CartridgeCategory.CLONING -> CyberIconType.DNA_CLONE
+                            CartridgeCategory.TOOLS -> CyberIconType.WRENCH_TOOL
+                        },
+                        tint = categoryAccent,
                         size = 12.dp
                     )
                     Text(
-                        text = if (selectedCategory == CartridgeCategory.TTS) {
-                            "TTS_BUS // ${visibleCatalog.size}-BAY RACK"
-                        } else {
-                            "TOOL_BUS // ${visibleCatalog.size}-MODULE RACK"
+                        text = when (selectedCategory) {
+                            CartridgeCategory.TTS -> "TTS_BUS // ${categoryCatalog.size}-BAY RACK"
+                            CartridgeCategory.CLONING -> "CLONE_BUS // ${categoryCatalog.size}-BAY RACK"
+                            CartridgeCategory.TOOLS -> "TOOL_BUS // ${categoryCatalog.size}-MODULE RACK"
                         },
-                        color = rackAccent,
+                        color = categoryAccent,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
                         fontSize = 10.sp,
@@ -158,7 +262,7 @@ fun ModelCatalogTab(
                     )
                 }
                 Text(
-                    text = "[ $slottedCount / ${visibleCatalog.size} SLOTTED | $busLoadPct% ]",
+                    text = "[ $slottedCount / ${categoryCatalog.size} SLOTTED | $busLoadPct% ]",
                     color = if (slottedCount > 0) MikaColors.TerminalGreen else MikaColors.DimText,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Bold,
@@ -168,83 +272,109 @@ fun ModelCatalogTab(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Interactive Mini Bay Slots
-            Row(
+            // Interactive Multi-Row Motherboard Bay Rack (max 8 bays per row)
+            val rackRows = remember(categoryCatalog) { categoryCatalog.chunked(8) }
+            Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(6.dp))
                     .background(Color(0xFF040207))
                     .border(1.dp, Color.White.copy(alpha = 0.10f), RoundedCornerShape(6.dp))
                     .padding(horizontal = 6.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                verticalArrangement = Arrangement.spacedBy(5.dp)
             ) {
-                visibleCatalog.forEachIndexed { idx, spec ->
-                    val childSubs = subCartridgesByParent[spec.id].orEmpty()
-                    val standaloneSubInstalled = childSubs.any { sub ->
-                        sub.id !in setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert") &&
-                            forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED
-                    }
-                    val isInstalled = spec.isBuiltInOsCartridge ||
-                        forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED ||
-                        standaloneSubInstalled
-                    val isSlotted = spec.id in forgeState.slottedCartridges
-                    val accent = Color(spec.accentHex)
+                rackRows.forEachIndexed { rowIdx, rowSpecs ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        rowSpecs.forEachIndexed { colIdx, spec ->
+                            val globalIdx = rowIdx * 8 + colIdx
+                            val isInstalled = isSpecOrStandaloneSubInstalled(spec)
+                            val isSlotted = spec.id in forgeState.slottedCartridges
+                            val accent = Color(spec.accentHex)
 
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(48.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                            .background(
-                                if (isSlotted) accent.copy(alpha = 0.22f)
-                                else Color.White.copy(alpha = 0.03f)
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isSlotted) accent else if (isInstalled) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.14f),
-                                shape = RoundedCornerShape(4.dp)
-                            )
-                            .clickable {
-                                if (isInstalled) {
-                                    viewModel.toggleCartridgeSlotted(spec, !isSlotted)
-                                } else {
-                                    viewModel.showToast("${spec.romCode}: Tap DOWNLOAD below first!")
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(48.dp)
+                                    .clip(RoundedCornerShape(4.dp))
+                                    .background(
+                                        if (isSlotted) accent.copy(alpha = 0.22f)
+                                        else Color.White.copy(alpha = 0.03f)
+                                    )
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSlotted) accent else if (isInstalled) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.14f),
+                                        shape = RoundedCornerShape(4.dp)
+                                    )
+                                    .clickable {
+                                        if (isInstalled) {
+                                            viewModel.toggleCartridgeSlotted(spec, !isSlotted)
+                                        } else {
+                                            viewModel.showToast("${spec.romCode}: Tap DOWNLOAD below first!")
+                                        }
+                                    }
+                                    .padding(vertical = 4.dp, horizontal = 2.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                verticalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(10.dp)
+                                        .height(4.dp)
+                                        .clip(RoundedCornerShape(2.dp))
+                                        .background(if (isSlotted) accent else Color.White.copy(alpha = 0.15f))
+                                )
+                                Text(
+                                    text = when (selectedCategory) {
+                                        CartridgeCategory.TTS -> "%02d".format(globalIdx + 1)
+                                        CartridgeCategory.CLONING -> "C${globalIdx + 1}"
+                                        CartridgeCategory.TOOLS -> "T${globalIdx + 1}"
+                                    },
+                                    color = if (isSlotted) Color.White else Color.White.copy(alpha = 0.35f),
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Black,
+                                    fontSize = 8.sp
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth(0.7f)
+                                        .height(3.dp)
+                                        .background(if (isSlotted) MikaColors.SsrGold else Color.White.copy(alpha = 0.08f))
+                                )
+                            }
+                        }
+                        if (rackRows.size > 1 && rowSpecs.size < 8) {
+                            repeat(8 - rowSpecs.size) {
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .height(48.dp)
+                                        .clip(RoundedCornerShape(4.dp))
+                                        .background(Color.White.copy(alpha = 0.015f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.05f), RoundedCornerShape(4.dp)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "--",
+                                        color = Color.White.copy(alpha = 0.14f),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 8.sp
+                                    )
                                 }
                             }
-                            .padding(vertical = 4.dp, horizontal = 2.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .width(10.dp)
-                                .height(4.dp)
-                                .clip(RoundedCornerShape(2.dp))
-                                .background(if (isSlotted) accent else Color.White.copy(alpha = 0.15f))
-                        )
-                        Text(
-                            text = if (selectedCategory == CartridgeCategory.TTS) "0${idx + 1}" else "T${idx + 1}",
-                            color = if (isSlotted) Color.White else Color.White.copy(alpha = 0.35f),
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 8.sp
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth(0.7f)
-                                .height(3.dp)
-                                .background(if (isSlotted) MikaColors.SsrGold else Color.White.copy(alpha = 0.08f))
-                        )
+                        }
                     }
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = if (selectedCategory == CartridgeCategory.TTS) {
-                    "// Download & slam TTS engines (Kokoro 54v, KittenTTS 30MB, Piper Collection, Supertonic, Pocket, ZipVoice). ROM-02 & ROM-05 accept expansion chips!"
-                } else {
-                    "// Slam or eject built-in OS Tool Modules. Ejecting P.U.R.R. ENGINE or DSP RACK removes its icon from the Modules tab and turns off its pipeline!"
+                text = when (selectedCategory) {
+                    CartridgeCategory.TTS -> "// Download & slam core TTS engines. Tap EXPAND on any hub cartridge to reveal its nested sub-modules and accelerator chips."
+                    CartridgeCategory.CLONING -> "// Dedicated zero-shot cloning bay (Pocket, ZipVoice, Chatterbox-Turbo, Qwen3 Base) + Clone Studio workshop. Tap EXPAND on hubs for studio weights."
+                    CartridgeCategory.TOOLS -> "// Slam or eject built-in OS Tool Modules. Ejecting P.U.R.R. ENGINE or DSP RACK removes its icon from the Modules tab and turns off its pipeline!"
                 },
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
@@ -282,6 +412,102 @@ fun ModelCatalogTab(
             }
         }
 
+        // 1b. Compact Filter & Sort Controls
+        MikaGlowPanel(accent = categoryAccent, contentPadding = 10.dp) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "> FILTER // ${visibleCatalog.size} OF ${categoryCatalog.size}",
+                        color = categoryAccent,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 9.5.sp
+                    )
+                    if (filterMode != CartridgeFilterMode.ALL || sortMode != CartridgeSortMode.BAY_ORDER) {
+                        Text(
+                            text = "[RESET]",
+                            color = MikaColors.MikaAmber,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 9.sp,
+                            modifier = Modifier.clickable {
+                                filterMode = CartridgeFilterMode.ALL
+                                sortMode = CartridgeSortMode.BAY_ORDER
+                            }
+                        )
+                    }
+                }
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    CartridgeFilterMode.entries.forEach { mode ->
+                        MikaTagPill(
+                            label = mode.label,
+                            selected = filterMode == mode,
+                            activeColor = categoryAccent,
+                            onClick = { filterMode = mode }
+                        )
+                    }
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text(
+                        text = "SORT:",
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.sp
+                    )
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        CartridgeSortMode.entries.forEach { mode ->
+                            MikaTagPill(
+                                label = mode.label,
+                                selected = sortMode == mode,
+                                activeColor = MikaColors.SsrGold,
+                                onClick = { sortMode = mode }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        if (visibleCatalog.isEmpty()) {
+            MikaGlowPanel(accent = MikaColors.MikaAmber) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "// No cartridges match filter [${filterMode.label}].",
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 9.5.sp,
+                        modifier = Modifier.weight(1f)
+                    )
+                    MikaTagPill(
+                        label = "SHOW ALL",
+                        selected = true,
+                        activeColor = MikaColors.MikaAmber,
+                        onClick = { filterMode = CartridgeFilterMode.ALL }
+                    )
+                }
+            }
+        }
+
         // 2. Physical Molded Cartridge Cards for Active Category
         visibleCatalog.forEach { spec ->
             val bundleState = forgeState.modelStates[spec.id] ?: ModelBundleState(specId = spec.id)
@@ -294,7 +520,8 @@ fun ModelCatalogTab(
                 bundleState.state == DownloadState.INSTALLED ||
                 standaloneSubInstalled
             val isSlotted = isInstalled && spec.id in forgeState.slottedCartridges
-            val isToolCartridge = spec.category == CartridgeCategory.TOOLS
+            val isToolCartridge = spec.isBuiltInOsCartridge && (spec.category == CartridgeCategory.TOOLS || spec.id == "tool_clone_studio")
+            val isCloningCartridge = spec.category == CartridgeCategory.CLONING
             val accent = Color(spec.accentHex)
             val sizeLabel = when {
                 isToolCartridge -> "OS_MODULE"
@@ -347,7 +574,11 @@ fun ModelCatalogTab(
                             Box(modifier = Modifier.fillMaxWidth().height(2.dp).background(if (isSlotted) accent.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.12f)))
                         }
                         Text(
-                            text = if (isToolCartridge) "M.I.K.A.-OS" else "M.I.K.A.-ROM",
+                            text = when {
+                                isToolCartridge -> "M.I.K.A.-OS"
+                                isCloningCartridge -> "M.I.K.A.-CLN"
+                                else -> "M.I.K.A.-ROM"
+                            },
                             color = if (isSlotted) accent else Color.White.copy(alpha = 0.3f),
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.Black,
@@ -564,7 +795,7 @@ fun ModelCatalogTab(
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
                                     Text(
-                                        text = "SELECT A CLONING ENGINE BELOW (SUB-03A..E)",
+                                        text = "EXPAND SUB-MODULES BELOW TO INSTALL CHIPS",
                                         color = accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Black,
@@ -627,16 +858,28 @@ fun ModelCatalogTab(
                                         .background(accent.copy(alpha = 0.18f))
                                         .border(1.dp, accent, RoundedCornerShape(5.dp))
                                         .clickable {
-                                            if (isToolCartridge) onOpenModulesTab() else onJumpToVoiceSelector(spec.id)
+                                            when {
+                                                spec.id == "tool_clone_studio" -> onOpenCloneStudio()
+                                                isToolCartridge -> onOpenModulesTab()
+                                                else -> onJumpToVoiceSelector(spec.id)
+                                            }
                                         }
                                         .padding(horizontal = 10.dp, vertical = 9.dp),
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    MikaCyberIcon(type = CyberIconType.WRENCH_TOOL, tint = accent, size = 11.dp)
+                                    MikaCyberIcon(
+                                        type = if (spec.id == "tool_clone_studio") CyberIconType.DNA_CLONE else CyberIconType.WRENCH_TOOL,
+                                        tint = accent,
+                                        size = 11.dp
+                                    )
                                     Spacer(modifier = Modifier.width(5.dp))
                                     Text(
-                                        text = if (isToolCartridge) "MODULE" else "VOICES",
+                                        text = when {
+                                            spec.id == "tool_clone_studio" -> "STUDIO"
+                                            isToolCartridge -> "MODULE"
+                                            else -> "VOICES"
+                                        },
                                         color = accent,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Black,
@@ -690,69 +933,217 @@ fun ModelCatalogTab(
                     }
 
                     if (childSubs.isNotEmpty()) {
+                        val isExpanded = spec.id in expandedSubMenus
+                        val activeSubCount = childSubs.count { sub ->
+                            forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED &&
+                                sub.id in forgeState.enabledSubCartridges
+                        }
+                        val installedSubCount = childSubs.count { sub ->
+                            forgeState.modelStates[sub.id]?.state == DownloadState.INSTALLED
+                        }
+                        val anySubDownloading = childSubs.any { sub ->
+                            val st = forgeState.modelStates[sub.id]?.state
+                            st == DownloadState.DOWNLOADING || st == DownloadState.VERIFYING || st == DownloadState.EXTRACTING
+                        }
+                        val chevronRotation by animateFloatAsState(
+                            targetValue = if (isExpanded) 90f else 0f,
+                            animationSpec = spring(
+                                dampingRatio = Spring.DampingRatioMediumBouncy,
+                                stiffness = Spring.StiffnessMediumLow
+                            ),
+                            label = "subMenuChevron_${spec.id}"
+                        )
+                        val drawerBorderColor by animateColorAsState(
+                            targetValue = if (isExpanded) accent.copy(alpha = 0.72f) else accent.copy(alpha = 0.42f),
+                            animationSpec = tween(220),
+                            label = "subMenuBorder_${spec.id}"
+                        )
+                        val drawerBgColor by animateColorAsState(
+                            targetValue = if (isExpanded) Color(0xFF0A0716) else Color(0xFF07050E),
+                            animationSpec = tween(220),
+                            label = "subMenuBg_${spec.id}"
+                        )
+
                         Spacer(modifier = Modifier.height(10.dp))
                         Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFF07050E))
-                                .border(1.dp, accent.copy(alpha = 0.40f), RoundedCornerShape(6.dp))
-                                .padding(10.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                                .background(drawerBgColor)
+                                .border(1.dp, drawerBorderColor, RoundedCornerShape(6.dp))
                         ) {
                             val subHeaderText = when (spec.id) {
-                                "rom_kokoro_sherpa" -> "KOKORO EXPANSIONS & ACCELERATORS (${childSubs.size} CHIPS)"
-                                "rom_clone_hub" -> "ZERO-SHOT CLONING ENGINES (${childSubs.size} ENGINES)"
-                                "rom_qwen3_custom_06b" -> "QWEN3-TTS EXPANSION MODELS (CLONE & VOICEDESIGN)"
-                                "rom_kitten_tts" -> "KITTENTTS FULL-WEIGHT UPGRADE (${childSubs.size} CHIP)"
-                                "rom_piper" -> "PIPER VOICES, MELOTTS & FLOW ENGINES (${childSubs.size} PACKS)"
-                                else -> "EXPANSION SUB-CARTRIDGES (${childSubs.size} PACKS FOR ${spec.romCode})"
+                                "rom_kokoro_sherpa" -> "KOKORO SUB-MODULES & CHIPS (${childSubs.size})"
+                                "rom_pocket_tts" -> "POCKET CLONE UPGRADES (${childSubs.size})"
+                                "rom_zipvoice" -> "ZIPVOICE CLONE UPGRADES (${childSubs.size})"
+                                "rom_qwen3_custom_06b" -> "QWEN3 SUB-MODULES (${childSubs.size})"
+                                "rom_kitten_tts" -> "KITTENTTS FULL-WEIGHT UPGRADE (${childSubs.size})"
+                                "rom_piper" -> "PIPER, MELOTTS & FLOW SUB-MODULES (${childSubs.size})"
+                                else -> "SUB-MODULES FOR ${spec.romCode} (${childSubs.size})"
                             }
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(6.dp)
-                            ) {
-                                MikaCyberIcon(type = CyberIconType.CHIP_EXPANSION, tint = accent, size = 12.dp)
-                                Text(
-                                    text = subHeaderText,
-                                    color = accent,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Black,
-                                    fontSize = 9.5.sp,
-                                    letterSpacing = 0.5.sp
-                                )
-                            }
-                            val hubGuideText = when (spec.id) {
-                                "rom_kokoro_sherpa" -> if (bundleState.state == DownloadState.INSTALLED) {
-                                    "// Kokoro Base INT8 is ready! SUB-02A/B accelerate Kokoro Base; SUB-02C (FP32) & SUB-02D (v1.1 103v) also work standalone."
-                                } else {
-                                    "// Install ROM-02 Base INT8 above (required for NPU/GPU SUB-02A/B), OR install SUB-02C FP32 / SUB-02D v1.1 standalone!"
-                                }
-                                "rom_clone_hub" -> "// Pick ANY cloning engine below (Pocket INT8/FP32, ZipVoice INT8/Full, or Chatterbox-Turbo 350M) — ROM-03 auto-slots!"
-                                "rom_qwen3_custom_06b" -> "// Install 0.6B CustomVoice above OR slam 0.6B Base Cloner (SUB-04A) / 1.7B VoiceDesign (SUB-04B) directly — standalone!"
-                                "rom_kitten_tts" -> "// Install 30MB Nano Base above OR 64MB KittenTTS Mini 80M below — either works standalone!"
-                                "rom_piper" -> "// Pick Piper Lessac US above OR any standalone narrator pack (Amy, Ryan, Cori, Alba, GLaDOS, Kristin, MeloTTS, Supertonic 3, Matcha)."
-                                else -> "// Expansion sub-cartridges for ${spec.romCode}:"
-                            }
-                            Text(
-                                text = hubGuideText,
-                                color = if (isInstalled) MikaColors.DimText else MikaColors.NeonCyan,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 9.sp,
-                                lineHeight = 13.sp
-                            )
 
-                            childSubs.forEach { subSpec ->
-                                val subState = forgeState.modelStates[subSpec.id] ?: ModelBundleState(specId = subSpec.id)
-                                val subInstalled = subState.state == DownloadState.INSTALLED
-                                val subEnabled = subInstalled && subSpec.id in forgeState.enabledSubCartridges
-                                SubCartridgeCard(
-                                    subSpec = subSpec,
-                                    subState = subState,
-                                    isInstalled = subInstalled,
-                                    isEnabled = subEnabled,
-                                    viewModel = viewModel
+                            // Unmistakable Collapsible Header Trigger
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable {
+                                        expandedSubMenus = if (isExpanded) {
+                                            expandedSubMenus - spec.id
+                                        } else {
+                                            expandedSubMenus + spec.id
+                                        }
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 9.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                        modifier = Modifier.weight(1f)
+                                    ) {
+                                        MikaCyberIcon(type = CyberIconType.CHIP_EXPANSION, tint = accent, size = 12.dp)
+                                        Text(
+                                            text = subHeaderText,
+                                            color = accent,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 9.5.sp,
+                                            letterSpacing = 0.5.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                    ) {
+                                        val statusBadgeText = when {
+                                            anySubDownloading -> "BUSY"
+                                            activeSubCount > 0 -> "$activeSubCount ON"
+                                            installedSubCount > 0 -> "$installedSubCount READY"
+                                            else -> "${childSubs.size} CHIPS"
+                                        }
+                                        val statusBadgeColor = when {
+                                            anySubDownloading -> MikaColors.MikaAmber
+                                            activeSubCount > 0 -> MikaColors.TerminalGreen
+                                            installedSubCount > 0 -> MikaColors.NeonCyan
+                                            else -> MikaColors.DimText
+                                        }
+                                        Text(
+                                            text = statusBadgeText,
+                                            color = statusBadgeColor,
+                                            fontFamily = FontFamily.Monospace,
+                                            fontWeight = FontWeight.Black,
+                                            fontSize = 8.sp,
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(3.dp))
+                                                .background(statusBadgeColor.copy(alpha = 0.14f))
+                                                .border(1.dp, statusBadgeColor.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
+                                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(4.dp))
+                                                .background(accent.copy(alpha = if (isExpanded) 0.22f else 0.14f))
+                                                .border(1.dp, accent.copy(alpha = 0.75f), RoundedCornerShape(4.dp))
+                                                .padding(horizontal = 7.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = if (isExpanded) "HIDE" else "EXPAND",
+                                                color = accent,
+                                                fontFamily = FontFamily.Monospace,
+                                                fontWeight = FontWeight.Black,
+                                                fontSize = 8.sp,
+                                                letterSpacing = 0.5.sp
+                                            )
+                                            Box(modifier = Modifier.rotate(chevronRotation)) {
+                                                MikaCyberIcon(type = CyberIconType.CHEVRON_RIGHT, tint = accent, size = 9.dp)
+                                            }
+                                        }
+                                    }
+                                }
+
+                                if (!isExpanded) {
+                                    val previewNames = childSubs.take(3).joinToString(" • ") { it.badge } +
+                                        if (childSubs.size > 3) " +${childSubs.size - 3} more" else ""
+                                    Text(
+                                        text = "// Tap to expand: $previewNames",
+                                        color = MikaColors.CyanWhite.copy(alpha = 0.62f),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 8.5.sp,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                            }
+
+                            AnimatedVisibility(
+                                visible = isExpanded,
+                                enter = expandVertically(
+                                    animationSpec = spring(
+                                        dampingRatio = Spring.DampingRatioNoBouncy,
+                                        stiffness = Spring.StiffnessMediumLow
+                                    ),
+                                    expandFrom = Alignment.Top
+                                ) + fadeIn(
+                                    animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing)
+                                ),
+                                exit = shrinkVertically(
+                                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing),
+                                    shrinkTowards = Alignment.Top
+                                ) + fadeOut(
+                                    animationSpec = tween(durationMillis = 160)
                                 )
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(start = 10.dp, end = 10.dp, bottom = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    val hubGuideText = when (spec.id) {
+                                        "rom_kokoro_sherpa" -> if (bundleState.state == DownloadState.INSTALLED) {
+                                            "// Kokoro Base INT8 is ready! SUB-02A/B accelerate Kokoro Base; SUB-02C (FP32) & SUB-02D (v1.1 103v) also work standalone."
+                                        } else {
+                                            "// Install ROM-02 Base INT8 above (required for NPU/GPU SUB-02A/B), OR install SUB-02C FP32 / SUB-02D v1.1 standalone!"
+                                        }
+                                        "rom_pocket_tts" -> "// Upgrade CLN-01 Pocket INT8 with unquantized FP32 Studio cloning weights below!"
+                                        "rom_zipvoice" -> "// Upgrade CLN-02 ZipVoice Distill with full non-distilled flow-matching studio weights below!"
+                                        "rom_qwen3_custom_06b" -> "// Install 0.6B CustomVoice above OR slam 1.7B VoiceDesign (SUB-03A) directly — standalone!"
+                                        "rom_kitten_tts" -> "// Install 30MB Nano Base above OR Micro (42MB) / Mini 80M (64MB) below — all work standalone!"
+                                        "rom_inflect_v2" -> "// Install Inflect v2 Nano (21MB) above OR Micro Studio (41MB) below!"
+                                        "rom_icefall_vits" -> "// Install Icefall Medium (70MB) above OR Lite (30MB) below!"
+                                        "rom_piper" -> "// Pick Piper Lessac US above OR any standalone narrator pack (Amy, Ryan, Cori, Alba, GLaDOS, Kristin, MeloTTS, Supertonic 3, Matcha)."
+                                        else -> "// Expansion sub-cartridges for ${spec.romCode}:"
+                                    }
+                                    Text(
+                                        text = hubGuideText,
+                                        color = if (isInstalled) MikaColors.DimText else MikaColors.NeonCyan,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 9.sp,
+                                        lineHeight = 13.sp
+                                    )
+
+                                    childSubs.forEach { subSpec ->
+                                        val subState = forgeState.modelStates[subSpec.id] ?: ModelBundleState(specId = subSpec.id)
+                                        val subInstalled = subState.state == DownloadState.INSTALLED
+                                        val subEnabled = subInstalled && subSpec.id in forgeState.enabledSubCartridges
+                                        SubCartridgeCard(
+                                            subSpec = subSpec,
+                                            subState = subState,
+                                            isInstalled = subInstalled,
+                                            isEnabled = subEnabled,
+                                            viewModel = viewModel
+                                        )
+                                    }
+                                }
                             }
                         }
                     }

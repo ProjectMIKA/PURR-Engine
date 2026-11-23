@@ -86,7 +86,7 @@ class PurrHeavyEnginesTest {
         val raw = "Oh no! *laughs* Hold on [sigh] wait [gasp]!"
         val cbProfile = PurrDefaultPresets.builtInProfiles().first().copy(
             primaryVoiceId = "chatterbox_turbo_default",
-            selectedCartridgeId = "rom_clone_hub",
+            selectedCartridgeId = "sub_chatterbox_turbo",
             enableSymbolShield = true
         )
         val kokoroProfile = cbProfile.copy(
@@ -185,7 +185,7 @@ class PurrHeavyEnginesTest {
             assertTrue("rom_kokoro_sherpa" in migrated.slottedCartridges)
             assertTrue("rom_piper" in migrated.slottedCartridges)
 
-            // Verify Qwen3 Base & Chatterbox clone routing
+            // Verify Qwen3 Base & Chatterbox clone routing into dedicated CLONING cartridges
             repo.registerClonedVoice(
                 ClonedVoiceProfile(
                     id = "clone_qwen",
@@ -196,7 +196,7 @@ class PurrHeavyEnginesTest {
                     cloneEngineId = "sub_qwen3_base_06b"
                 )
             )
-            assertEquals("rom_qwen3_custom_06b", repo.currentProfile.selectedCartridgeId)
+            assertEquals("sub_qwen3_base_06b", repo.currentProfile.selectedCartridgeId)
             assertEquals(BackendType.QWEN3_NATIVE, repo.currentProfile.preferredBackend)
 
             repo.registerClonedVoice(
@@ -209,9 +209,38 @@ class PurrHeavyEnginesTest {
                     cloneEngineId = "sub_chatterbox_turbo"
                 )
             )
-            assertEquals("rom_clone_hub", repo.currentProfile.selectedCartridgeId)
+            assertEquals("sub_chatterbox_turbo", repo.currentProfile.selectedCartridgeId)
             assertEquals(BackendType.ONNX_NATIVE, repo.currentProfile.preferredBackend)
-            assertTrue("sub_chatterbox_turbo" in repo.state.value.enabledSubCartridges)
+            assertTrue("sub_chatterbox_turbo" in repo.state.value.slottedCartridges)
+
+            // Verify legacy rom_clone_hub profiles migrate cleanly to top-level CLONING cartridges
+            val legacyCloneHubDir = Files.createTempDirectory("purr_repo_clone_mig").toFile()
+            try {
+                File(legacyCloneHubDir, "purr_forge_state.json").writeText(
+                    json.encodeToString(
+                        PurrForgeState(
+                            activeProfileId = "gachaswipe_default",
+                            profiles = listOf(
+                                PurrDefaultPresets.builtInProfiles().first().copy(
+                                    selectedCartridgeId = "rom_clone_hub",
+                                    primaryVoiceId = "chatterbox_turbo_default",
+                                    preferredBackend = BackendType.ONNX_NATIVE
+                                )
+                            ),
+                            slottedCartridges = setOf("rom_core_os", "rom_clone_hub"),
+                            modelStates = mapOf(
+                                "sub_chatterbox_turbo" to ModelBundleState("sub_chatterbox_turbo", DownloadState.INSTALLED, sha256Verified = true)
+                            )
+                        )
+                    )
+                )
+                val migratedCloneRepo = PurrProfileRepository(legacyCloneHubDir)
+                assertEquals("sub_chatterbox_turbo", migratedCloneRepo.currentProfile.selectedCartridgeId)
+                assertFalse("rom_clone_hub" in migratedCloneRepo.state.value.slottedCartridges)
+                assertTrue("sub_chatterbox_turbo" in migratedCloneRepo.state.value.slottedCartridges)
+            } finally {
+                legacyCloneHubDir.deleteRecursively()
+            }
         } finally {
             tempDir.deleteRecursively()
         }

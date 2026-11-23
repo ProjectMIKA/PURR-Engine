@@ -6,14 +6,17 @@ import ai.onnxruntime.OnnxValue
 import ai.onnxruntime.OrtEnvironment
 import ai.onnxruntime.OrtSession
 import ai.onnxruntime.TensorInfo
+import ai.onnxruntime.providers.NNAPIFlags
 import android.content.Context
 import android.util.Log
 import com.projectmika.purrtts.core.purr.ArchetypeTone
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
+import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrBpeTokenizer
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
+import com.projectmika.purrtts.core.purr.PurrHardwareProbe
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrSentimentScorer
 import com.projectmika.purrtts.engine.PurrSynthesizer
@@ -22,6 +25,7 @@ import java.io.File
 import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import java.util.EnumSet
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
@@ -56,6 +60,8 @@ import kotlinx.serialization.json.jsonPrimitive
 class OnnxRuntimeEngine(
     private val context: Context,
     private val clonedVoicesProvider: () -> List<ClonedVoiceProfile>,
+    private val smartOffloadProvider: () -> Boolean = { false },
+    private val hardwareProfile: HardwareProfile = PurrHardwareProbe.detectDevice(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -164,6 +170,8 @@ class OnnxRuntimeEngine(
     private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
 
     private var loadedFamily = LoadedFamily.NONE
+    private var activeSmartOffload = false
+    private var activeUsedNnapi = false
     private var sopranoBackbone: OrtSession? = null
     private var sopranoDecoder: OrtSession? = null
     private var sopranoTokenizer: PurrBpeTokenizer? = null
@@ -276,7 +284,11 @@ class OnnxRuntimeEngine(
 
             if (outcome.pcmFloat24k.isEmpty()) return@withContext outcome
 
-            _statusFlow.value = HardwareStatusBadge.CPU_NEON
+            val activeBadge = when {
+                activeSmartOffload && activeUsedNnapi -> HardwareStatusBadge.NPU_ACTIVE
+                else -> HardwareStatusBadge.CPU_NEON
+            }
+            _statusFlow.value = activeBadge
             var pcm = outcome.pcmFloat24k
             if (speakingRate !in 0.94f..1.06f) {
                 pcm = PurrDspProcessor.timeScaleWsola(pcm, speakingRate.coerceIn(0.65f, 1.65f), SAMPLE_RATE_HZ)
@@ -284,7 +296,16 @@ class OnnxRuntimeEngine(
             if (pitch !in 0.995f..1.005f) {
                 pcm = PurrDspProcessor.shiftPitchCubic(pcm, pitch.coerceIn(0.88f, 1.12f))
             }
-            outcome.copy(pcmFloat24k = pcm, hardwareBadge = HardwareStatusBadge.CPU_NEON)
+            val summary = if (activeSmartOffload) {
+                "${outcome.engineSummary} • Smart Offload"
+            } else {
+                outcome.engineSummary
+            }
+            outcome.copy(
+                pcmFloat24k = pcm,
+                hardwareBadge = activeBadge,
+                engineSummary = summary
+            )
         }
     }
 
@@ -321,34 +342,93 @@ class OnnxRuntimeEngine(
         cbPromptCache = null
 
         loadedFamily = LoadedFamily.NONE
+        activeSmartOffload = false
+        activeUsedNnapi = false
     }
 
-    private fun buildSessionOptions(threads: Int = 4): OrtSession.SessionOptions {
+    private fun buildSessionOptions(
+        threads: Int = hardwareProfile.optimalCpuThreads,
+        preferNnapi: Boolean = false,
+        smartOffload: Boolean = false
+    ): OrtSession.SessionOptions {
         return OrtSession.SessionOptions().apply {
             setOptimizationLevel(OrtSession.SessionOptions.OptLevel.ALL_OPT)
             setIntraOpNumThreads(threads)
             setInterOpNumThreads(1)
+            if (smartOffload) {
+                if (preferNnapi && hardwareProfile.hasNnapi) {
+                    runCatching { addNnapi(EnumSet.of(NNAPIFlags.USE_FP16)) }
+                }
+                runCatching {
+                    addXnnpack(mapOf("intra_op_num_threads" to threads.toString()))
+                }
+            }
         }
     }
 
+    /**
+     * Creates an ORT session with optional NNAPI FP16 delegation under Smart Offload, always
+     * failing soft to XNNPACK/CPU if a particular graph contains unsupported NNAPI operators.
+     */
+    private fun createSessionWithFallback(
+        modelPath: String,
+        threads: Int,
+        preferNnapi: Boolean,
+        smartOffload: Boolean
+    ): Pair<OrtSession, Boolean> {
+        if (smartOffload && preferNnapi && hardwareProfile.hasNnapi) {
+            val nnapiAttempt = runCatching {
+                buildSessionOptions(threads = threads, preferNnapi = true, smartOffload = true).use { opts ->
+                    env.createSession(modelPath, opts)
+                }
+            }
+            if (nnapiAttempt.isSuccess) {
+                return nnapiAttempt.getOrThrow() to true
+            }
+            Log.w(TAG, "NNAPI delegation rejected for ${File(modelPath).name}, falling back to XNNPACK/CPU: ${nnapiAttempt.exceptionOrNull()?.message}")
+        }
+        val cpuSession = buildSessionOptions(threads = threads, preferNnapi = false, smartOffload = smartOffload).use { opts ->
+            env.createSession(modelPath, opts)
+        }
+        return cpuSession to false
+    }
+
     // =========================================================================
-    // 1. SOPRANO-80M 32kHz ENGINE (ROM-06)
+    // 1. SOPRANO-80M 32kHz ENGINE (ROM-05)
     // =========================================================================
 
     private fun ensureSopranoLoadedLocked(): Boolean {
-        if (loadedFamily == LoadedFamily.SOPRANO && sopranoBackbone != null && sopranoDecoder != null) {
+        val smartOffload = smartOffloadProvider()
+        if (loadedFamily == LoadedFamily.SOPRANO &&
+            activeSmartOffload == smartOffload &&
+            sopranoBackbone != null &&
+            sopranoDecoder != null
+        ) {
             return true
         }
         if (!isSopranoInstalled()) return false
         closeAllSessionsLocked()
         val dir = nativeDir(SPEC_SOPRANO)
-        buildSessionOptions(threads = 4).use { opts ->
-            sopranoBackbone = env.createSession(File(dir, "soprano_backbone_kv.onnx").absolutePath, opts)
-            sopranoDecoder = env.createSession(File(dir, "soprano_decoder.onnx").absolutePath, opts)
-        }
+        val threads = hardwareProfile.optimalCpuThreads
+        val (backboneSession, _) = createSessionWithFallback(
+            modelPath = File(dir, "soprano_backbone_kv.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = false,
+            smartOffload = smartOffload
+        )
+        val (decoderSession, decoderUsedNnapi) = createSessionWithFallback(
+            modelPath = File(dir, "soprano_decoder.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = true,
+            smartOffload = smartOffload
+        )
+        sopranoBackbone = backboneSession
+        sopranoDecoder = decoderSession
         sopranoTokenizer = PurrBpeTokenizer.fromFile(File(dir, "tokenizer.json"))
         loadedFamily = LoadedFamily.SOPRANO
-        Log.i(TAG, "Loaded Soprano-80M ONNX (32kHz) cleanly")
+        activeSmartOffload = smartOffload
+        activeUsedNnapi = decoderUsedNnapi
+        Log.i(TAG, "Loaded Soprano-80M ONNX (32kHz, smart=$smartOffload, nnapi=$decoderUsedNnapi) cleanly")
         return true
     }
 
@@ -502,23 +582,41 @@ class OnnxRuntimeEngine(
     // =========================================================================
 
     private fun ensureNeuTtsLoadedLocked(): Boolean {
-        if (loadedFamily == LoadedFamily.NEUTTS && neuBackbone != null && neuCodec != null) {
+        val smartOffload = smartOffloadProvider()
+        if (loadedFamily == LoadedFamily.NEUTTS &&
+            activeSmartOffload == smartOffload &&
+            neuBackbone != null &&
+            neuCodec != null
+        ) {
             return true
         }
         if (!isNeuTtsInstalled()) return false
         closeAllSessionsLocked()
         val dir = nativeDir(SPEC_NEUTTS_2E)
         // NeuTTS-2E benchmark proves 4 intra-op threads is peak throughput on CPU EP
-        buildSessionOptions(threads = 4).use { opts ->
-            neuBackbone = env.createSession(File(dir, "model_int8.onnx").absolutePath, opts)
-            neuCodec = env.createSession(File(dir, "neucodec_decoder_int8.onnx").absolutePath, opts)
-        }
+        val threads = hardwareProfile.optimalCpuThreads.coerceAtMost(4)
+        val (backboneSession, _) = createSessionWithFallback(
+            modelPath = File(dir, "model_int8.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = false,
+            smartOffload = smartOffload
+        )
+        val (codecSession, codecUsedNnapi) = createSessionWithFallback(
+            modelPath = File(dir, "neucodec_decoder_int8.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = true,
+            smartOffload = smartOffload
+        )
+        neuBackbone = backboneSession
+        neuCodec = codecSession
         neuTokenizer = PurrBpeTokenizer.fromFile(File(dir, "tokenizer.json"))
         if (neuRefs == null) {
             neuRefs = loadNeuTtsRefsFromAssets()
         }
         loadedFamily = LoadedFamily.NEUTTS
-        Log.i(TAG, "Loaded NeuTTS-2E INT8 + NeuCodec INT8 cleanly")
+        activeSmartOffload = smartOffload
+        activeUsedNnapi = codecUsedNnapi
+        Log.i(TAG, "Loaded NeuTTS-2E INT8 + NeuCodec INT8 (smart=$smartOffload, nnapi=$codecUsedNnapi) cleanly")
         return true
     }
 
@@ -738,23 +836,53 @@ class OnnxRuntimeEngine(
     // =========================================================================
 
     private fun ensureChatterboxLoadedLocked(): Boolean {
+        val smartOffload = smartOffloadProvider()
         if (loadedFamily == LoadedFamily.CHATTERBOX &&
-            cbSpeechEncoder != null && cbEmbedTokens != null && cbLanguageModel != null && cbCondDecoder != null
+            activeSmartOffload == smartOffload &&
+            cbSpeechEncoder != null &&
+            cbEmbedTokens != null &&
+            cbLanguageModel != null &&
+            cbCondDecoder != null
         ) {
             return true
         }
         if (!isChatterboxInstalled()) return false
         closeAllSessionsLocked()
         val dir = nativeDir(SPEC_CHATTERBOX)
-        buildSessionOptions(threads = 4).use { opts ->
-            cbSpeechEncoder = env.createSession(File(dir, "speech_encoder_q4.onnx").absolutePath, opts)
-            cbEmbedTokens = env.createSession(File(dir, "embed_tokens_q4.onnx").absolutePath, opts)
-            cbLanguageModel = env.createSession(File(dir, "language_model_q4.onnx").absolutePath, opts)
-            cbCondDecoder = env.createSession(File(dir, "conditional_decoder_q4.onnx").absolutePath, opts)
-        }
+        val threads = hardwareProfile.optimalCpuThreads.coerceAtMost(4)
+        val (encSession, encNnapi) = createSessionWithFallback(
+            modelPath = File(dir, "speech_encoder_q4.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = true,
+            smartOffload = smartOffload
+        )
+        val (embSession, _) = createSessionWithFallback(
+            modelPath = File(dir, "embed_tokens_q4.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = false,
+            smartOffload = smartOffload
+        )
+        val (lmSession, _) = createSessionWithFallback(
+            modelPath = File(dir, "language_model_q4.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = false,
+            smartOffload = smartOffload
+        )
+        val (decSession, decNnapi) = createSessionWithFallback(
+            modelPath = File(dir, "conditional_decoder_q4.onnx").absolutePath,
+            threads = threads,
+            preferNnapi = true,
+            smartOffload = smartOffload
+        )
+        cbSpeechEncoder = encSession
+        cbEmbedTokens = embSession
+        cbLanguageModel = lmSession
+        cbCondDecoder = decSession
         cbTokenizer = PurrBpeTokenizer.fromFile(File(dir, "tokenizer.json"))
         loadedFamily = LoadedFamily.CHATTERBOX
-        Log.i(TAG, "Loaded Chatterbox-Turbo 350M Q4 (4 ONNX graphs) cleanly")
+        activeSmartOffload = smartOffload
+        activeUsedNnapi = encNnapi || decNnapi
+        Log.i(TAG, "Loaded Chatterbox-Turbo 350M Q4 (4 ONNX graphs, smart=$smartOffload, nnapi=$activeUsedNnapi) cleanly")
         return true
     }
 

@@ -35,6 +35,7 @@ REQUIRED_FILES = [
     "app/src/main/res/drawable/ic_launcher_purr.xml",
     "app/src/main/java/com/projectmika/purrtts/PurrApplication.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrModels.kt",
+    "app/src/main/java/com/projectmika/purrtts/core/purr/PurrHardwareProbe.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrBpeTokenizer.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrSentimentScorer.kt",
     "app/src/main/java/com/projectmika/purrtts/core/purr/PurrTextProcessor.kt",

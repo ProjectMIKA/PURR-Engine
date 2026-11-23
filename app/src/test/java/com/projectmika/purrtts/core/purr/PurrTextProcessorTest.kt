@@ -283,6 +283,9 @@ class PurrTextProcessorTest {
         assertTrue(catalog.any { it.id == "rom_kitten_tts" && it.sherpaFamily == SherpaModelFamily.KITTEN_TTS && it.category == CartridgeCategory.TTS })
         assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" && it.requiredSubCartridgeId == null })
         assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" && it.requiredSubCartridgeId == "sub_kitten_mini" })
+        assertEquals(8, voices.count { it.cartridgeId == "rom_kitten_tts" && it.requiredSubCartridgeId == "sub_kitten_micro" })
+        assertTrue(voices.any { it.id == "inflect_nano_v2" && it.cartridgeId == "rom_inflect_v2" })
+        assertTrue(voices.any { it.id == "icefall_ljs_medium" && it.cartridgeId == "rom_icefall_vits" })
 
         val narratorSubs = catalog.filter { it.parentCartridgeId == "rom_piper" && it.isSubCartridge }
         assertEquals(9, narratorSubs.size)
@@ -293,7 +296,6 @@ class PurrTextProcessorTest {
             "tool_purr_engine",
             "tool_dsp_rack",
             "tool_symbol_shield",
-            "tool_clone_studio",
             "tool_audio_exporter",
             "tool_voice_design",
             "tool_audiobook_constructor"
@@ -301,6 +303,13 @@ class PurrTextProcessorTest {
         val tools = catalog.filter { it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
         assertTrue(expectedTools.all { it in defaultState.slottedCartridges })
+
+        val cloning = catalog.filter { it.category == CartridgeCategory.CLONING && !it.isSubCartridge }
+        assertEquals(
+            setOf("rom_pocket_tts", "rom_zipvoice", "sub_chatterbox_turbo", "sub_qwen3_base_06b", "tool_clone_studio"),
+            cloning.map { it.id }.toSet()
+        )
+        assertTrue("tool_clone_studio" in defaultState.slottedCartridges)
     }
 
     @Test

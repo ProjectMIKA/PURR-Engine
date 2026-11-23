@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAtUtc": "2026-11-21T19:50:51Z",
+  "generatedAtUtc": "2026-11-23T00:16:03Z",
   "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
   "assets": {
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
@@ -26,6 +26,14 @@
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-lessac-high.tar.bz2": {
       "sha256": "8619d204c7005866fe4f420181dfa79622af6a6222389f0b0818d2af31e0db0e",
       "sizeBytes": 115545841
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-nano-v2.tar.bz2": {
+      "sha256": "9a6b1188b5f3be8813e0552056328495b4e88ffd1ef18ff837272bde7b3bc136",
+      "sizeBytes": 22429639
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-en_US-ljspeech-medium.tar.bz2": {
+      "sha256": "93efae74fe0c72199c51b11ca7acb20b4966c2dc8b728109910266784f39f720",
+      "sizeBytes": 73546070
     },
     "https://huggingface.co/litert-community/Kokoro-G2P-en-US/resolve/main/dp_g2p_litert.tflite": {
       "sha256": "f8d6bbd16197b2468f53273de13f971a0e1e8657709d7f4285f2cd1c31f26620",
@@ -74,6 +82,18 @@
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-mini-en-v0_8.tar.bz2": {
       "sha256": "518f9b130320f690d5b5476df77bde4215fca67773cda16710318e5081234b9d",
       "sizeBytes": 67547594
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-micro-en-v0_8.tar.bz2": {
+      "sha256": "85faaea7511ca9d1d2f251fed0a4553bdf0d1ee046102fa60ddd8046c751f76f",
+      "sizeBytes": 44423643
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-micro-v2.tar.bz2": {
+      "sha256": "ed3c594d9c49b6c64ffe27f4b368ea8a700bcc27ff80610771408ee81cd96574",
+      "sizeBytes": 42956555
+    },
+    "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-en_US-ljspeech-low.tar.bz2": {
+      "sha256": "e5ae18c97b566099a2a748f243d4d44ea7cd188acc34e3533a2adc2565c9f845",
+      "sizeBytes": 31746179
     },
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2": {
       "sha256": "9a5d1fc497f85e8022b785bff5f8105203b1e33099ee6265203efc70b0cb0264",

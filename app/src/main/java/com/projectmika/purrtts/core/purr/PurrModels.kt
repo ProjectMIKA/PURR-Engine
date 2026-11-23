@@ -51,6 +51,46 @@ object PurrProxyPresets {
             note = "F5-TTS OpenAI-compatible wrapper — zero-shot cloning server-side"
         ),
         ProxyPreset(
+            id = "outetts_lan",
+            label = "OUTETTS_GGUF // LAN",
+            baseUrl = "http://192.168.1.50:8081/v1/audio/speech",
+            model = "outetts-1.0-0.6b",
+            voice = "default",
+            note = "OuteTTS GGUF server on your PC — llama.cpp + WavTokenizer"
+        ),
+        ProxyPreset(
+            id = "orpheus_lan",
+            label = "ORPHEUS_TTS // LAN",
+            baseUrl = "http://192.168.1.50:5005/v1/audio/speech",
+            model = "orpheus-3b",
+            voice = "tara",
+            note = "Canopy Orpheus TTS (Llama-3 + SNAC) with expressive tags"
+        ),
+        ProxyPreset(
+            id = "vibevoice_lan",
+            label = "VIBEVOICE_RT // LAN",
+            baseUrl = "http://192.168.1.50:8082/v1/audio/speech",
+            model = "vibevoice-realtime-0.5b",
+            voice = "default",
+            note = "Microsoft VibeVoice-Realtime-0.5B — long-form streaming voice"
+        ),
+        ProxyPreset(
+            id = "spark_tts_lan",
+            label = "SPARK_TTS // LAN",
+            baseUrl = "http://192.168.1.50:8083/v1/audio/speech",
+            model = "spark-tts-0.5b",
+            voice = "default",
+            note = "SparkAudio Spark-TTS-0.5B — Qwen2.5 + BiCodec voice styling"
+        ),
+        ProxyPreset(
+            id = "cosyvoice2_lan",
+            label = "COSYVOICE_2 // LAN",
+            baseUrl = "http://192.168.1.50:8084/v1/audio/speech",
+            model = "cosyvoice2-0.5b",
+            voice = "default",
+            note = "Alibaba CosyVoice 2/3 — cross-lingual zero-shot cloning server"
+        ),
+        ProxyPreset(
             id = "openai_official",
             label = "OPENAI_CLOUD",
             baseUrl = "https://api.openai.com/v1/audio/speech",
@@ -86,6 +126,7 @@ enum class SherpaModelFamily(val label: String) {
 @Serializable
 enum class CartridgeCategory(val label: String) {
     TTS("TTS_ENGINES"),
+    CLONING("VOICE_CLONING"),
     TOOLS("TOOL_MODULES")
 }
 
@@ -394,7 +435,9 @@ data class ModelBundleSpec(
     // ✨ MULTI-FILE HEAVY BUNDLES (v1.7.0): extra ONNX/GGUF/NPY/Tokenizer assets for
     // Qwen3-TTS, Chatterbox-Turbo, NeuTTS-2E, and Soprano-80M.
     val extraAssets: List<BundleAssetFile> = emptyList(),
-    val category: CartridgeCategory = CartridgeCategory.TTS
+    val category: CartridgeCategory = CartridgeCategory.TTS,
+    // Monotonic release order so users can sort cartridges by NEWEST in the Cartridge Bay.
+    val releaseOrder: Int = 0
 )
 
 @Serializable
@@ -498,6 +541,11 @@ data class PurrForgeState(
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
     val seenTutorialVersion: Int = 0,
+    // ✨ SMART HARDWARE OFFLOAD (v1.8.5): experimental device-level toggle that probes the
+    // SoC (Qualcomm Adreno/Hexagon, Tensor, Dimensity, generic ARM64) and automatically engages
+    // the best supported acceleration path per engine (Adreno OpenCL GPU, Hexagon NPU / NNAPI
+    // FP16, XNNPACK) while always failing soft to CPU if a graph/device rejects delegation.
+    val smartHardwareOffload: Boolean = false,
     // ✨ HARDWARE OFFLOAD (v1.8.3): device-level accelerator toggles — deliberately GLOBAL
     // state, not per-vibe-preset: hardware doesn't change when you switch personas. Future
     // GPU/NPU offload toggles slot here too (surfaced in Settings ▸ HARDWARE_OFFLOAD with the
@@ -524,7 +572,9 @@ object PurrNeuralBypass {
     private val ADVANCED_CARTRIDGES = setOf(
         "rom_qwen3_custom_06b",
         "rom_neutts_2e",
-        "rom_soprano_80m"
+        "rom_soprano_80m",
+        "sub_chatterbox_turbo",
+        "sub_qwen3_base_06b"
     )
 
     private val ADVANCED_VOICE_PREFIXES = listOf(
@@ -890,6 +940,73 @@ object PurrDefaultPresets {
             )
         }
 
+        val kittenMicroVoices = (0..7).map { idx ->
+            val isFemale = idx % 2 == 0
+            val num = (idx / 2) + 1
+            val tag = if (isFemale) "F$num" else "M$num"
+            VoiceDescriptor(
+                id = "kmicro_${tag.lowercase()}",
+                displayName = "Kitten Micro v0.8 // $tag",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_kitten_tts",
+                sherpaFamily = SherpaModelFamily.KITTEN_TTS,
+                gender = if (isFemale) VoiceGender.FEMALE else VoiceGender.MALE,
+                languageCode = "en-US",
+                speakerIndex = idx,
+                nativeTags = listOf(if (isFemale) "female" else "male", "american", "kittenmicro", "fast"),
+                requiredSubCartridgeId = "sub_kitten_micro"
+            )
+        }
+
+        val inflectAndIcefallVoices = listOf(
+            VoiceDescriptor(
+                id = "inflect_nano_v2",
+                displayName = "Inflect v2 Nano (Expressive EN)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_inflect_v2",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "inflect", "expressive", "fast")
+            ),
+            VoiceDescriptor(
+                id = "inflect_micro_v2",
+                displayName = "Inflect v2 Micro (Studio EN)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_inflect_v2",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "inflect", "studio", "expressive"),
+                requiredSubCartridgeId = "sub_inflect_micro"
+            ),
+            VoiceDescriptor(
+                id = "icefall_ljs_medium",
+                displayName = "Icefall VITS // LJSpeech Medium (EN)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_icefall_vits",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "icefall", "narrator", "clear")
+            ),
+            VoiceDescriptor(
+                id = "icefall_ljs_low",
+                displayName = "Icefall VITS // LJSpeech Lite (30MB EN)",
+                engine = BackendType.SHERPA_ONNX,
+                cartridgeId = "rom_icefall_vits",
+                sherpaFamily = SherpaModelFamily.PIPER,
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                speakerIndex = 0,
+                nativeTags = listOf("female", "american", "icefall", "lightweight", "fast"),
+                requiredSubCartridgeId = "sub_icefall_low"
+            )
+        )
+
         val sherpaSpecialized = listOf(
             VoiceDescriptor(
                 id = "supertonic3_f1",
@@ -1062,19 +1179,18 @@ object PurrDefaultPresets {
                 id = "pocket_tts_zero_shot",
                 displayName = "Pocket TTS INT8 // Base Zero-Shot",
                 engine = BackendType.SHERPA_ONNX,
-                cartridgeId = "rom_clone_hub",
+                cartridgeId = "rom_pocket_tts",
                 sherpaFamily = SherpaModelFamily.POCKET_TTS,
                 gender = VoiceGender.ANDROGYNOUS,
                 languageCode = "en-US",
                 speakerIndex = 0,
-                nativeTags = listOf("androgynous", "american", "clone", "warm"),
-                requiredSubCartridgeId = "rom_pocket_tts"
+                nativeTags = listOf("androgynous", "american", "clone", "warm")
             ),
             VoiceDescriptor(
                 id = "pocket_fp32_zero_shot",
                 displayName = "Pocket TTS FP32 // Studio Base",
                 engine = BackendType.SHERPA_ONNX,
-                cartridgeId = "rom_clone_hub",
+                cartridgeId = "rom_pocket_tts",
                 sherpaFamily = SherpaModelFamily.POCKET_TTS,
                 gender = VoiceGender.ANDROGYNOUS,
                 languageCode = "en-US",
@@ -1086,19 +1202,18 @@ object PurrDefaultPresets {
                 id = "zipvoice_flow_en",
                 displayName = "ZipVoice Distill // Flow Neural",
                 engine = BackendType.SHERPA_ONNX,
-                cartridgeId = "rom_clone_hub",
+                cartridgeId = "rom_zipvoice",
                 sherpaFamily = SherpaModelFamily.ZIPVOICE,
                 gender = VoiceGender.FEMALE,
                 languageCode = "en-US",
                 speakerIndex = 0,
-                nativeTags = listOf("female", "american", "soft", "breathy", "clone"),
-                requiredSubCartridgeId = "rom_zipvoice"
+                nativeTags = listOf("female", "american", "soft", "breathy", "clone")
             ),
             VoiceDescriptor(
                 id = "zipvoice_full_studio",
                 displayName = "ZipVoice Full // Studio Flow Clone",
                 engine = BackendType.SHERPA_ONNX,
-                cartridgeId = "rom_clone_hub",
+                cartridgeId = "rom_zipvoice",
                 sherpaFamily = SherpaModelFamily.ZIPVOICE,
                 gender = VoiceGender.FEMALE,
                 languageCode = "en-US",
@@ -1110,17 +1225,16 @@ object PurrDefaultPresets {
                 id = "chatterbox_turbo_default",
                 displayName = "Chatterbox-Turbo 350M // Paralinguistic Studio",
                 engine = BackendType.ONNX_NATIVE,
-                cartridgeId = "rom_clone_hub",
+                cartridgeId = "sub_chatterbox_turbo",
                 gender = VoiceGender.FEMALE,
                 languageCode = "en-US",
                 speakerIndex = 0,
-                nativeTags = listOf("female", "american", "chatterbox", "clone", "laugh", "sigh", "expressive"),
-                requiredSubCartridgeId = "sub_chatterbox_turbo"
+                nativeTags = listOf("female", "american", "chatterbox", "clone", "laugh", "sigh", "expressive")
             )
         )
 
         val heavyNativeVoices = listOf(
-            // ROM-04: Qwen3-TTS 0.6B CustomVoice speakers + Base 3s Clone + 1.7B VoiceDesign
+            // ROM-03: Qwen3-TTS 0.6B CustomVoice speakers + 1.7B VoiceDesign (Clone Base lives in CLN-04)
             VoiceDescriptor("qwen3_vivian", "Qwen3-TTS // Vivian (Warm Studio)", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.FEMALE, languageCode = "en-US", nativeTags = listOf("female", "qwen3", "warm", "multilingual")),
             VoiceDescriptor("qwen3_serena", "Qwen3-TTS // Serena (Soft Velvet)", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.FEMALE, languageCode = "en-US", nativeTags = listOf("female", "qwen3", "soft", "calm", "multilingual")),
             VoiceDescriptor("qwen3_ryan", "Qwen3-TTS // Ryan (Heroic Male)", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.MALE, languageCode = "en-US", nativeTags = listOf("male", "qwen3", "energetic", "multilingual")),
@@ -1130,7 +1244,7 @@ object PurrDefaultPresets {
             VoiceDescriptor("qwen3_ono_anna", "Qwen3-TTS // Ono Anna (Japanese)", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.FEMALE, languageCode = "ja-JP", nativeTags = listOf("female", "qwen3", "japanese", "cute")),
             VoiceDescriptor("qwen3_sohee", "Qwen3-TTS // Sohee (Korean/Bright)", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.FEMALE, languageCode = "ko-KR", nativeTags = listOf("female", "qwen3", "korean", "bright")),
             VoiceDescriptor("qwen3_uncle_fu", "Qwen3-TTS // Uncle Fu (Mature Baritone)", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.MALE, languageCode = "zh-CN", nativeTags = listOf("male", "qwen3", "deep", "mature")),
-            VoiceDescriptor("qwen3_base_clone_default", "Qwen3-TTS 0.6B Base // Clone Engine", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.FEMALE, languageCode = "en-US", nativeTags = listOf("female", "qwen3", "clone", "multilingual"), requiredSubCartridgeId = "sub_qwen3_base_06b"),
+            VoiceDescriptor("qwen3_base_clone_default", "Qwen3-TTS 0.6B Base // Clone Engine", BackendType.QWEN3_NATIVE, "sub_qwen3_base_06b", gender = VoiceGender.FEMALE, languageCode = "en-US", nativeTags = listOf("female", "qwen3", "clone", "multilingual")),
             VoiceDescriptor("qwen3_design_custom", "Qwen3-TTS 1.7B // Prompt VoiceDesign", BackendType.QWEN3_NATIVE, "rom_qwen3_custom_06b", gender = VoiceGender.ANDROGYNOUS, languageCode = "en-US", nativeTags = listOf("androgynous", "qwen3", "voicedesign", "prompt"), requiredSubCartridgeId = "sub_qwen3_design_17b"),
 
             // ROM-05: NeuTTS-2E Emotional
@@ -1155,7 +1269,7 @@ object PurrDefaultPresets {
             )
         )
 
-        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + sherpaSpecialized + heavyNativeVoices + proxyVoices
+        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + sherpaSpecialized + heavyNativeVoices + proxyVoices
     }
 
     /**
@@ -1443,14 +1557,14 @@ object PurrDefaultPresets {
     }
 
     /**
-     * ✨ CLEAN 8-BAY HUB CARTRIDGE RACK (v1.7.0) ✨
-     * ROM-01..ROM-08 organize every TTS engine cleanly by family, with accelerators,
-     * FP32/v1.1 upgrades, cloning engines, and extra voice packs nested inside their Hub bays.
-     * Plus 5 Built-In Tool Cartridges (`TOOL-01`..`TOOL-05`) under `CartridgeCategory.TOOLS`.
+     * ✨ CLEAN 3-CATEGORY CARTRIDGE RACK (v1.8.5) ✨
+     * - `CartridgeCategory.TTS`: ROM-01..ROM-09 core speech synthesis hubs + nested sub-chips.
+     * - `CartridgeCategory.CLONING`: CLN-01..CLN-05 dedicated voice cloning engines & Clone Studio.
+     * - `CartridgeCategory.TOOLS`: TOOL-01..TOOL-06 built-in Cyberdeck OS modules.
      */
     fun modelCatalog(): List<ModelBundleSpec> = listOf(
         // =========================================================================
-        // 8 MAIN TTS HUB CARTRIDGES (ROM-01 .. ROM-08)
+        // 9 MAIN TTS HUB CARTRIDGES (ROM-01 .. ROM-09)
         // =========================================================================
         ModelBundleSpec(
             id = "rom_core_os",
@@ -1469,7 +1583,8 @@ object PurrDefaultPresets {
             hardwareAccelNote = "Android OS Binder Bridge • Ejectable",
             isBuiltInOsCartridge = true,
             unlocksSummary = "UNLOCKS: Your phone's built-in Android voices (0 MB download). Eject to completely disable system voices.",
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 1
         ),
         ModelBundleSpec(
             id = "rom_kokoro_sherpa",
@@ -1488,35 +1603,17 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = true,
             hardwareAccelNote = "ARM64 NEON Base + NPU/GPU/FP32/v1.1 Sub-Cartridges",
             unlocksSummary = "UNLOCKS: All 54 Kokoro v1.0 Base voices + hosts Kokoro FP32, v1.1 (103v), NPU & GPU chips.",
-            category = CartridgeCategory.TTS
-        ),
-        ModelBundleSpec(
-            id = "rom_clone_hub",
-            romCode = "ROM-03",
-            badge = "ZERO_SHOT_CLONE",
-            accentHex = 0xFFB533FF,
-            name = "VOICE_CLONE_HUB",
-            subtitle = "Zero-Shot Voice Cloning Bay • Pocket, ZipVoice & Chatterbox-Turbo (350M)",
-            description = "All zero-shot voice cloning engines in one bay! Download any engine chip below — Pocket TTS (fast 5s), Pocket FP32 Studio, ZipVoice (flow-matching), or flagship Chatterbox-Turbo (with native [laugh]/[sigh]/[gasp] tags).",
-            backend = BackendType.SHERPA_ONNX,
-            downloadUrl = "builtin://hub/voice_clone",
-            fileName = "clone_hub.rom",
-            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
-            approximateSizeMb = 0,
-            isArchiveTarBz2 = false,
-            isHubContainer = true,
-            hardwareAccelNote = "Container Hub • Auto-Slots When Any Clone Engine Installs",
-            unlocksSummary = "HOSTS: Pocket INT8/FP32, ZipVoice INT8/Full & Chatterbox-Turbo 350M cloning engines.",
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 3
         ),
         ModelBundleSpec(
             id = "rom_qwen3_custom_06b",
-            romCode = "ROM-04",
+            romCode = "ROM-03",
             badge = "QWEN3_FLAGSHIP",
             accentHex = 0xFFFFD700,
             name = "QWEN3_TTS_STUDIO",
-            subtitle = "Alibaba Qwen3-TTS 0.6B CustomVoice (GGUF+ONNX) + Base Clone & 1.7B Design",
-            description = "Exclusive local Qwen3-TTS powered by llama.cpp + ONNX Runtime JNI! Base cartridge unlocks 9 multilingual studio speakers (Vivian, Serena, Ryan, Aiden, Ono Anna, Sohee & more). Add 0.6B Base for 3s multilingual cloning or 1.7B VoiceDesign for prompt-created voices! Needs 8GB+ RAM.",
+            subtitle = "Alibaba Qwen3-TTS 0.6B CustomVoice (GGUF+ONNX) + 1.7B VoiceDesign",
+            description = "Exclusive local Qwen3-TTS powered by llama.cpp + ONNX Runtime JNI! Base cartridge unlocks 9 multilingual studio speakers (Vivian, Serena, Ryan, Aiden, Ono Anna, Sohee & more). Expand with 1.7B VoiceDesign below (0.6B Base Cloner lives in the CLONING bay!). Needs 8GB+ RAM.",
             backend = BackendType.QWEN3_NATIVE,
             downloadUrl = "https://huggingface.co/wkwong/Lunavox-Qwen3-TTS-GGUF/resolve/main/custom_small/qwen3_tts_talker.q5_k.gguf",
             fileName = "qwen3_tts_talker.q5_k.gguf",
@@ -1524,7 +1621,7 @@ object PurrDefaultPresets {
             approximateSizeMb = 1053,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "llama.cpp b8470 GGUF + ORT 1.31.1 ONNX JNI • 8GB+ RAM",
-            unlocksSummary = "UNLOCKS: Qwen3-TTS 0.6B (9 Multilingual Studio Voices) + hosts 0.6B Base Cloner & 1.7B VoiceDesign.",
+            unlocksSummary = "UNLOCKS: Qwen3-TTS 0.6B (9 Multilingual Studio Voices) + hosts 1.7B VoiceDesign.",
             extraAssets = lunavoxQwen3Assets(
                 hfSubDir = "custom_small",
                 predictorSha = "87d8db0655badec054959b6bdd75ac093d241fd6cd40aee487fe5090129428a8",
@@ -1550,11 +1647,12 @@ object PurrDefaultPresets {
                     "57cb0ce39de77611a7be8f3932debe3a2fa9eba9189e7b3fac890c482ce9a8ba"
                 )
             ),
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 7
         ),
         ModelBundleSpec(
             id = "rom_neutts_2e",
-            romCode = "ROM-05",
+            romCode = "ROM-04",
             badge = "EMOTION_LLM",
             accentHex = 0xFFFF107A,
             name = "NEUTTS_2E_EMOTIONAL",
@@ -1572,11 +1670,12 @@ object PurrDefaultPresets {
                 BundleAssetFile("neucodec_decoder_int8.onnx", "https://huggingface.co/aoiandroid/neuphonic-neucodec-onnx-decoder-int8-mirror/resolve/main/model.onnx", "3ddd9e56396e6029e0e948ac0255c89c803f981f23dcf4c154f50820bd74a6b3", 312292102L),
                 BundleAssetFile("tokenizer.json", "https://huggingface.co/Danny-Dasilva/neutts-2e-onnx/resolve/main/tokenizer.json", "4124ffb80d856316c5f0bcad7c51742ffad141db65f3f1e8fcc2b34d4d498f34", 24063947L)
             ),
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 6
         ),
         ModelBundleSpec(
             id = "rom_soprano_80m",
-            romCode = "ROM-06",
+            romCode = "ROM-05",
             badge = "32KHZ_STUDIO_LLM",
             accentHex = 0xFF38BDF8,
             name = "SOPRANO_32KHZ_LLM",
@@ -1595,16 +1694,17 @@ object PurrDefaultPresets {
                 BundleAssetFile("soprano_decoder.onnx.data", "https://huggingface.co/KevinAHM/soprano-onnx/resolve/main/onnx/soprano_decoder.onnx.data", "b5ef3e4fe11c5eddf1b78afa10a0cecba4b8710b84b78c57b9661d7a56005a45", 57937920L),
                 BundleAssetFile("tokenizer.json", "https://huggingface.co/KevinAHM/soprano-onnx/resolve/main/tokenizer.json", "", 1630675L)
             ),
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 5
         ),
         ModelBundleSpec(
             id = "rom_kitten_tts",
-            romCode = "ROM-07",
+            romCode = "ROM-06",
             badge = "KITTEN_HUB",
             accentHex = 0xFFFF9E00,
             name = "KITTEN_TTS_HUB",
-            subtitle = "KittenTTS Nano (30MB Base) + Mini 80M Upgrade (64MB)",
-            description = "Compact ultra-expressive 8-voice English hub. Slam the 30MB Nano INT8 base or upgrade to the 80M KittenTTS Mini v0.8 sub-cartridge below for richer tone!",
+            subtitle = "KittenTTS Nano (30MB) + Micro (42MB) + Mini 80M (64MB)",
+            description = "Compact ultra-expressive 8-voice English hub. Slam the 30MB Nano INT8 base or pick Micro / Mini 80M v0.8 sub-cartridges below!",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.KITTEN_TTS,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-nano-en-v0_8-int8.tar.bz2",
@@ -1612,13 +1712,14 @@ object PurrDefaultPresets {
             expectedSha256 = "6fa5be852612ce761094ba74ee6123b4fc4acfefa79bf64dc63acae4a83af2fd",
             approximateSizeMb = 30,
             isArchiveTarBz2 = true,
-            hardwareAccelNote = "KittenTTS v0.8 • Nano 30MB + Mini 80M Option",
-            unlocksSummary = "UNLOCKS: 8 KittenTTS Nano voices (F1-F4 & M1-M4) + optional Mini 80M upgrade below.",
-            category = CartridgeCategory.TTS
+            hardwareAccelNote = "KittenTTS v0.8 • Nano 30MB + Micro 42MB + Mini 80M",
+            unlocksSummary = "UNLOCKS: 8 KittenTTS Nano voices (F1-F4 & M1-M4) + Micro & Mini 80M upgrades below.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 4
         ),
         ModelBundleSpec(
             id = "rom_piper",
-            romCode = "ROM-08",
+            romCode = "ROM-07",
             badge = "NARRATOR_HUB",
             accentHex = 0xFF9146FF,
             name = "NARRATOR_VITS_FLOW_HUB",
@@ -1633,7 +1734,48 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS + MeloTTS + Matcha + Supertonic Sub-Chips",
             unlocksSummary = "UNLOCKS: Piper Lessac US Base + 9 optional Narrator, MeloTTS & Flow Sub-Cartridges below.",
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 2
+        ),
+        ModelBundleSpec(
+            id = "rom_inflect_v2",
+            romCode = "ROM-08",
+            badge = "INFLECT_V2",
+            accentHex = 0xFF00FFA3,
+            name = "INFLECT_V2_NEURAL",
+            subtitle = "k2-fsa Inflect v2 Nano (21MB) + Micro Studio Upgrade (41MB)",
+            description = "Ultra-light expressive English neural VITS family built for snappy dialogue and minimal RAM draw, with a 41MB Micro Studio expansion below.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-nano-v2.tar.bz2",
+            fileName = "vits-inflect-en-nano-v2.tar.bz2",
+            expectedSha256 = "9a6b1188b5f3be8813e0552056328495b4e88ffd1ef18ff837272bde7b3bc136",
+            approximateSizeMb = 21,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Inflect v2 VITS ONNX • 21MB Nano + Micro Expansion",
+            unlocksSummary = "UNLOCKS: Inflect v2 Nano expressive English voice + Micro v2 below.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 8
+        ),
+        ModelBundleSpec(
+            id = "rom_icefall_vits",
+            romCode = "ROM-09",
+            badge = "ICEFALL_VITS",
+            accentHex = 0xFF00E5FF,
+            name = "ICEFALL_VITS_STUDIO",
+            subtitle = "k2-fsa Next-Gen Icefall LJSpeech Medium (70MB) + Lite (30MB)",
+            description = "Clean Icefall VITS neural synthesis trained on studio American English narration, with a lightweight 30MB Lite sub-cartridge below.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-en_US-ljspeech-medium.tar.bz2",
+            fileName = "vits-icefall-en_US-ljspeech-medium.tar.bz2",
+            expectedSha256 = "93efae74fe0c72199c51b11ca7acb20b4966c2dc8b728109910266784f39f720",
+            approximateSizeMb = 70,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Icefall VITS ONNX • Crisp Studio Narrator",
+            unlocksSummary = "UNLOCKS: Icefall VITS LJSpeech Medium + Lite 30MB sub-cartridge below.",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 9
         ),
 
         // =========================================================================
@@ -1723,16 +1865,16 @@ object PurrDefaultPresets {
         ),
 
         // =========================================================================
-        // SUB-CARTRIDGES: ROM-03 (VOICE_CLONE_HUB)
+        // DEDICATED VOICE CLONING CATEGORY (CLN-01 .. CLN-05) + SUB-CHIPS
         // =========================================================================
         ModelBundleSpec(
             id = "rom_pocket_tts",
-            romCode = "SUB-03A",
+            romCode = "CLN-01",
             badge = "5S_CLONE_INT8",
             accentHex = 0xFFB533FF,
-            name = "POCKET_TTS_INT8",
-            subtitle = "Fast 5-Second Zero-Shot CPU Cloner (+94 MB)",
-            description = "Compact 5-second zero-shot cloning model via sherpa-onnx. Fast on every phone.",
+            name = "POCKET_TTS_CLONER",
+            subtitle = "Fast 5-Second Zero-Shot CPU Cloner (+94 MB) + FP32 Studio Upgrade",
+            description = "Compact 5-second zero-shot cloning model via sherpa-onnx. Fast on every phone, with an optional FP32 Studio weight expansion below.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.POCKET_TTS,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-pocket-tts-int8-2026-01-26.tar.bz2",
@@ -1741,14 +1883,13 @@ object PurrDefaultPresets {
             approximateSizeMb = 94,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Pocket TTS INT8 Zero-Shot Speaker Encoder",
-            unlocksSummary = "ENABLES: Pocket INT8 5s cloning in Clone Studio + base voice under ROM-03.",
-            isSubCartridge = true,
-            parentCartridgeId = "rom_clone_hub",
-            category = CartridgeCategory.TTS
+            unlocksSummary = "ENABLES: Pocket INT8 5s cloning in Clone Studio + hosts Pocket FP32 Studio below.",
+            category = CartridgeCategory.CLONING,
+            releaseOrder = 5
         ),
         ModelBundleSpec(
             id = "sub_pocket_fp32",
-            romCode = "SUB-03B",
+            romCode = "SUB-C1A",
             badge = "5S_CLONE_FP32",
             accentHex = 0xFFD946EF,
             name = "POCKET_TTS_FP32_STUDIO",
@@ -1762,19 +1903,19 @@ object PurrDefaultPresets {
             approximateSizeMb = 160,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Pocket TTS FP32 Unquantized Studio Weights",
-            unlocksSummary = "ENABLES: Pocket FP32 Studio cloning in Clone Studio + base voice under ROM-03.",
+            unlocksSummary = "ENABLES: Pocket FP32 Studio cloning in Clone Studio + base voice under CLN-01.",
             isSubCartridge = true,
-            parentCartridgeId = "rom_clone_hub",
-            category = CartridgeCategory.TTS
+            parentCartridgeId = "rom_pocket_tts",
+            category = CartridgeCategory.CLONING
         ),
         ModelBundleSpec(
             id = "rom_zipvoice",
-            romCode = "SUB-03C",
+            romCode = "CLN-02",
             badge = "FLOW_CLONE_INT8",
             accentHex = 0xFFFF107A,
-            name = "ZIPVOICE_DISTILL_INT8",
-            subtitle = "Distilled Flow-Matching Zero-Shot Clone (+104 MB)",
-            description = "Compact distilled flow-matching cloner with expressive prosody transfer.",
+            name = "ZIPVOICE_FLOW_CLONER",
+            subtitle = "Distilled Flow-Matching Zero-Shot Clone (+104 MB) + Full Studio Upgrade",
+            description = "Compact distilled flow-matching cloner with expressive prosody transfer, plus optional Full Studio expansion below.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.ZIPVOICE,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/sherpa-onnx-zipvoice-distill-int8-zh-en-emilia.tar.bz2",
@@ -1783,14 +1924,13 @@ object PurrDefaultPresets {
             approximateSizeMb = 104,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "ONNX Runtime INT8 + Vocos",
-            unlocksSummary = "ENABLES: ZipVoice INT8 cloning in Clone Studio + ZipVoice base voice.",
-            isSubCartridge = true,
-            parentCartridgeId = "rom_clone_hub",
-            category = CartridgeCategory.TTS
+            unlocksSummary = "ENABLES: ZipVoice INT8 cloning in Clone Studio + hosts ZipVoice Full below.",
+            category = CartridgeCategory.CLONING,
+            releaseOrder = 6
         ),
         ModelBundleSpec(
             id = "sub_zipvoice_full",
-            romCode = "SUB-03D",
+            romCode = "SUB-C2A",
             badge = "FLOW_CLONE_FULL",
             accentHex = 0xFFFF4D6D,
             name = "ZIPVOICE_FULL_STUDIO",
@@ -1804,14 +1944,14 @@ object PurrDefaultPresets {
             approximateSizeMb = 605,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Full Non-Distilled ZipVoice Studio + Vocos",
-            unlocksSummary = "ENABLES: Full ZipVoice Studio cloning in Clone Studio + studio base voice.",
+            unlocksSummary = "ENABLES: Full ZipVoice Studio cloning in Clone Studio + studio base voice under CLN-02.",
             isSubCartridge = true,
-            parentCartridgeId = "rom_clone_hub",
-            category = CartridgeCategory.TTS
+            parentCartridgeId = "rom_zipvoice",
+            category = CartridgeCategory.CLONING
         ),
         ModelBundleSpec(
             id = "sub_chatterbox_turbo",
-            romCode = "SUB-03E",
+            romCode = "CLN-03",
             badge = "CHATTERBOX_350M",
             accentHex = 0xFFFF6B35,
             name = "CHATTERBOX_TURBO_350M",
@@ -1825,8 +1965,6 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "ONNX Runtime Q4 4-Graph + Native Paralinguistics • MIT",
             unlocksSummary = "ENABLES: Chatterbox-Turbo 350M zero-shot cloning & native [laugh]/[sigh]/[gasp] expressions!",
-            isSubCartridge = true,
-            parentCartridgeId = "rom_clone_hub",
             extraAssets = listOf(
                 BundleAssetFile("language_model_q4.onnx", "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/main/onnx/language_model_q4.onnx", "b39d03d3f8b943b9e60c6fce3fb41191dbc1df4589f913291db1e214eef669b1", 274572L),
                 BundleAssetFile("embed_tokens_q4.onnx", "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/main/onnx/embed_tokens_q4.onnx", "fd6ba1d22902e8f539d3dd6d7c1c44b98ebb4c84ebbb5e47fcb826ddcf667561", 2844L),
@@ -1838,15 +1976,12 @@ object PurrDefaultPresets {
                 BundleAssetFile("tokenizer.json", "https://huggingface.co/ResembleAI/chatterbox-turbo-ONNX/resolve/main/tokenizer.json", "", 3562272L),
                 BundleAssetFile("emily_neutral.wav", "https://huggingface.co/Danny-Dasilva/neutts-2e-onnx/resolve/main/samples/emily_neutral.wav", "af84bfde96bcaddd9d303e0213d84be8c920a981561b65eea07c68d951f6e4d1", 267884L)
             ),
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.CLONING,
+            releaseOrder = 7
         ),
-
-        // =========================================================================
-        // SUB-CARTRIDGES: ROM-04 (QWEN3_TTS_STUDIO)
-        // =========================================================================
         ModelBundleSpec(
             id = "sub_qwen3_base_06b",
-            romCode = "SUB-04A",
+            romCode = "CLN-04",
             badge = "3S_MULTILANG_CLONE",
             accentHex = 0xFFFFB703,
             name = "QWEN3_06B_BASE_CLONER",
@@ -1859,9 +1994,7 @@ object PurrDefaultPresets {
             approximateSizeMb = 1173,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Qwen3-TTS 0.6B Base + Speaker/Codec Encoders • 8GB+ RAM",
-            unlocksSummary = "ENABLES: 3-second Qwen3 multilingual voice cloning in Clone Studio under ROM-04.",
-            isSubCartridge = true,
-            parentCartridgeId = "rom_qwen3_custom_06b",
+            unlocksSummary = "ENABLES: 3-second Qwen3 multilingual voice cloning in Clone Studio (standalone CLN-04).",
             extraAssets = lunavoxQwen3Assets(
                 hfSubDir = "base_small",
                 predictorSha = "80d942f3c9665688aabf6c282a162b3786b6e648ff9741d56994791b439f91e2",
@@ -1888,11 +2021,36 @@ object PurrDefaultPresets {
                 ),
                 includeBaseCloneEncoders = true
             ),
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.CLONING,
+            releaseOrder = 8
         ),
         ModelBundleSpec(
+            id = "tool_clone_studio",
+            romCode = "CLN-05",
+            badge = "CLONE_WORKSHOP",
+            accentHex = 0xFFB533FF,
+            name = "VOICE_CLONE_STUDIO",
+            subtitle = "3-12s Zero-Shot Mic Reference Recorder, Clipper & Cloner Workshop",
+            description = "Dedicated studio OS app for recording, importing & cleaning reference samples and registering custom zero-shot cloned voices across Pocket, ZipVoice, Chatterbox-Turbo & Qwen3-TTS Base.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/clone_studio",
+            fileName = "clone_studio.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "24kHz Mono Reference Recorder & STFT Denoiser • Ejectable",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: Voice Clone Studio OS Module for reference recording, clip import & cloning.",
+            category = CartridgeCategory.CLONING,
+            releaseOrder = 4
+        ),
+
+        // =========================================================================
+        // SUB-CARTRIDGE: ROM-03 (QWEN3_TTS_STUDIO)
+        // =========================================================================
+        ModelBundleSpec(
             id = "sub_qwen3_design_17b",
-            romCode = "SUB-04B",
+            romCode = "SUB-03A",
             badge = "1.7B_VOICEDESIGN",
             accentHex = 0xFFFF007F,
             name = "QWEN3_17B_VOICEDESIGN",
@@ -1905,7 +2063,7 @@ object PurrDefaultPresets {
             approximateSizeMb = 2100,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "1.7B Qwen3 VoiceDesign • 12GB+ RAM Flagship Devices",
-            unlocksSummary = "UNLOCKS: qwen3_design_custom (create any voice live from a text prompt under ROM-04).",
+            unlocksSummary = "UNLOCKS: qwen3_design_custom (create any voice live from a text prompt under ROM-03).",
             isSubCartridge = true,
             parentCartridgeId = "rom_qwen3_custom_06b",
             extraAssets = lunavoxQwen3Assets(
@@ -1940,11 +2098,11 @@ object PurrDefaultPresets {
         ),
 
         // =========================================================================
-        // SUB-CARTRIDGE: ROM-07 (KITTEN_TTS_HUB)
+        // SUB-CARTRIDGES: ROM-06 (KITTEN_TTS_HUB)
         // =========================================================================
         ModelBundleSpec(
             id = "sub_kitten_mini",
-            romCode = "SUB-07A",
+            romCode = "SUB-06A",
             badge = "KITTEN_80M_MINI",
             accentHex = 0xFFFFB703,
             name = "KITTEN_TTS_MINI_80M",
@@ -1958,23 +2116,94 @@ object PurrDefaultPresets {
             approximateSizeMb = 64,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "KittenTTS Mini v0.8 (80M) + espeak-ng",
-            unlocksSummary = "ADDS VOICES: 8 full-weight KittenTTS Mini 80M voices (kmini_*) to ROM-07.",
+            unlocksSummary = "ADDS VOICES: 8 full-weight KittenTTS Mini 80M voices (kmini_*) to ROM-06.",
             isSubCartridge = true,
             parentCartridgeId = "rom_kitten_tts",
-            category = CartridgeCategory.TTS
+            category = CartridgeCategory.TTS,
+            releaseOrder = 6
+        ),
+        ModelBundleSpec(
+            id = "sub_kitten_micro",
+            romCode = "SUB-06B",
+            badge = "KITTEN_MICRO",
+            accentHex = 0xFFFF7A00,
+            name = "KITTEN_TTS_MICRO_V08",
+            subtitle = "Balanced Mid-Tier KittenTTS v0.8 • 8 Voices (+42 MB)",
+            description = "Mid-weight KittenTTS v0.8 pack balancing faster ARM64 CPU latency than Mini with richer articulation than Nano.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.KITTEN_TTS,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kitten-micro-en-v0_8.tar.bz2",
+            fileName = "kitten-micro-en-v0_8.tar.bz2",
+            expectedSha256 = "85faaea7511ca9d1d2f251fed0a4553bdf0d1ee046102fa60ddd8046c751f76f",
+            approximateSizeMb = 42,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "KittenTTS Micro v0.8 + espeak-ng",
+            unlocksSummary = "ADDS VOICES: 8 KittenTTS Micro v0.8 voices (kmicro_*) to ROM-06.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_kitten_tts",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 8
         ),
 
         // =========================================================================
-        // SUB-CARTRIDGES: ROM-08 (NARRATOR_VITS_FLOW_HUB)
+        // SUB-CARTRIDGES: ROM-08 (INFLECT_V2_NEURAL) & ROM-09 (ICEFALL_VITS_STUDIO)
+        // =========================================================================
+        ModelBundleSpec(
+            id = "sub_inflect_micro",
+            romCode = "SUB-08A",
+            badge = "INFLECT_MICRO",
+            accentHex = 0xFF00E5FF,
+            name = "INFLECT_V2_MICRO",
+            subtitle = "Inflect v2 Micro Upgrade • Higher Timbre Detail (+41 MB)",
+            description = "Upgraded Inflect v2 VITS checkpoint with smoother prosody and crisper high-frequency detail under ROM-08.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-inflect-en-micro-v2.tar.bz2",
+            fileName = "vits-inflect-en-micro-v2.tar.bz2",
+            expectedSha256 = "ed3c594d9c49b6c64ffe27f4b368ea8a700bcc27ff80610771408ee81cd96574",
+            approximateSizeMb = 41,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Inflect v2 Micro VITS ONNX",
+            unlocksSummary = "ADDS VOICE: Inflect v2 Micro (Studio EN) to ROM-08.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_inflect_v2",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 9
+        ),
+        ModelBundleSpec(
+            id = "sub_icefall_low",
+            romCode = "SUB-09A",
+            badge = "ICEFALL_LITE",
+            accentHex = 0xFF38BDF8,
+            name = "ICEFALL_VITS_LITE",
+            subtitle = "Icefall LJSpeech Low • Fast Compact 30MB Narrator (+30 MB)",
+            description = "Ultra-fast low-footprint variant of Icefall LJSpeech VITS for snappy mobile narration under ROM-09.",
+            backend = BackendType.SHERPA_ONNX,
+            sherpaFamily = SherpaModelFamily.PIPER,
+            downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-icefall-en_US-ljspeech-low.tar.bz2",
+            fileName = "vits-icefall-en_US-ljspeech-low.tar.bz2",
+            expectedSha256 = "e5ae18c97b566099a2a748f243d4d44ea7cd188acc34e3533a2adc2565c9f845",
+            approximateSizeMb = 30,
+            isArchiveTarBz2 = true,
+            hardwareAccelNote = "Icefall VITS Low-Latency ONNX",
+            unlocksSummary = "ADDS VOICE: Icefall VITS // LJSpeech Lite (30MB EN) to ROM-09.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_icefall_vits",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 9
+        ),
+
+        // =========================================================================
+        // SUB-CARTRIDGES: ROM-07 (NARRATOR_VITS_FLOW_HUB)
         // =========================================================================
         ModelBundleSpec(
             id = "sub_piper_amy",
-            romCode = "SUB-08A",
+            romCode = "SUB-07A",
             badge = "US_WARM",
             accentHex = 0xFFFFD700,
             name = "PIPER_AMY_US",
             subtitle = "en_US-amy-medium • Warm Friendly American Female (+64 MB)",
-            description = "Adds the popular Piper Amy Medium US English female voice to ROM-08.",
+            description = "Adds the popular Piper Amy Medium US English female voice to ROM-07.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-amy-medium.tar.bz2",
@@ -1983,19 +2212,19 @@ object PurrDefaultPresets {
             approximateSizeMb = 64,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS ONNX Medium (en-US)",
-            unlocksSummary = "ADDS VOICE: Piper VITS // Amy Medium (US Warm) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Amy Medium (US Warm) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "sub_piper_ryan",
-            romCode = "SUB-08B",
+            romCode = "SUB-07B",
             badge = "US_DEEP_MALE",
             accentHex = 0xFF00E5FF,
             name = "PIPER_RYAN_US",
             subtitle = "en_US-ryan-high • Deep Resonant Male Narrator (+110 MB)",
-            description = "Adds the studio-grade Piper Ryan High male audiobook voice to ROM-08.",
+            description = "Adds the studio-grade Piper Ryan High male audiobook voice to ROM-07.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-ryan-high.tar.bz2",
@@ -2004,19 +2233,19 @@ object PurrDefaultPresets {
             approximateSizeMb = 110,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS ONNX High (en-US)",
-            unlocksSummary = "ADDS VOICE: Piper VITS // Ryan High (US Deep Narrator) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Ryan High (US Deep Narrator) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "sub_piper_cori",
-            romCode = "SUB-08C",
+            romCode = "SUB-07C",
             badge = "UK_ELEGANT",
             accentHex = 0xFFB533FF,
             name = "PIPER_CORI_GB",
             subtitle = "en_GB-cori-high • Refined British Female Narrator (+110 MB)",
-            description = "Adds the high-resolution Piper Cori British RP female voice to ROM-08.",
+            description = "Adds the high-resolution Piper Cori British RP female voice to ROM-07.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-cori-high.tar.bz2",
@@ -2025,19 +2254,19 @@ object PurrDefaultPresets {
             approximateSizeMb = 110,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS ONNX High (en-GB)",
-            unlocksSummary = "ADDS VOICE: Piper VITS // Cori High (UK Elegant) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Cori High (UK Elegant) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "sub_piper_alba",
-            romCode = "SUB-08D",
+            romCode = "SUB-07D",
             badge = "SCOTTISH_UK",
             accentHex = 0xFF00FF41,
             name = "PIPER_ALBA_GB",
             subtitle = "en_GB-alba-medium • Expressive Scottish/UK Female (+64 MB)",
-            description = "Adds the charming Scottish-accented Piper Alba female voice to ROM-08.",
+            description = "Adds the charming Scottish-accented Piper Alba female voice to ROM-07.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_GB-alba-medium.tar.bz2",
@@ -2046,19 +2275,19 @@ object PurrDefaultPresets {
             approximateSizeMb = 64,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS ONNX Medium (en-GB)",
-            unlocksSummary = "ADDS VOICE: Piper VITS // Alba Medium (Scottish/UK) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Alba Medium (Scottish/UK) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "sub_piper_glados",
-            romCode = "SUB-08E",
+            romCode = "SUB-07E",
             badge = "CYBER_AI",
             accentHex = 0xFFFF107A,
             name = "PIPER_GLADOS_AI",
             subtitle = "en_US-glados-high • Iconic Cybernetic Android AI Voice (+110 MB)",
-            description = "Adds the signature dry, calculating cybernetic AI voice (GLaDOS style) to ROM-08.",
+            description = "Adds the signature dry, calculating cybernetic AI voice (GLaDOS style) to ROM-07.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-glados-high.tar.bz2",
@@ -2067,19 +2296,19 @@ object PurrDefaultPresets {
             approximateSizeMb = 110,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS ONNX High (Cyber AI)",
-            unlocksSummary = "ADDS VOICE: Piper VITS // GLaDOS (Cybernetic AI) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Piper VITS // GLaDOS (Cybernetic AI) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "sub_piper_kristin",
-            romCode = "SUB-08F",
+            romCode = "SUB-07F",
             badge = "US_STORY",
             accentHex = 0xFFFF9E00,
             name = "PIPER_KRISTIN_US",
             subtitle = "en_US-kristin-medium • Clear US Audiobook Storyteller (+64 MB)",
-            description = "Adds the articulate Piper Kristin Medium US storyteller voice to ROM-08.",
+            description = "Adds the articulate Piper Kristin Medium US storyteller voice to ROM-07.",
             backend = BackendType.SHERPA_ONNX,
             sherpaFamily = SherpaModelFamily.PIPER,
             downloadUrl = "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-en_US-kristin-medium.tar.bz2",
@@ -2088,14 +2317,14 @@ object PurrDefaultPresets {
             approximateSizeMb = 64,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "Piper VITS ONNX Medium (en-US)",
-            unlocksSummary = "ADDS VOICE: Piper VITS // Kristin Medium (US Storyteller) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Piper VITS // Kristin Medium (US Storyteller) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "sub_melo_en",
-            romCode = "SUB-08G",
+            romCode = "SUB-07G",
             badge = "MELOTTS_5ACCENTS",
             accentHex = 0xFF00E5FF,
             name = "MELO_TTS_ENGLISH",
@@ -2109,14 +2338,14 @@ object PurrDefaultPresets {
             approximateSizeMb = 155,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "MeloTTS VITS + CMU Lexicon",
-            unlocksSummary = "ADDS VOICES: 5 English accent voices (melo_en_us..default) to ROM-08.",
+            unlocksSummary = "ADDS VOICES: 5 English accent voices (melo_en_us..default) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "rom_supertonic3",
-            romCode = "SUB-08H",
+            romCode = "SUB-07H",
             badge = "LOW_LATENCY",
             accentHex = 0xFF38BDF8,
             name = "SUPERTONIC_3_TTS",
@@ -2130,14 +2359,14 @@ object PurrDefaultPresets {
             approximateSizeMb = 123,
             isArchiveTarBz2 = true,
             hardwareAccelNote = "ARM64 NEON INT8 Supertonic 3",
-            unlocksSummary = "ADDS VOICES: Supertonic F1 Female & M1 Male to ROM-08.",
+            unlocksSummary = "ADDS VOICES: Supertonic F1 Female & M1 Male to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         ModelBundleSpec(
             id = "rom_matcha_zh_en",
-            romCode = "SUB-08I",
+            romCode = "SUB-07I",
             badge = "FLOW_NARRATOR",
             accentHex = 0xFF9146FF,
             name = "MATCHA_ZH_EN",
@@ -2155,13 +2384,13 @@ object PurrDefaultPresets {
             companionExpectedSha256 = "b599142a1fb8ff03de3e84ac35ff537c619e56f4267a6fe894851a42844acf9e",
             companionApproxSizeMb = 51,
             hardwareAccelNote = "ONNX CPU • Flow-Matching + 16kHz Vocos Vocoder",
-            unlocksSummary = "ADDS VOICE: Matcha Narrator (ZH/EN) to ROM-08.",
+            unlocksSummary = "ADDS VOICE: Matcha Narrator (ZH/EN) to ROM-07.",
             isSubCartridge = true,
             parentCartridgeId = "rom_piper",
             category = CartridgeCategory.TTS
         ),
         // =========================================================================
-        // BUILT-IN OS TOOL MODULES (TOOL-01 .. TOOL-04)
+        // BUILT-IN OS TOOL MODULES (TOOL-01 .. TOOL-06)
         // =========================================================================
         ModelBundleSpec(
             id = "tool_purr_engine",
@@ -2221,27 +2450,8 @@ object PurrDefaultPresets {
             category = CartridgeCategory.TOOLS
         ),
         ModelBundleSpec(
-            id = "tool_clone_studio",
-            romCode = "TOOL-04",
-            badge = "5S_VOICE_CLONER",
-            accentHex = 0xFFB533FF,
-            name = "VOICE_CLONE_STUDIO",
-            subtitle = "3-12s Zero-Shot Mic Reference Recorder & Cloner Workshop",
-            description = "Dedicated studio OS app for recording & registering custom zero-shot cloned voices across Pocket TTS, ZipVoice, Chatterbox-Turbo (ROM-03) and Qwen3-TTS Base (ROM-04).",
-            backend = BackendType.CORE_OS,
-            downloadUrl = "builtin://tool/clone_studio",
-            fileName = "clone_studio.tool",
-            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
-            approximateSizeMb = 0,
-            isArchiveTarBz2 = false,
-            hardwareAccelNote = "16kHz Mono Reference Recorder • Ejectable",
-            isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Voice Clone Studio OS Module for custom reference voice recording.",
-            category = CartridgeCategory.TOOLS
-        ),
-        ModelBundleSpec(
             id = "tool_audio_exporter",
-            romCode = "TOOL-05",
+            romCode = "TOOL-04",
             badge = "WAV_DOWNLOAD",
             accentHex = 0xFFFFD700,
             name = "AUDIO_MEDIA_EXPORTER",
@@ -2260,12 +2470,12 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "tool_voice_design",
-            romCode = "TOOL-06",
+            romCode = "TOOL-05",
             badge = "1.7B_PROMPT_LAB",
             accentHex = 0xFFFF007F,
             name = "QWEN3_VOICE_DESIGN",
             subtitle = "Qwen3 1.7B Prompt Builder • Gender, Pitch, Timbre, Pace, Accent & Lock-Clone",
-            description = "Dedicated Cyberdeck OS studio for Qwen3-TTS 1.7B VoiceDesign (SUB-04B): build natural-language voice prompts from structured acoustic controls, save custom voice presets, audition live, or lock into a reusable Clone reference.",
+            description = "Dedicated Cyberdeck OS studio for Qwen3-TTS 1.7B VoiceDesign (SUB-03A): build natural-language voice prompts from structured acoustic controls, save custom voice presets, audition live, or lock into a reusable Clone reference.",
             backend = BackendType.CORE_OS,
             downloadUrl = "builtin://tool/voice_design",
             fileName = "voice_design.tool",
@@ -2279,7 +2489,7 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "tool_audiobook_constructor",
-            romCode = "TOOL-07",
+            romCode = "TOOL-06",
             badge = "M4B_BOOK_FORGE",
             accentHex = 0xFF38BDF8,
             name = "AUDIOBOOK_CONSTRUCTOR",

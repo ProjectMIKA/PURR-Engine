@@ -6,15 +6,18 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Switch
-import androidx.compose.material3.SwitchDefaults
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -24,6 +27,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -51,6 +55,9 @@ fun MikaSettingsSheet(
     versionCode: Int,
     updateCheckInFlight: Boolean,
     onCheckForUpdates: () -> Unit,
+    smartHardwareOffload: Boolean,
+    onSmartHardwareOffloadToggle: (Boolean) -> Unit,
+    hardwareSummary: String,
     qwen3GpuOffload: Boolean,
     onQwen3GpuOffloadToggle: (Boolean) -> Unit,
     onReplayTutorial: () -> Unit,
@@ -64,8 +71,9 @@ fun MikaSettingsSheet(
                 .clip(RoundedCornerShape(14.dp))
                 .background(MikaColors.PanelBg)
                 .border(1.5.dp, MikaColors.NeonCyan, RoundedCornerShape(14.dp))
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+                .verticalScroll(rememberScrollState())
+                .padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -192,14 +200,23 @@ fun MikaSettingsSheet(
                 )
             }
             Text(
-                text = "// Engine accelerators. Per-cartridge NPU/GPU chips stay in the Cartridge Bay.",
+                text = "// Detected: $hardwareSummary",
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp
+                fontSize = 8.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             SettingsToggleRow(
-                title = "Qwen3 GPU Offload (Adreno OpenCL)",
-                subtitle = "Runs the Qwen3 talker on your Adreno GPU instead of CPU — big synthesis speedup on Snapdragon flagships. Per-tensor CPU fallback on unsupported devices or quant types.",
+                title = "SMART_HARDWARE_OFFLOAD",
+                subtitle = "Auto-routes TTS to NPU / NNAPI / OpenCL / XNNPACK with safe CPU fallback.",
+                checked = smartHardwareOffload,
+                accent = MikaColors.TerminalGreen,
+                onToggle = onSmartHardwareOffloadToggle
+            )
+            SettingsToggleRow(
+                title = "QWEN3_GPU_OFFLOAD (OPENCL)",
+                subtitle = "Runs Qwen3 talker on Adreno GPU (auto-engaged by Smart Offload on Snapdragon).",
                 checked = qwen3GpuOffload,
                 accent = MikaColors.MikaAmber,
                 onToggle = onQwen3GpuOffloadToggle
@@ -236,40 +253,58 @@ private fun SettingsToggleRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(8.dp))
-            .background(accent.copy(alpha = 0.08f))
-            .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .background(accent.copy(alpha = if (checked) 0.12f else 0.06f))
+            .border(1.dp, accent.copy(alpha = if (checked) 0.78f else 0.40f), RoundedCornerShape(8.dp))
+            .clickable { onToggle(!checked) }
+            .padding(horizontal = 10.dp, vertical = 7.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = accent, size = 16.dp)
-        Column(modifier = Modifier.weight(1f)) {
+        MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = accent, size = 14.dp)
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(1.dp)) {
             Text(
                 text = title,
-                color = if (checked) Color.White else MikaColors.DimText,
+                color = if (checked) Color.White else MikaColors.CyanWhite.copy(alpha = 0.78f),
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Black,
-                fontSize = 11.sp,
-                letterSpacing = 0.8.sp
+                fontSize = 10.sp,
+                letterSpacing = 0.6.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
             Text(
                 text = subtitle,
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
+                fontSize = 8.5.sp,
+                lineHeight = 11.sp,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Row(
+            modifier = Modifier
+                .clip(RoundedCornerShape(4.dp))
+                .background(if (checked) accent.copy(alpha = 0.22f) else MikaColors.VoidBg.copy(alpha = 0.75f))
+                .border(1.dp, if (checked) accent else MikaColors.DimText.copy(alpha = 0.45f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(5.dp)
+                    .clip(CircleShape)
+                    .background(if (checked) accent else MikaColors.DimText.copy(alpha = 0.5f))
+            )
+            Text(
+                text = if (checked) "ON" else "OFF",
+                color = if (checked) accent else MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
                 fontSize = 9.sp
             )
         }
-        Switch(
-            checked = checked,
-            onCheckedChange = onToggle,
-            colors = SwitchDefaults.colors(
-                checkedThumbColor = MikaColors.VoidBg,
-                checkedTrackColor = accent,
-                uncheckedThumbColor = MikaColors.DimText,
-                uncheckedTrackColor = MikaColors.PanelBg,
-                uncheckedBorderColor = MikaColors.DimText.copy(alpha = 0.4f)
-            )
-        )
     }
 }
 
@@ -288,9 +323,9 @@ private fun SettingsActionRow(
             .background(accent.copy(alpha = 0.08f))
             .border(1.dp, accent.copy(alpha = 0.55f), RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 10.dp),
+            .padding(horizontal = 10.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(10.dp)
+        horizontalArrangement = Arrangement.spacedBy(9.dp)
     ) {
         MikaCyberIcon(type = icon, tint = accent, size = 16.dp)
         Column(modifier = Modifier.weight(1f)) {

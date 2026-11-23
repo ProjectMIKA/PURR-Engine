@@ -24,6 +24,7 @@ import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ExportedAudioFile
+import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.MikaStopConfig
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
@@ -95,12 +96,16 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val discoveredSystemVoices: StateFlow<List<VoiceDescriptor>> = repository.discoveredSystemVoices
     val telemetry: StateFlow<TtsBackendRouter.LiveTelemetry> = backendRouter.telemetry
     val vramRemainingSeconds: StateFlow<Int> = backendRouter.liteRtEngine.vramRemainingSeconds
+    val hardwareProfile: HardwareProfile = backendRouter.hardwareProfile
     val modelCatalog: List<ModelBundleSpec> = catalogManager.catalog
     val mainCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
-        !it.isSubCartridge && it.category == CartridgeCategory.TTS
+        !it.isSubCartridge && (it.category == CartridgeCategory.TTS || (it.category == CartridgeCategory.CLONING && !it.isBuiltInOsCartridge))
+    }
+    val cloningCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
+        !it.isSubCartridge && it.category == CartridgeCategory.CLONING
     }
     val toolCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
-        !it.isSubCartridge && it.category == CartridgeCategory.TOOLS
+        !it.isSubCartridge && (it.category == CartridgeCategory.TOOLS || it.id == "tool_clone_studio")
     }
 
     fun subCartridgesFor(parentId: String): List<ModelBundleSpec> =
@@ -277,7 +282,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         }
         val designReady = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
         if (!designReady) {
-            showToast("Download SUB-04B (Qwen3 1.7B VoiceDesign) in Cartridge Bay first!")
+            showToast("Download SUB-03A (Qwen3 1.7B VoiceDesign) in Cartridge Bay first!")
             return
         }
         repository.setCartridgeSlotted("rom_qwen3_custom_06b", true)
@@ -324,7 +329,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         val cleanPrompt = prompt.trim()
         val designReady = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
         if (!designReady) {
-            showToast("Download SUB-04B (Qwen3 1.7B VoiceDesign) first to freeze a clone seed!")
+            showToast("Download SUB-03A (Qwen3 1.7B VoiceDesign) first to freeze a clone seed!")
             return
         }
         val qwenBaseReady = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_BASE_CLONE_06B]?.state == DownloadState.INSTALLED
@@ -398,6 +403,16 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         repository.updateActiveProfile { p -> p.copy(mikaStopConfig = transform(p.mikaStopConfig)) }
     }
 
+    // ✨ SMART HARDWARE OFFLOAD (v1.8.5): experimental auto-offload across supported accelerators.
+    fun setSmartHardwareOffload(enabled: Boolean) {
+        repository.setSmartHardwareOffload(enabled)
+        viewModelScope.launch { backendRouter.evictAllVram() }
+        showToast(
+            if (enabled) "Smart Hardware Offload ON (${hardwareProfile.recommendedStrategyLabel})"
+            else "Smart Hardware Offload OFF — reverted to manual/CPU settings"
+        )
+    }
+
     // ✨ HARDWARE OFFLOAD (v1.8.3): global device-level toggle — Settings ▸ HARDWARE_OFFLOAD.
     fun setQwen3GpuOffload(enabled: Boolean) {
         repository.setQwen3GpuOffload(enabled)
@@ -432,18 +447,21 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun toggleCartridgeSlotted(spec: ModelBundleSpec, slotIn: Boolean) {
         val modelState = repository.state.value.modelStates[spec.id]
-        val isPiperSubReady = spec.id == "rom_piper" && subCartridgesFor("rom_piper").any {
-            repository.state.value.modelStates[it.id]?.state == DownloadState.INSTALLED
+        val hasStandaloneSubReady = subCartridgesFor(spec.id).any {
+            it.id !in setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert") &&
+                repository.state.value.modelStates[it.id]?.state == DownloadState.INSTALLED
         }
-        val isReady = spec.isBuiltInOsCartridge || modelState?.state == DownloadState.INSTALLED || isPiperSubReady
+        val isReady = spec.isBuiltInOsCartridge || modelState?.state == DownloadState.INSTALLED || hasStandaloneSubReady
         if (slotIn && !isReady) {
             showToast("Download ${spec.romCode} first before slotting!")
             return
         }
         repository.setCartridgeSlotted(spec.id, slotIn)
-        if (!slotIn && spec.category == CartridgeCategory.TTS) {
+        val isSpeechEngine = spec.category == CartridgeCategory.TTS ||
+            (spec.category == CartridgeCategory.CLONING && !spec.isBuiltInOsCartridge)
+        if (!slotIn && isSpeechEngine) {
             viewModelScope.launch { backendRouter.evictAllVram() }
-        } else if (slotIn && spec.category == CartridgeCategory.TTS) {
+        } else if (slotIn && isSpeechEngine) {
             repository.selectEngineCartridge(spec.id)
         }
 
@@ -590,8 +608,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                                     audioTrack.write(pcmBytes, offset, step)
                                     offset += step
                                 }
-                            } else if (repository.isCartridgeSlotted("rom_core_os")) {
-                                // Direct speaker fallback when OEM TTS blocks synthesizeToFile and ROM-01 is slotted
+                            } else if (effectiveProfile.preferredBackend == BackendType.CORE_OS &&
+                                repository.isCartridgeSlotted("rom_core_os")
+                            ) {
+                                // Direct speaker fallback when OEM TTS blocks synthesizeToFile and ROM-01 is explicitly active
                                 val pulseBins = FloatArray(32) { i -> 0.25f + 0.55f * abs(sin(i * 0.45f)) }
                                 backendRouter.emitSpeechTelemetry(
                                     label = "[${chunk.role.name}] ${chunk.text.take(40)}",
@@ -618,15 +638,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                                 lastEmptySummary = outcome.engineSummary.ifBlank {
                                     "No active voice cartridge ready — slam a cartridge in Tab 3!"
                                 }
-                                val fatalMissing = lastEmptySummary.contains("not installed", ignoreCase = true) ||
-                                    lastEmptySummary.contains("not downloaded", ignoreCase = true) ||
-                                    lastEmptySummary.contains("unavailable", ignoreCase = true) ||
-                                    lastEmptySummary.contains("load error", ignoreCase = true)
-                                if (fatalMissing) {
-                                    showToast(lastEmptySummary)
-                                    showedFallbackToast = true
-                                    break
-                                }
+                                showToast(lastEmptySummary)
+                                showedFallbackToast = true
+                                break
                             }
                         }
                     }
@@ -796,8 +810,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         tagsRaw: String,
         wavPathOverride: String? = null,
         cloneEngineId: String = if (family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
-    ) {
+    ): Boolean {
         val cleanName = displayName.trim().ifEmpty { "Mika Clone" }
+        val existingImportedPath = _importedCloneWavPath.value?.takeIf { File(it).exists() && File(it).length() > 44L }
+        val existingRecordedPath = _lastRecordedWavPath.value?.takeIf { File(it).exists() && File(it).length() > 44L }
         val wavPath = when {
             // Imported clip: trim to the selected engine's best-voice window and write the WAV.
             importedCloneSamples != null -> {
@@ -816,7 +832,12 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                 file.absolutePath
             }
             wavPathOverride != null -> wavPathOverride
-            else -> _lastRecordedWavPath.value ?: createSyntheticPlaceholderRefWav(cleanName)
+            existingImportedPath != null -> existingImportedPath
+            existingRecordedPath != null -> existingRecordedPath
+            else -> {
+                showToast("Record a 5s sample or import an audio clip first!")
+                return false
+            }
         }
         val parsedTags = tagsRaw.split(',').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
             .ifEmpty { listOf("cloned", "custom", gender.tag) }
@@ -834,7 +855,12 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             cloneEngineId = cloneEngineId
         )
         repository.registerClonedVoice(cloned)
-        showToast("Registered Cloned Voice [$cleanName]")
+        val engineInstalled = repository.state.value.modelStates[cloneEngineId]?.state == DownloadState.INSTALLED
+        showToast(
+            if (engineInstalled) "Registered Cloned Voice [$cleanName]"
+            else "Registered [$cleanName] — download ${cloneEngineId.uppercase()} in Cartridge Bay > CLONING to speak!"
+        )
+        return true
     }
 
     fun removeClonedVoice(voiceId: String) {

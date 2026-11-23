@@ -130,9 +130,16 @@ class Qwen3TtsEngine(
 
     private fun isSpecDownloaded(specId: String): Boolean {
         val dir = modelDirForSpec(specId)
-        return File(dir, "qwen3_tts_talker.q5_k.gguf").exists() &&
+        val baseOk = File(dir, "qwen3_tts_talker.q5_k.gguf").exists() &&
             File(dir, "model_profile.json").exists() &&
             File(dir, "qwen3_tts_decoder.fp16.onnx").exists()
+        if (!baseOk) return false
+        return if (specId == SPEC_BASE_CLONE_06B) {
+            File(dir, "qwen3_tts_speaker_encoder.fp16.onnx").exists() &&
+                File(dir, "qwen3_tts_codec_encoder.fp16.onnx").exists()
+        } else {
+            true
+        }
     }
 
     override val isModelReady: Boolean
@@ -219,7 +226,7 @@ class Qwen3TtsEngine(
                             isFallbackNeuralPreview = true
                         )
                     }
-                    Qwen3NativeBridge.nativeSynthesizeClone(
+                    var cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
                         handle = handle,
                         text = text,
                         refWavPath = wavFile.absolutePath,
@@ -227,6 +234,20 @@ class Qwen3TtsEngine(
                         languageId = langId,
                         nThreads = nThreads
                     )
+                    // If ICL mode (with refText) fails or emits empty audio, retry once in
+                    // x-vector-only mode (empty refText) so speaker-embedding cloning still succeeds.
+                    if ((cloneAudio == null || cloneAudio.isEmpty()) && clonedVoice.referenceTranscript.isNotBlank()) {
+                        Log.w(TAG, "Qwen3 ICL clone returned empty for ${clonedVoice.displayName}; retrying x-vector clone mode")
+                        cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
+                            handle = handle,
+                            text = text,
+                            refWavPath = wavFile.absolutePath,
+                            refText = "",
+                            languageId = langId,
+                            nThreads = nThreads
+                        )
+                    }
+                    cloneAudio
                 }
                 cleanVoiceId == "qwen3_base_clone_default" -> {
                     return@withContext SynthesisOutcome(
@@ -290,10 +311,11 @@ class Qwen3TtsEngine(
                 targetSpec == SPEC_DESIGN_17B -> "Qwen3 1.7B VoiceDesign"
                 else -> "Qwen3 0.6B • ${(SPEAKER_MAP[cleanVoiceId] ?: "vivian").replaceFirstChar { it.uppercase() }}"
             } + if (activeGpuOffload) " • Adreno OpenCL" else ""
+            val badge = if (activeGpuOffload) HardwareStatusBadge.GPU_FP16 else HardwareStatusBadge.CPU_NEON
             SynthesisOutcome(
                 pcmFloat24k = finalPcm,
                 sampleRateHz = SAMPLE_RATE_HZ,
-                hardwareBadge = HardwareStatusBadge.CPU_NEON,
+                hardwareBadge = badge,
                 engineSummary = label
             )
         }
