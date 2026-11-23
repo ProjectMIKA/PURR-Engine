@@ -148,6 +148,8 @@ fun MangaDubStudioModuleWindowBody(
     val selectedVisionTier by viewModel.selectedMangaVisionModel.collectAsState()
     val globalIncludeNonBubbleText by viewModel.includeMangaNonBubbleText.collectAsState()
     val includeNonBubbleText = activeProject?.includeNonBubbleText ?: globalIncludeNonBubbleText
+    val globalLockVoicesViaCloning by viewModel.lockMangaVoicesViaCloning.collectAsState()
+    val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     var autoCookFullMp4 by remember(activeProject?.id) {
         mutableStateOf(activeProject?.autoCookFullMp4 ?: true)
     }
@@ -201,6 +203,7 @@ fun MangaDubStudioModuleWindowBody(
                 burnInSubtitles = selectedBurnSubtitles,
                 videoQuality = selectedVideoQuality,
                 includeNonBubbleText = includeNonBubbleText,
+                lockVoicesViaCloning = lockVoicesViaCloning,
                 preferredVisionModel = selectedVisionTier
             )
         }
@@ -662,6 +665,17 @@ fun MangaDubStudioModuleWindowBody(
             accent = MikaColors.NeonPurple
         ) {
             SimplePurrToggle(
+                title = "LOCK CHARACTER VOICES VIA QWEN CLONE (ANTI-DRIFT)",
+                subtitle = "ON by default: renders 1 VoiceDesign studio seed per character & locks every line through Qwen/Pocket clone so pitch stays consistent.",
+                checked = lockVoicesViaCloning,
+                accent = MikaColors.TerminalGreen,
+                icon = CyberIconType.DNA_CLONE,
+                onToggle = { checked ->
+                    viewModel.setMangaLockVoicesViaCloning(checked)
+                    activeProject?.let { viewModel.updateMangaProjectConfig(it.id, lockVoicesViaCloning = checked) }
+                }
+            )
+            SimplePurrToggle(
                 title = "EXPERIMENTAL: PROCESS NON-BUBBLE TEXT & SFX",
                 subtitle = "OFF by default (skips floating SFX like Shaaa/GULP, scanlation credits & signatures). Turn ON to dub everything.",
                 checked = includeNonBubbleText,
@@ -978,6 +992,17 @@ fun MangaDubStudioModuleWindowBody(
                     accent = MikaColors.SsrGold,
                     icon = CyberIconType.BOLT_ACCEL,
                     onToggle = { viewModel.updateMangaProjectConfig(activeProject.id, enableAtmosphereFx = it) }
+                )
+                SimplePurrToggle(
+                    title = "LOCK CHARACTER VOICES VIA QWEN CLONE (ANTI-DRIFT)",
+                    subtitle = "ON by default: uses 1 VoiceDesign seed clip -> Qwen Base / Pocket clone to eliminate vocal drift.",
+                    checked = activeProject.lockVoicesViaCloning,
+                    accent = MikaColors.TerminalGreen,
+                    icon = CyberIconType.DNA_CLONE,
+                    onToggle = { checked ->
+                        viewModel.setMangaLockVoicesViaCloning(checked)
+                        viewModel.updateMangaProjectConfig(activeProject.id, lockVoicesViaCloning = checked)
+                    }
                 )
                 SimplePurrToggle(
                     title = "EXPERIMENTAL: PROCESS NON-BUBBLE TEXT & SFX",

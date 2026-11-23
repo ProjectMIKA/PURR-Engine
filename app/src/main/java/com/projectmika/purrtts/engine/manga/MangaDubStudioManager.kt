@@ -31,6 +31,7 @@ import com.projectmika.purrtts.core.manga.MangaVideoAspect
 import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.purr.BackendType
+import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
@@ -39,6 +40,7 @@ import com.projectmika.purrtts.core.purr.PurrProfileRepository
 import com.projectmika.purrtts.core.purr.PurrVoiceMatcher
 import com.projectmika.purrtts.core.purr.SegmentRole
 import com.projectmika.purrtts.core.purr.SentimentResult
+import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.engine.TtsBackendRouter
@@ -104,6 +106,11 @@ class MangaDubStudioManager(
     )
     val includeNonBubbleText: StateFlow<Boolean> = _includeNonBubbleText.asStateFlow()
 
+    private val _lockVoicesViaCloning = MutableStateFlow(
+        prefs.getBoolean("lock_voices_via_cloning", true)
+    )
+    val lockVoicesViaCloning: StateFlow<Boolean> = _lockVoicesViaCloning.asStateFlow()
+
     private val _projects = MutableStateFlow<List<MangaSeriesProject>>(emptyList())
     val projects: StateFlow<List<MangaSeriesProject>> = _projects.asStateFlow()
 
@@ -152,6 +159,14 @@ class MangaDubStudioManager(
         _includeNonBubbleText.value = include
         _activeProjectId.value?.let { pid ->
             updateProjectConfig(pid, includeNonBubbleText = include)
+        }
+    }
+
+    fun setLockVoicesViaCloning(lock: Boolean) {
+        prefs.edit().putBoolean("lock_voices_via_cloning", lock).apply()
+        _lockVoicesViaCloning.value = lock
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(pid, lockVoicesViaCloning = lock)
         }
     }
 
@@ -366,6 +381,7 @@ class MangaDubStudioManager(
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
         includeNonBubbleText: Boolean? = null,
+        lockVoicesViaCloning: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         onComplete: (String) -> Unit
     ) {
@@ -375,14 +391,17 @@ class MangaDubStudioManager(
         }
         val effectiveVisionTier = preferredVisionModel ?: _selectedVisionModel.value
         val effectiveIncludeNonBubble = includeNonBubbleText ?: _includeNonBubbleText.value
+        val effectiveLockVoices = lockVoicesViaCloning ?: _lockVoicesViaCloning.value
         prefs.edit()
             .putString("selected_vision_model", effectiveVisionTier.name)
             .putString("selected_reading_order", readingOrder.name)
             .putBoolean("include_non_bubble_text", effectiveIncludeNonBubble)
+            .putBoolean("lock_voices_via_cloning", effectiveLockVoices)
             .apply()
         _selectedVisionModel.value = effectiveVisionTier
         _selectedReadingOrder.value = readingOrder
         _includeNonBubbleText.value = effectiveIncludeNonBubble
+        _lockVoicesViaCloning.value = effectiveLockVoices
 
         activeJob = scope.launch {
             _isBusy.value = true
@@ -418,6 +437,7 @@ class MangaDubStudioManager(
                     burnInSubtitles = burnInSubtitles ?: existingProject.burnInSubtitles,
                     videoQuality = videoQuality ?: existingProject.videoQuality,
                     includeNonBubbleText = effectiveIncludeNonBubble,
+                    lockVoicesViaCloning = lockVoicesViaCloning ?: existingProject.lockVoicesViaCloning,
                     preferredVisionModel = effectiveVisionTier,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
@@ -431,6 +451,7 @@ class MangaDubStudioManager(
                     burnInSubtitles = burnInSubtitles ?: true,
                     videoQuality = videoQuality ?: MangaVideoQuality.HD_720P,
                     includeNonBubbleText = effectiveIncludeNonBubble,
+                    lockVoicesViaCloning = effectiveLockVoices,
                     preferredVisionModel = effectiveVisionTier,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
@@ -1269,6 +1290,7 @@ class MangaDubStudioManager(
         videoQuality: MangaVideoQuality? = null,
         enableAtmosphereFx: Boolean? = null,
         includeNonBubbleText: Boolean? = null,
+        lockVoicesViaCloning: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         autoCookFullMp4: Boolean? = null,
@@ -1281,6 +1303,10 @@ class MangaDubStudioManager(
         if (includeNonBubbleText != null) {
             prefs.edit().putBoolean("include_non_bubble_text", includeNonBubbleText).apply()
             _includeNonBubbleText.value = includeNonBubbleText
+        }
+        if (lockVoicesViaCloning != null) {
+            prefs.edit().putBoolean("lock_voices_via_cloning", lockVoicesViaCloning).apply()
+            _lockVoicesViaCloning.value = lockVoicesViaCloning
         }
         mutateProject(projectId) { proj ->
             val nextOrder = readingOrder ?: proj.readingOrder
@@ -1319,6 +1345,7 @@ class MangaDubStudioManager(
                 videoQuality = videoQuality ?: proj.videoQuality,
                 enableAtmosphereFx = enableAtmosphereFx ?: proj.enableAtmosphereFx,
                 includeNonBubbleText = includeNonBubbleText ?: proj.includeNonBubbleText,
+                lockVoicesViaCloning = lockVoicesViaCloning ?: proj.lockVoicesViaCloning,
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
                 preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
                 autoCookFullMp4 = autoCookFullMp4 ?: proj.autoCookFullMp4,
@@ -1445,25 +1472,37 @@ class MangaDubStudioManager(
         // Guarantee Gemma 4 Vision is completely out of RAM before loading Qwen3 / TTS
         visionEngine.unload()
 
-        val proj = _projects.value.firstOrNull { it.id == projectId }
+        var proj = _projects.value.firstOrNull { it.id == projectId }
             ?: throw IllegalStateException("Project not found")
-        val chapter = proj.chapters.firstOrNull { it.id == chapterId }
+        var chapter = proj.chapters.firstOrNull { it.id == chapterId }
             ?: throw IllegalStateException("Chapter not found")
 
         val allLinesCount = chapter.totalLineCount.coerceAtLeast(1)
         val audioDir = File(projectDir(projectId), "chapters/$chapterId/audio").apply { mkdirs() }
-        val voices = repository.allAvailableVoices()
         val baseProfile = repository.currentProfile
         val sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ
         val designInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
 
+        if (proj.lockVoicesViaCloning && designInstalled) {
+            proj = ensureCharacterVoiceClonesLocked(
+                proj = proj,
+                chapter = chapter,
+                progress = progressOffset + progressSpan * 0.02f
+            )
+            chapter = proj.chapters.firstOrNull { it.id == chapterId } ?: chapter
+        }
+        val voices = repository.allAvailableVoices()
+
         mutateChapterStatus(projectId, chapterId, MangaChapterStatus.SYNTHESIZING_AUDIO, null)
         reportTelemetry(
             stage = MangaPipelineStage.VOICE_FORGE,
-            detail = if (designInstalled) {
-                "🎙️ QWEN3 1.7B VOICEDESIGN SYNTHESIS ($allLinesCount LINES)..."
-            } else {
-                "🎙️ VOICE SYNTHESIS ($allLinesCount LINES, ${chapter.title})..."
+            detail = when {
+                proj.lockVoicesViaCloning && resolvePreferredAutoCloneEngineId() != null ->
+                    "🔒 VOICE-CLONE LOCK ACTIVE ($allLinesCount LINES)..."
+                designInstalled ->
+                    "🎙️ QWEN3 1.7B VOICEDESIGN SYNTHESIS ($allLinesCount LINES)..."
+                else ->
+                    "🎙️ VOICE SYNTHESIS ($allLinesCount LINES, ${chapter.title})..."
             },
             progress = progressOffset + progressSpan * 0.04f,
             itemCurrent = 0,
@@ -1486,6 +1525,9 @@ class MangaDubStudioManager(
                         renderedLines += line
                         continue
                     }
+                    if (!proj.includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(line.speakerName, textToSpeak)) {
+                        continue
+                    }
 
                     reportTelemetry(
                         stage = MangaPipelineStage.VOICE_FORGE,
@@ -1502,7 +1544,8 @@ class MangaDubStudioManager(
                     val synthProfile = resolveSynthesisProfileForCharacter(
                         baseProfile = baseProfile,
                         character = charProfile,
-                        availableVoices = voices
+                        availableVoices = voices,
+                        lockVoicesViaCloning = proj.lockVoicesViaCloning
                     )
                     val outcome = backendRouter.synthesizeSpeechChunk(
                         chunk = PurrChunk.Speech(
@@ -1603,14 +1646,151 @@ class MangaDubStudioManager(
         return renderRes.publicDownloadPath.ifBlank { renderRes.internalMp4File.name }
     }
 
+    private fun resolvePreferredAutoCloneEngineId(): String? {
+        val states = repository.state.value.modelStates
+        val candidates = listOf(
+            Qwen3TtsEngine.SPEC_BASE_CLONE_06B,
+            "sub_pocket_fp32",
+            "rom_pocket_tts",
+            "sub_chatterbox_turbo",
+            "sub_zipvoice_full",
+            "rom_zipvoice"
+        )
+        return candidates.firstOrNull { states[it]?.state == DownloadState.INSTALLED }
+    }
+
+    /**
+     * Synthesizes one clean canonical reference WAV clip per active cast member via Qwen3 1.7B VoiceDesign
+     * and locks them into the background voice cloner (Qwen3 0.6B Base preferred) so every chapter line
+     * keeps identical timbre without emotional drift across panels, then evicts 1.7B before line synthesis.
+     */
+    private suspend fun ensureCharacterVoiceClonesLocked(
+        proj: MangaSeriesProject,
+        chapter: MangaChapterEntry,
+        progress: Float
+    ): MangaSeriesProject {
+        val targetCloneEngineId = resolvePreferredAutoCloneEngineId() ?: return proj
+        val activeSpeakers = chapter.pages
+            .flatMap { it.panels }
+            .flatMap { it.lines }
+            .map { it.speakerName.trim().uppercase() }
+            .filter { it.isNotEmpty() && it != "UNKNOWN" }
+            .toSet()
+
+        val charsToLock = proj.characters.filter { ch ->
+            ch.assignedVoiceId.isBlank() &&
+                ch.voiceDesignPrompt.isNotBlank() &&
+                (activeSpeakers.isEmpty() || ch.name.trim().uppercase() in activeSpeakers || ch.lineCount > 0)
+        }
+        if (charsToLock.isEmpty()) return proj
+
+        val seedDir = File(projectDir(proj.id), "voice_seeds").apply { mkdirs() }
+        val availableNow = repository.allAvailableVoices()
+        val updatedCharacters = proj.characters.toMutableList()
+        val seedTranscript = "Actually, let us take a steady breath and look carefully at what is happening here right now."
+        val designBase = repository.currentProfile.copy(
+            selectedCartridgeId = "rom_qwen3_custom_06b",
+            preferredBackend = BackendType.QWEN3_NATIVE,
+            primaryVoiceId = "qwen3_design_custom",
+            baseSpeed = 1.0f,
+            basePitch = 1.0f
+        )
+        var synthesizedAnySeed = false
+
+        for ((idx, ch) in updatedCharacters.withIndex()) {
+            if (ch !in charsToLock) continue
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+
+            val promptHash = Integer.toHexString("${ch.voiceDesignPrompt.trim()}|$targetCloneEngineId".hashCode())
+            val existingCloneValid = ch.autoCloneVoiceId.isNotBlank() &&
+                ch.autoClonePromptHash == promptHash &&
+                File(ch.autoCloneSeedWavPath).let { it.isFile && it.length() > 2048L } &&
+                availableNow.any { it.id == ch.autoCloneVoiceId }
+            if (existingCloneValid) continue
+
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "🔒 DESIGNING & LOCKING VOICE [${ch.name}]...",
+                progress = progress,
+                itemCurrent = idx + 1,
+                itemTotal = updatedCharacters.size,
+                addLog = true
+            )
+
+            val designProfile = designBase.copy(voiceDesignPrompt = ch.voiceDesignPrompt)
+            val outcome = backendRouter.synthesizeSpeechChunk(
+                chunk = PurrChunk.Speech(
+                    text = seedTranscript,
+                    role = if (ch.name.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
+                    targetVoiceId = "qwen3_design_custom",
+                    speakingRate = 1.0f,
+                    pitch = 1.0f,
+                    volumeGain = 1.0f,
+                    sentiment = SentimentResult()
+                ),
+                profile = designProfile
+            )
+            synthesizedAnySeed = true
+            val pcmFloat = outcome.pcmFloat24k
+            if (pcmFloat.isEmpty()) {
+                appendLog("⚠️ Seed clip empty for [${ch.name}]; keeping direct VoiceDesign fallback")
+                continue
+            }
+
+            val seedFile = File(seedDir, "${sanitizeSlug(ch.id)}_${promptHash}.wav")
+            val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
+            writePcm16MonoWav(seedFile, pcm16, pcm16.size, PurrDspProcessor.SAMPLE_RATE_HZ)
+
+            val family = if (targetCloneEngineId.contains("zipvoice") || targetCloneEngineId == Qwen3TtsEngine.SPEC_BASE_CLONE_06B) {
+                SherpaModelFamily.ZIPVOICE
+            } else {
+                SherpaModelFamily.POCKET_TTS
+            }
+            val cloneId = "manga_auto_${sanitizeSlug(proj.id)}_${sanitizeSlug(ch.id)}"
+            repository.upsertBackgroundClonedVoice(
+                ClonedVoiceProfile(
+                    id = cloneId,
+                    displayName = "Manga Cast // ${ch.name}",
+                    family = family,
+                    gender = ch.gender,
+                    referenceWavPath = seedFile.absolutePath,
+                    referenceText = seedTranscript,
+                    tags = listOf("manga", "autoclone", targetCloneEngineId),
+                    cloneEngineId = targetCloneEngineId
+                )
+            )
+            updatedCharacters[idx] = ch.copy(
+                autoCloneVoiceId = cloneId,
+                autoCloneSeedWavPath = seedFile.absolutePath,
+                autoClonePromptHash = promptHash
+            )
+            appendLog("🔒 Locked [${ch.name}] seed -> $targetCloneEngineId (${pcmFloat.size / PurrDspProcessor.SAMPLE_RATE_HZ}s)")
+        }
+
+        if (synthesizedAnySeed) {
+            // Unload 1.7B VoiceDesign once before switching to the cloning backend for chapter lines
+            backendRouter.evictAllVram()
+        }
+
+        val updatedProj = proj.copy(
+            updatedAtEpochMs = System.currentTimeMillis(),
+            characters = updatedCharacters
+        )
+        mutateProject(proj.id) { current ->
+            current.copy(updatedAtEpochMs = System.currentTimeMillis(), characters = updatedCharacters)
+        }
+        return updatedProj
+    }
+
     fun resolveSynthesisProfileForCharacter(
         baseProfile: PurrProfile,
         character: MangaCharacterProfile?,
-        availableVoices: List<VoiceDescriptor>
+        availableVoices: List<VoiceDescriptor>,
+        lockVoicesViaCloning: Boolean = true
     ): PurrProfile {
         if (character == null) return baseProfile
 
-        // 1. Explicit assigned voice (including custom Clone Studio voices like Vegeta!)
+        // 1. Explicit assigned voice (including manual Clone Studio voices)
         if (character.assignedVoiceId.isNotBlank()) {
             val matched = availableVoices.firstOrNull { it.id == character.assignedVoiceId }
             if (matched != null) {
@@ -1625,7 +1805,22 @@ class MangaDubStudioManager(
             }
         }
 
-        // 2. Qwen3 1.7B VoiceDesign prompt-driven voice synthesis when installed
+        // 2. Background VoiceDesign -> Qwen Voice Clone lock (prevents vocal drift across emotions/panels)
+        if (lockVoicesViaCloning && character.autoCloneVoiceId.isNotBlank()) {
+            val autoCloneMatched = availableVoices.firstOrNull { it.id == character.autoCloneVoiceId }
+            if (autoCloneMatched != null) {
+                return baseProfile.copy(
+                    primaryVoiceId = autoCloneMatched.id,
+                    preferredBackend = autoCloneMatched.engine,
+                    selectedCartridgeId = autoCloneMatched.cartridgeId,
+                    sherpaFamily = autoCloneMatched.sherpaFamily ?: baseProfile.sherpaFamily,
+                    baseSpeed = (baseProfile.baseSpeed * character.speedScale).coerceIn(0.6f, 1.8f),
+                    basePitch = (baseProfile.basePitch * character.pitchScale).coerceIn(0.88f, 1.12f)
+                )
+            }
+        }
+
+        // 3. Direct Qwen3 1.7B VoiceDesign fallback (when clone lock is OFF or no cloner cartridge is installed)
         val designInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
         if (designInstalled && character.voiceDesignPrompt.isNotBlank()) {
             return baseProfile.copy(

@@ -24,10 +24,14 @@ import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.engine.PurrSynthesizer
 import com.projectmika.purrtts.engine.SynthesisOutcome
+import java.io.BufferedInputStream
 import java.io.File
 import java.io.FileInputStream
+import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -84,6 +88,10 @@ class SherpaOnnxEngine(
         File(context.filesDir, "models/sherpa").apply { mkdirs() }
     }
 
+    private val sharedEspeakDir: File by lazy {
+        File(modelsBaseDir, "shared_espeak/espeak-ng-data")
+    }
+
     override val isModelReady: Boolean
         get() = modelsBaseDir.listFiles()?.any { it.isDirectory && it.listFiles()?.isNotEmpty() == true } == true
 
@@ -108,19 +116,32 @@ class SherpaOnnxEngine(
             File(dir, "phondata").isFile &&
             File(dir, "intonations").isFile
 
+    private fun resolveMatchaVocoderForDir(dir: File, files: List<File>): String {
+        val local = files.firstOrNull {
+            it.extension.equals("onnx", ignoreCase = true) && isVocoderOnnx(it)
+        }?.absolutePath.orEmpty()
+        if (local.isNotEmpty()) return local
+        val expectedVocoder = if (dir.name == "matcha") "vocos-16khz-univ.onnx" else "vocos-22khz-univ.onnx"
+        val siblingCandidate = listOf("matcha", "matcha_rom_matcha_en", "matcha_sub_matcha_en")
+            .map { File(modelsBaseDir, "$it/$expectedVocoder") }
+            .firstOrNull { it.isFile && it.length() > 1024L }
+        return siblingCandidate?.absolutePath.orEmpty()
+    }
+
     private fun hasMinimumRequiredAssets(dir: File, family: SherpaModelFamily): Boolean {
         if (!dir.exists() || !dir.isDirectory) return false
         val files = dir.walkTopDown()
             .filter { it.isFile && it.length() > 0L && !it.absolutePath.contains("${File.separator}espeak-ng-data${File.separator}") }
             .toList()
         if (files.none { it.extension.equals("onnx", ignoreCase = true) }) return false
+        val hasEspeak = dir.walkTopDown().any { isCompleteEspeakDir(it) } || isCompleteEspeakDir(sharedEspeakDir)
         return when (family) {
             SherpaModelFamily.KOKORO -> files.any { it.name == "voices.bin" } &&
                 files.any { it.name == "tokens.txt" } &&
-                dir.walkTopDown().any { isCompleteEspeakDir(it) }
+                hasEspeak
             SherpaModelFamily.KITTEN_TTS -> files.any { it.name == "voices.bin" } &&
                 files.any { it.name == "tokens.txt" } &&
-                dir.walkTopDown().any { isCompleteEspeakDir(it) }
+                hasEspeak
             SherpaModelFamily.SUPERTONIC_3 -> {
                 files.any { it.name.contains("duration_predictor") && it.extension.equals("onnx", true) } &&
                     files.any { it.name.contains("text_encoder") && it.extension.equals("onnx", true) } &&
@@ -146,8 +167,10 @@ class SherpaOnnxEngine(
                     files.any { it.name.contains("vocoder") && it.extension.equals("onnx", true) }
             }
             SherpaModelFamily.MATCHA -> files.any { it.name == "tokens.txt" } &&
-                files.any { it.extension.equals("onnx", true) && !isVocoderOnnx(it) }
-            SherpaModelFamily.PIPER,
+                files.any { it.extension.equals("onnx", true) && !isVocoderOnnx(it) } &&
+                resolveMatchaVocoderForDir(dir, files).isNotEmpty()
+            SherpaModelFamily.PIPER -> files.any { it.name == "tokens.txt" } &&
+                (files.any { it.name.startsWith("lexicon") } || hasEspeak)
             SherpaModelFamily.MELO_TTS -> files.any { it.name == "tokens.txt" }
         }
     }
@@ -197,6 +220,28 @@ class SherpaOnnxEngine(
                 speakerIndex = installedSibling.speakerIndex,
                 voiceDisplayName = installedSibling.displayName,
                 cartridgeId = installedSibling.cartridgeId
+            )
+        }
+
+        // Active cartridge fallback: if the requested voice's hub isn't installed, route to the currently selected cartridge
+        val activeCartFallback = allBuiltIn.firstOrNull { candidate ->
+            candidate.cartridgeId == profile.selectedCartridgeId &&
+                candidate.sherpaFamily != null &&
+                run {
+                    val cSub = candidate.requiredSubCartridgeId
+                        ?: candidate.cartridgeId.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
+                    hasMinimumRequiredAssets(familyDir(candidate.sherpaFamily, cSub), candidate.sherpaFamily)
+                }
+        }
+        if (activeCartFallback != null && activeCartFallback.sherpaFamily != null) {
+            val resolvedSub = activeCartFallback.requiredSubCartridgeId
+                ?: activeCartFallback.cartridgeId.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
+            return MountTarget(
+                family = activeCartFallback.sherpaFamily,
+                subCartridgeId = resolvedSub,
+                speakerIndex = activeCartFallback.speakerIndex,
+                voiceDisplayName = activeCartFallback.displayName,
+                cartridgeId = activeCartFallback.cartridgeId
             )
         }
 
@@ -529,13 +574,20 @@ class SherpaOnnxEngine(
         lastMountError = null
 
         val dir = familyDir(family, subCartridgeId)
-        val files = dir.walkTopDown()
+        fun scanNonEspeakFiles(root: File): List<File> = root.walkTopDown()
             .filter {
                 it.isFile &&
                     it.length() > 0L &&
                     !it.absolutePath.contains("${File.separator}espeak-ng-data${File.separator}")
             }
             .toList()
+
+        var files = scanNonEspeakFiles(dir)
+        if (!hasMinimumRequiredAssets(dir, family)) {
+            if (tryRepairSherpaDirFromArchiveLocked(family, subCartridgeId, dir)) {
+                files = scanNonEspeakFiles(dir)
+            }
+        }
         if (files.none { it.extension.equals("onnx", ignoreCase = true) }) {
             // ✨ TRUST RENEWAL (v1.8.1): say WHY the mount refused — support gold when a user
             // swears they downloaded a cartridge but every voice fail-softs to OS speech.
@@ -546,12 +598,14 @@ class SherpaOnnxEngine(
 
         val tokensPath = files.firstOrNull { it.name == "tokens.txt" }?.absolutePath.orEmpty()
         val rawEspeakDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
-        val dataDir = if (rawEspeakDir != null && isCompleteEspeakDir(rawEspeakDir)) {
-            rawEspeakDir.absolutePath
-        } else {
-            ""
+        if (rawEspeakDir != null && !isCompleteEspeakDir(rawEspeakDir)) {
+            if (tryRepairSherpaDirFromArchiveLocked(family, subCartridgeId, dir)) {
+                files = scanNonEspeakFiles(dir)
+            }
         }
-        if (rawEspeakDir != null && dataDir.isEmpty()) {
+        val repairedEspeakDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
+        val dataDir = resolveStableEspeakDir(repairedEspeakDir)
+        if (repairedEspeakDir != null && dataDir.isEmpty()) {
             lastMountError = "Incomplete espeak-ng-data in ${dir.name} (missing phontab/phonindex/phondata/intonations) — re-download cartridge"
             Log.w(TAG, "[MOUNT_MISS] $lastMountError")
             return
@@ -596,7 +650,8 @@ class SherpaOnnxEngine(
                 )
             )
         val ruleFsts = ruleFstList.joinToString(",") { it.absolutePath }
-        val ruleFars = if (ruleFsts.isEmpty()) {
+        val allowRuleFarsWithFsts = subCartridgeId == "rom_aishell3_zh"
+        val ruleFars = if (ruleFsts.isEmpty() || allowRuleFarsWithFsts) {
             files.filter { it.extension.equals("far", ignoreCase = true) }
                 .sortedBy { it.name }
                 .joinToString(",") { it.absolutePath }
@@ -612,18 +667,7 @@ class SherpaOnnxEngine(
             return best?.absolutePath.orEmpty()
         }
 
-        fun resolveMatchaVocoder(): String {
-            val local = files.firstOrNull {
-                it.extension.equals("onnx", ignoreCase = true) && isVocoderOnnx(it)
-            }?.absolutePath.orEmpty()
-            if (local.isNotEmpty()) return local
-            // Check sibling Matcha dir (matcha / matcha_rom_matcha_en) for matching vocoder filename
-            val expectedVocoder = if (dir.name == "matcha") "vocos-16khz-univ.onnx" else "vocos-22khz-univ.onnx"
-            val siblingCandidate = listOf("matcha", "matcha_rom_matcha_en")
-                .map { File(modelsBaseDir, "$it/$expectedVocoder") }
-                .firstOrNull { it.isFile && it.length() > 1024L }
-            return siblingCandidate?.absolutePath.orEmpty()
-        }
+        fun resolveMatchaVocoder(): String = resolveMatchaVocoderForDir(dir, files)
 
         fun buildConfigForProvider(providerName: String): OfflineTtsModelConfig? = when (family) {
             SherpaModelFamily.KOKORO -> {
@@ -806,7 +850,7 @@ class SherpaOnnxEngine(
             SherpaModelFamily.PIPER
         )
         val ruleFstsArg = if (supportsTextRules) ruleFsts else ""
-        val ruleFarsArg = if (supportsTextRules && ruleFsts.isEmpty()) ruleFars else ""
+        val ruleFarsArg = if (supportsTextRules && (ruleFsts.isEmpty() || allowRuleFarsWithFsts)) ruleFars else ""
 
         // ✨ SMART HARDWARE OFFLOAD (v1.8.5): try NNAPI first when enabled & supported on
         // architectures with predictable shapes (Kokoro/Kitten/Supertonic/Pocket/ZipVoice).
@@ -839,19 +883,120 @@ class SherpaOnnxEngine(
         }
 
         val cpuCfg = buildConfigForProvider("cpu") ?: return
-        runCatching {
+        val cpuAttempt = runCatching {
             val config = OfflineTtsConfig(
                 model = cpuCfg,
                 ruleFsts = ruleFstsArg,
                 ruleFars = ruleFarsArg
             )
-            activeOfflineTts = OfflineTts(assetManager = null, config = config)
-            _statusFlow.value = HardwareStatusBadge.CPU_NEON
-            Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")
-        }.onFailure { err ->
-            lastMountError = err.message ?: "OfflineTts mount failed"
-            Log.e(TAG, "Failed to mount sherpa-onnx ${family.label}: ${err.message}", err)
-            activeOfflineTts = null
+            OfflineTts(assetManager = null, config = config)
+        }
+        val mountedTts = cpuAttempt.getOrNull() ?: run {
+            val firstErr = cpuAttempt.exceptionOrNull()
+            // Self-heal once from cached .tar.bz2 in case extraction was partial or interrupted
+            if (tryRepairSherpaDirFromArchiveLocked(family, subCartridgeId, dir)) {
+                val retryAttempt = runCatching {
+                    val config = OfflineTtsConfig(
+                        model = cpuCfg,
+                        ruleFsts = ruleFstsArg,
+                        ruleFars = ruleFarsArg
+                    )
+                    OfflineTts(assetManager = null, config = config)
+                }
+                if (retryAttempt.isSuccess) {
+                    retryAttempt.getOrThrow()
+                } else {
+                    val retryErr = retryAttempt.exceptionOrNull() ?: firstErr
+                    lastMountError = retryErr?.message ?: "OfflineTts mount failed"
+                    Log.e(TAG, "Failed to mount sherpa-onnx ${family.label} after repair: $lastMountError", retryErr)
+                    activeOfflineTts = null
+                    return
+                }
+            } else {
+                lastMountError = firstErr?.message ?: "OfflineTts mount failed"
+                Log.e(TAG, "Failed to mount sherpa-onnx ${family.label}: $lastMountError", firstErr)
+                activeOfflineTts = null
+                return
+            }
+        }
+        activeOfflineTts = mountedTts
+        _statusFlow.value = HardwareStatusBadge.CPU_NEON
+        Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")
+    }
+
+    private fun resolveStableEspeakDir(rawEspeakDir: File?): String {
+        if (rawEspeakDir != null) {
+            if (!isCompleteEspeakDir(rawEspeakDir)) return ""
+            if (!isCompleteEspeakDir(sharedEspeakDir)) {
+                sharedEspeakDir.parentFile?.mkdirs()
+                runCatching { rawEspeakDir.copyRecursively(sharedEspeakDir, overwrite = true) }
+            }
+            return sharedEspeakDir.takeIf { isCompleteEspeakDir(it) }?.absolutePath ?: rawEspeakDir.absolutePath
+        }
+        return if (isCompleteEspeakDir(sharedEspeakDir)) sharedEspeakDir.absolutePath else ""
+    }
+
+    private fun tryRepairSherpaDirFromArchiveLocked(
+        family: SherpaModelFamily,
+        subCartridgeId: String?,
+        targetDir: File
+    ): Boolean {
+        val catalog = PurrDefaultPresets.modelCatalog()
+        val spec = subCartridgeId?.let { id -> catalog.firstOrNull { it.id == id } }
+            ?: catalog.firstOrNull { !it.isSubCartridge && it.sherpaFamily == family }
+            ?: return false
+        val downloadsDir = File(context.filesDir, "models/downloads")
+        val archiveFile = File(downloadsDir, spec.fileName)
+        if (!archiveFile.isFile || archiveFile.length() <= 1024L || !spec.isArchiveTarBz2) {
+            return false
+        }
+        val stagingDir = File(targetDir.parentFile ?: targetDir, "${targetDir.name}.repair_tmp")
+        return runCatching {
+            stagingDir.deleteRecursively()
+            stagingDir.mkdirs()
+            targetDir.mkdirs()
+            val canonicalRoot = stagingDir.canonicalPath
+            BufferedInputStream(FileInputStream(archiveFile)).use { bis ->
+                BZip2CompressorInputStream(bis).use { bzIn ->
+                    TarArchiveInputStream(bzIn).use { tarIn ->
+                        while (true) {
+                            val entry = tarIn.nextEntry ?: break
+                            val outFile = File(stagingDir, entry.name)
+                            if (!outFile.canonicalPath.startsWith(canonicalRoot)) {
+                                throw SecurityException("Blocked unsafe tar entry path: ${entry.name}")
+                            }
+                            if (entry.isDirectory) {
+                                outFile.mkdirs()
+                            } else {
+                                outFile.parentFile?.mkdirs()
+                                FileOutputStream(outFile).use { out -> tarIn.copyTo(out) }
+                            }
+                        }
+                    }
+                }
+            }
+            stagingDir.copyRecursively(targetDir, overwrite = true)
+            targetDir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }?.let { espeak ->
+                if (isCompleteEspeakDir(espeak) && !isCompleteEspeakDir(sharedEspeakDir)) {
+                    sharedEspeakDir.parentFile?.mkdirs()
+                    runCatching { espeak.copyRecursively(sharedEspeakDir, overwrite = true) }
+                }
+            }
+            val companionName = spec.companionFileName
+            if (!companionName.isNullOrBlank()) {
+                val cachedCompanion = File(downloadsDir, companionName)
+                val destCompanion = File(targetDir, companionName)
+                if (cachedCompanion.isFile && cachedCompanion.length() > 1024L && (!destCompanion.isFile || destCompanion.length() <= 1024L)) {
+                    cachedCompanion.copyTo(destCompanion, overwrite = true)
+                }
+            }
+            Log.i(TAG, "[SELF_HEAL] Repaired sherpa extract for ${spec.id} into ${targetDir.name}")
+            true
+        }.getOrElse { err ->
+            Log.w(TAG, "[SELF_HEAL] Archive repair failed for ${spec.id}: ${err.message}")
+            false
+        }.also {
+            runCatching { stagingDir.deleteRecursively() }
         }
     }
 

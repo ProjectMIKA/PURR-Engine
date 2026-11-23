@@ -1,3 +1,31 @@
+# 🌌 PURR-TTS v1.9.6 // Manga Z-Order, Voice-Clone Lock, Phonon 31M, Icefall Mount Fix & LiteRT KV Cache
+
+### ✨ What's New since v1.9.5
+
+Major upgrades to Manga Dubbing reading accuracy, anti-drift character voice cloning, Gradium Phonon 31M (`ROM-17`), Icefall mount reliability, and on-device LiteRT-LM KV caching! 🧠📖🔊
+
+* **📖 Row-First Manga Z-Order, Edge Bubble Padding & Strict Non-Bubble Exclusion (`MangaDubModels` / `LiteRtGemmaVisionEngine`)**:
+  * Fixed recursive XY-cut and guillotine partitioning so staggered 2×2 layouts read strictly row-first (`Top-Right -> Top-Left` before `Bottom-Right -> Bottom-Left`) without column-dropping while preserving true full-height column layouts.
+  * Expanded panel crop padding to **3.5%** (`1088px` max) so protruding edge bubbles aren't clipped, tightened intra-panel band sorting (`0.20` threshold), replaced hardcoded `"is_speech_bubble": true` schemas with `"container_type"`, and expanded deterministic exclusion of floating SFX, scanlation credits, page numbers, and signatures when `includeNonBubbleText = false`.
+* **🎯 Bubble-Tail Speaker Attribution & Anti-Drift Voice-Clone Lock (`PurrProfileRepository` / `MangaDubStudioManager`)**:
+  * Prompts now trace pointed bubble tails, inline chibi icons, and `--` continuations into `"tail_target"` and flag genuinely ambiguous speakers for Pre-Production review (`confidence < 0.68` or unclear tail).
+  * **Default ON (`lockVoicesViaCloning = true`)**: Before chapter synthesis, PURR compiles structured `QwenVoiceDesignBuilder` prompts, generates one canonical studio seed clip per character via **Qwen3 1.7B VoiceDesign**, registers background cloned voices (**Qwen3 0.6B Base Cloner** preferred -> **Pocket** -> **Chatterbox** -> **ZipVoice**), evicts 1.7B VRAM once, and synthesizes every chapter line through voice cloning to eliminate emotional pitch/timbre drift.
+* **🔊 Gradium Phonon 31M TTS (`ROM-17`, `SUB-17A`, 16 Voices & 3rd Bay Row)**:
+  * Added **Gradium Phonon 31M Q4** (`ROM-17`, 55 MB, Apache-2.0) + optional **FP32 Studio Chip** (`SUB-17A`) with a pure-Kotlin Unigram + UTF-8 byte-fallback tokenizer (`PurrPhononTokenizer`), XNNPACK block-8 Flow-LM + Mimi 24 kHz decoding, and 16 US/UK/Character voices—adding Row 3 to the `TTS_BUS` Cartridge Bay.
+* **🛠️ Icefall Mount Fix (`ROM-09`, `SUB-09A`, `ROM-13`, `ROM-16`)**:
+  * Fixed `sherpa-onnx` C++ `InitEspeak` `std::once_flag` stale-directory failures by mirroring validated `espeak-ng-data` to persistent `shared_espeak/espeak-ng-data`, added atomic archive extraction + on-mount self-healing from cached `.tar.bz2`, enabled `rule.far` + `rule.fst` loading for `ROM-16` AISHELL-3, and auto-synced active voices on cartridge install.
+* **⚡ LiteRT-LM KV Cache Reuse (`LiteRtGemmaVisionEngine`)**:
+  * Enabled `ExperimentalFlags.filterChannelContentFromKvCache = true`, persistent `noBackupFilesDir/litert_kv_program_cache`, multi-image KV-cache mounts (`maxNumImages = 4` with `1` fallback), page-scoped `Conversation(prefillPrefaceOnInit = true)` reuse with token/image budget rotation, and `Session.runPrefill` + `Session.clone()` batch casting for large rosters.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.6_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `32`).
+2. **`PURR-TTS_V1.9.6.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.5 // XY-Cut Panel Slicer (Max 5), Context Framing & Strict RTL Bubble Order
 
 ### ✨ What's New since v1.9.4

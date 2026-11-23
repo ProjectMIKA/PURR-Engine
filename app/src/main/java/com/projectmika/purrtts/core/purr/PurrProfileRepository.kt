@@ -310,14 +310,16 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
+    private fun resolveCloneTargetCartridge(engineId: String): String = when (engineId) {
+        "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
+        "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
+        "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
+        else -> "rom_pocket_tts"
+    }
+
     fun registerClonedVoice(voice: ClonedVoiceProfile) {
         val engineId = voice.resolvedCloneEngineId
-        val targetCart = when (engineId) {
-            "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
-            "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
-            "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
-            else -> "rom_pocket_tts"
-        }
+        val targetCart = resolveCloneTargetCartridge(engineId)
         val targetBackend = when (engineId) {
             "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
             "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
@@ -345,6 +347,28 @@ class PurrProfileRepository(filesDir: File) {
             s.copy(
                 clonedVoices = updatedClones,
                 profiles = updatedProfiles,
+                slottedCartridges = s.slottedCartridges + targetCart,
+                enabledSubCartridges = nextEnabledSubs
+            )
+        }
+    }
+
+    /**
+     * Registers or updates a cloned voice profile in the background without disturbing
+     * the user's currently selected Tab 1 speaking profile or voice.
+     */
+    fun upsertBackgroundClonedVoice(voice: ClonedVoiceProfile) {
+        val engineId = voice.resolvedCloneEngineId
+        val targetCart = resolveCloneTargetCartridge(engineId)
+        updateState { s ->
+            val updatedClones = s.clonedVoices.filterNot { it.id == voice.id } + voice
+            val nextEnabledSubs = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
+                s.enabledSubCartridges + engineId
+            } else {
+                s.enabledSubCartridges
+            }
+            s.copy(
+                clonedVoices = updatedClones,
                 slottedCartridges = s.slottedCartridges + targetCart,
                 enabledSubCartridges = nextEnabledSubs
             )
@@ -423,11 +447,35 @@ class PurrProfileRepository(filesDir: File) {
                 else -> Unit
             }
 
-            s.copy(
+            val provisional = s.copy(
                 modelStates = nextMap,
                 slottedCartridges = nextSlotted,
                 enabledSubCartridges = nextEnabledSubs
             )
+            if (bundleState.state == DownloadState.INSTALLED && spec?.category == CartridgeCategory.TTS) {
+                val targetHub = spec.parentCartridgeId?.takeIf { it.isNotBlank() } ?: specId
+                val avail = computeAvailableVoices(provisional)
+                val preferredForBundle = avail.filter { it.requiredSubCartridgeId == specId }
+                    .ifEmpty { avail.filter { it.cartridgeId == targetHub } }
+                val healedProfiles = provisional.profiles.map { p ->
+                    if (p.id == provisional.activeProfileId &&
+                        p.selectedCartridgeId == targetHub &&
+                        (p.primaryVoiceId == "core_os_auto" || avail.none { it.id == p.primaryVoiceId })
+                    ) {
+                        val pick = preferredForBundle.firstOrNull()
+                        if (pick != null) {
+                            p.copy(
+                                preferredBackend = pick.engine,
+                                sherpaFamily = pick.sherpaFamily ?: p.sherpaFamily,
+                                primaryVoiceId = pick.id
+                            )
+                        } else p
+                    } else p
+                }
+                provisional.copy(profiles = healedProfiles)
+            } else {
+                provisional
+            }
         }
     }
 

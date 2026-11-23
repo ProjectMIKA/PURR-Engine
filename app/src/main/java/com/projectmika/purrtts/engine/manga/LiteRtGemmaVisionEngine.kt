@@ -11,9 +11,12 @@ import android.util.Log
 import com.google.ai.edge.litertlm.Backend
 import com.google.ai.edge.litertlm.Content
 import com.google.ai.edge.litertlm.Contents
+import com.google.ai.edge.litertlm.Conversation
 import com.google.ai.edge.litertlm.ConversationConfig
 import com.google.ai.edge.litertlm.Engine
 import com.google.ai.edge.litertlm.EngineConfig
+import com.google.ai.edge.litertlm.ExperimentalApi
+import com.google.ai.edge.litertlm.ExperimentalFlags
 import com.google.ai.edge.litertlm.InputData
 import com.google.ai.edge.litertlm.Message
 import com.google.ai.edge.litertlm.SamplerConfig
@@ -70,6 +73,8 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     private var loadedModelPath: String? = null
     private var engineHandle: Engine? = null
     private var activeBackendLabel: String = "NONE"
+    private var activeMaxImages: Int = 1
+    private var activeMaxTokens: Int = 4096
 
     @Volatile
     var lastEngineError: String? = null
@@ -196,15 +201,15 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     }
 
     /**
-     * Crops a single BFS-detected panel with 1.5% bubble-safe padding and scales up to 960px
-     * so on-device VLMs see sharp, readable speech bubbles inside that exact panel.
+     * Crops a single BFS-detected panel with 3.5% bubble-safe padding and scales up to 1088px
+     * so protruding edge speech bubbles are never clipped and small lettering stays razor-sharp.
      */
     fun renderPanelCropForVision(
         pageBitmap: Bitmap,
         panelRect: MangaNormalizedRect,
         targetFile: File
     ) {
-        val padFrac = 0.015f
+        val padFrac = 0.035f
         val lFrac = (panelRect.left - padFrac).coerceIn(0f, 0.98f)
         val tFrac = (panelRect.top - padFrac).coerceIn(0f, 0.98f)
         val rFrac = (panelRect.right + padFrac).coerceIn(lFrac + 0.02f, 1f)
@@ -218,8 +223,8 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         val cropped = Bitmap.createBitmap(pageBitmap, x, y, w, h)
         val maxSide = maxOf(cropped.width, cropped.height).toFloat().coerceAtLeast(1f)
         val scale = when {
-            maxSide > 960f -> 960f / maxSide
-            maxSide < 560f -> minOf(2.0f, 640f / maxSide)
+            maxSide > 1088f -> 1088f / maxSide
+            maxSide < 640f -> minOf(2.0f, 768f / maxSide)
             else -> 1.0f
         }
         val outBmp = if (kotlin.math.abs(scale - 1.0f) > 0.02f) {
@@ -503,91 +508,191 @@ Output ONLY valid JSON:
             }
 
             val runningContext = recentDialogueContext.toMutableList()
+            val runningRoster = existingCharacters.toMutableList()
             val panelSpecs = ArrayList<MangaVisionResponseParser.DiscoveredPanelSpec>(targetPanels.size)
             val thoughtSnippets = ArrayList<String>()
             var mountFailed = false
+            val usePageKvCache = activeTier.maxContextTokens >= 4096 && targetPanels.size >= 2
+            var pageKvConv: Conversation? = null
+            var kvImagesUsed = 0
+            var kvEstTokens = 0
+            var kvRosterCursor = runningRoster.size
 
-            for ((panelIdx, rect) in targetPanels.withIndex()) {
-                val cropFile = File(context.cacheDir, "manga_vision_crop_${pageIndex}_${panelIdx}.jpg")
-                renderPanelCropForVision(pageBitmap, rect, cropFile)
-                val panelPrompt = buildSinglePanelDirectorPrompt(
-                    pageIndex = pageIndex,
-                    panelIndex = panelIdx,
-                    totalPanelsOnPage = targetPanels.size,
-                    readingOrder = readingOrder,
-                    existingCharacters = existingCharacters,
-                    recentDialogueContext = runningContext,
-                    storySummary = storySummary,
-                    pageSynopsis = pageSynopsis,
-                    includeNonBubbleText = includeNonBubbleText
-                )
+            try {
+                for ((panelIdx, rect) in targetPanels.withIndex()) {
+                    val cropFile = File(context.cacheDir, "manga_vision_crop_${pageIndex}_${panelIdx}.jpg")
+                    renderPanelCropForVision(pageBitmap, rect, cropFile)
 
-                val rawPanel = mutex.withLock {
-                    queryLiteRtGemmaMultimodalLocked(
-                        modelFile = localModel,
-                        annotatedJpegFile = cropFile,
-                        prompt = panelPrompt,
-                        enableThinking = activeTier.supportsThinking,
-                        maxTokens = activeTier.maxContextTokens,
-                        onLog = onLog
-                    )
-                }
-                runCatching { cropFile.delete() }
+                    var rawPanel: String? = null
+                    if (usePageKvCache) {
+                        rawPanel = mutex.withLock {
+                            val engine = ensureLiteRtEngineMountedLocked(
+                                modelFile = localModel,
+                                maxTokens = activeTier.maxContextTokens,
+                                onLog = onLog,
+                                desiredMaxImages = minOf(4, targetPanels.size).coerceAtLeast(2)
+                            ) ?: return@withLock null
+                            if (activeMaxImages < 2) return@withLock null
 
-                if (rawPanel.isNullOrBlank()) {
-                    if (engineHandle == null) {
-                        mountFailed = true
-                        onLog("⚠️ ${activeTier.shortLabel} mount/inference failed on P${panelIdx + 1}: ${lastEngineError ?: "unknown error"}")
-                        break
-                    }
-                    onLog("⚠️ Empty response on Page ${pageIndex + 1} P${panelIdx + 1}; continuing")
-                    panelSpecs += MangaVisionResponseParser.DiscoveredPanelSpec(
-                        panelIndex = panelIdx,
-                        sceneMood = "manga_panel",
-                        thoughtTrace = "",
-                        lines = emptyList()
-                    )
-                    onPanelProgress(panelIdx + 1, targetPanels.size, "0 bubble(s)")
-                    continue
-                }
+                            val needRotate = pageKvConv == null ||
+                                kvImagesUsed >= activeMaxImages ||
+                                kvEstTokens >= (activeMaxTokens - 1050)
+                            if (needRotate) {
+                                runCatching { pageKvConv?.close() }
+                                pageKvConv = null
+                                kvImagesUsed = 0
+                                val sharedPreface = buildPageKvSharedPreface(
+                                    pageIndex = pageIndex,
+                                    readingOrder = readingOrder,
+                                    knownCharacters = runningRoster,
+                                    storySummary = storySummary,
+                                    pageSynopsis = pageSynopsis,
+                                    includeNonBubbleText = includeNonBubbleText
+                                )
+                                kvEstTokens = estimateApproxTokens(sharedPreface)
+                                kvRosterCursor = runningRoster.size
+                                val convCfg = if (activeTier.supportsThinking) {
+                                    ConversationConfig(
+                                        systemInstruction = Contents.of(sharedPreface),
+                                        samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.2, seed = 42),
+                                        prefillPrefaceOnInit = true,
+                                        maxOutputToken = 768,
+                                        thinkingConfig = ThinkingConfig(enableThinking = true, thinkingTokenBudget = 384)
+                                    )
+                                } else {
+                                    ConversationConfig(
+                                        systemInstruction = Contents.of(sharedPreface),
+                                        samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.2, seed = 42),
+                                        prefillPrefaceOnInit = true,
+                                        maxOutputToken = 768
+                                    )
+                                }
+                                pageKvConv = runCatching { engine.createConversation(convCfg) }.getOrNull()
+                            }
 
-                var panelSpec = MangaVisionResponseParser.parseSinglePanelAnalysis(
-                    rawResponse = rawPanel,
-                    panelIndex = panelIdx,
-                    existingCharacters = existingCharacters,
-                    includeNonBubbleText = includeNonBubbleText,
-                    readingOrder = readingOrder
-                )
-                // If model emitted freeform prose instead of JSON and omitted empty `"lines": []`, try compact JSON repair
-                if (panelSpec.lines.isEmpty() && !rawPanel.contains("\"lines\"") && rawPanel.length > 40 && rawPanel.none { it == '{' }) {
-                    val repairPrompt = buildCompactSinglePanelRepairPrompt(rawPanel.take(500))
-                    val repairedRaw = mutex.withLock {
-                        queryLiteRtGemmaTextLocked(localModel, repairPrompt, activeTier.maxContextTokens, onLog)
-                    }
-                    if (!repairedRaw.isNullOrBlank()) {
-                        val repaired = MangaVisionResponseParser.parseSinglePanelAnalysis(
-                            rawResponse = repairedRaw,
-                            panelIndex = panelIdx,
-                            existingCharacters = existingCharacters,
-                            includeNonBubbleText = includeNonBubbleText,
-                            readingOrder = readingOrder
-                        )
-                        if (repaired.lines.isNotEmpty()) {
-                            panelSpec = repaired
+                            val conv = pageKvConv ?: return@withLock null
+                            val newlyAddedChars = runningRoster.drop(kvRosterCursor)
+                            kvRosterCursor = runningRoster.size
+                            val turnPrompt = buildPageKvTurnPrompt(
+                                panelIndex = panelIdx,
+                                totalPanelsOnPage = targetPanels.size,
+                                newlyDiscoveredChars = newlyAddedChars,
+                                recentDialogueContext = runningContext,
+                                includeNonBubbleText = includeNonBubbleText
+                            )
+                            val turnResult = runCatching {
+                                val msg = conv.sendMessage(
+                                    Contents.of(listOf(Content.ImageBytes(cropFile.readBytes()), Content.Text(turnPrompt)))
+                                )
+                                extractFullResponseFromMessage(msg)
+                            }
+                            if (turnResult.isFailure || turnResult.getOrNull().isNullOrBlank()) {
+                                runCatching { conv.close() }
+                                pageKvConv = null
+                                kvImagesUsed = 0
+                                null
+                            } else {
+                                val outText = turnResult.getOrNull()
+                                kvImagesUsed++
+                                kvEstTokens += 300 + estimateApproxTokens(turnPrompt) + estimateApproxTokens(outText.orEmpty())
+                                outText
+                            }
                         }
                     }
-                }
 
-                panelSpec.lines.forEach { ln ->
-                    if (ln.rawText.isNotBlank()) {
-                        runningContext += "${ln.speakerName}: ${ln.rawText}"
+                    if (rawPanel.isNullOrBlank()) {
+                        val panelPrompt = buildSinglePanelDirectorPrompt(
+                            pageIndex = pageIndex,
+                            panelIndex = panelIdx,
+                            totalPanelsOnPage = targetPanels.size,
+                            readingOrder = readingOrder,
+                            existingCharacters = runningRoster,
+                            recentDialogueContext = runningContext,
+                            storySummary = storySummary,
+                            pageSynopsis = pageSynopsis,
+                            includeNonBubbleText = includeNonBubbleText
+                        )
+                        rawPanel = mutex.withLock {
+                            queryLiteRtGemmaMultimodalLocked(
+                                modelFile = localModel,
+                                annotatedJpegFile = cropFile,
+                                prompt = panelPrompt,
+                                enableThinking = activeTier.supportsThinking,
+                                maxTokens = activeTier.maxContextTokens,
+                                onLog = onLog
+                            )
+                        }
                     }
+                    runCatching { cropFile.delete() }
+
+                    if (rawPanel.isNullOrBlank()) {
+                        if (engineHandle == null) {
+                            mountFailed = true
+                            onLog("⚠️ ${activeTier.shortLabel} mount/inference failed on P${panelIdx + 1}: ${lastEngineError ?: "unknown error"}")
+                            break
+                        }
+                        onLog("⚠️ Empty response on Page ${pageIndex + 1} P${panelIdx + 1}; continuing")
+                        panelSpecs += MangaVisionResponseParser.DiscoveredPanelSpec(
+                            panelIndex = panelIdx,
+                            sceneMood = "manga_panel",
+                            thoughtTrace = "",
+                            lines = emptyList()
+                        )
+                        onPanelProgress(panelIdx + 1, targetPanels.size, "0 bubble(s)")
+                        continue
+                    }
+
+                    var panelSpec = MangaVisionResponseParser.parseSinglePanelAnalysis(
+                        rawResponse = rawPanel,
+                        panelIndex = panelIdx,
+                        existingCharacters = runningRoster,
+                        includeNonBubbleText = includeNonBubbleText,
+                        readingOrder = readingOrder
+                    )
+                    // If model emitted freeform prose instead of JSON and omitted empty `"lines": []`, try compact JSON repair
+                    if (panelSpec.lines.isEmpty() && !rawPanel.contains("\"lines\"") && rawPanel.length > 40 && rawPanel.none { it == '{' }) {
+                        val repairPrompt = buildCompactSinglePanelRepairPrompt(rawPanel.take(500))
+                        val repairedRaw = mutex.withLock {
+                            queryLiteRtGemmaTextLocked(localModel, repairPrompt, activeTier.maxContextTokens, onLog)
+                        }
+                        if (!repairedRaw.isNullOrBlank()) {
+                            val repaired = MangaVisionResponseParser.parseSinglePanelAnalysis(
+                                rawResponse = repairedRaw,
+                                panelIndex = panelIdx,
+                                existingCharacters = runningRoster,
+                                includeNonBubbleText = includeNonBubbleText,
+                                readingOrder = readingOrder
+                            )
+                            if (repaired.lines.isNotEmpty()) {
+                                panelSpec = repaired
+                            }
+                        }
+                    }
+
+                    panelSpec.lines.forEach { ln ->
+                        if (ln.rawText.isNotBlank()) {
+                            runningContext += "${ln.speakerName}: ${ln.rawText}"
+                        }
+                        if (!ln.speakerName.equals("UNKNOWN", ignoreCase = true) &&
+                            runningRoster.none { it.name.equals(ln.speakerName, ignoreCase = true) }
+                        ) {
+                            runningRoster += MangaCharacterProfile(
+                                id = "tmp_${runningRoster.size}",
+                                name = ln.speakerName,
+                                gender = ln.gender,
+                                visualDescription = ln.visualDescription,
+                                voiceDesignPrompt = ln.voiceDesignPrompt
+                            )
+                        }
+                    }
+                    if (panelSpec.thoughtTrace.isNotBlank()) {
+                        thoughtSnippets += "P${panelIdx + 1}: ${panelSpec.thoughtTrace.take(80)}"
+                    }
+                    panelSpecs += panelSpec
+                    onPanelProgress(panelIdx + 1, targetPanels.size, "${panelSpec.lines.size} bubble(s)")
                 }
-                if (panelSpec.thoughtTrace.isNotBlank()) {
-                    thoughtSnippets += "P${panelIdx + 1}: ${panelSpec.thoughtTrace.take(80)}"
-                }
-                panelSpecs += panelSpec
-                onPanelProgress(panelIdx + 1, targetPanels.size, "${panelSpec.lines.size} bubble(s)")
+            } finally {
+                runCatching { pageKvConv?.close() }
             }
 
             if (!mountFailed && panelSpecs.isNotEmpty()) {
@@ -596,7 +701,7 @@ Output ONLY valid JSON:
                     thoughtTrace = combinedThought,
                     storySummary = storySummary,
                     panels = panelSpecs
-                ) to "${activeTier.shortLabel} ($activeBackendLabel)"
+                ) to "${activeTier.shortLabel} ($activeBackendLabel${if (usePageKvCache && activeMaxImages >= 2) " KVx$activeMaxImages" else ""})"
             }
         } else {
             onLog("ℹ️ No local .litertlm VLM found in filesDir/models/litert for ${preferredVisionModel.shortLabel}")
@@ -657,6 +762,7 @@ Output ONLY valid JSON:
             sampleLinesBySpeaker = sampleLinesBySpeaker
         )
 
+        var updatedRoster = characters
         var rawCasting: String? = null
         if (powerUserVisionUrl.isNotBlank()) {
             rawCasting = runCatching { queryOpenAiTextEndpoint(powerUserVisionUrl.trim(), castingPrompt) }.getOrNull()
@@ -665,6 +771,33 @@ Output ONLY valid JSON:
             val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
             if (localModel != null) {
                 val activeTier = resolveTierForFile(localModel, preferredVisionModel)
+                if (characters.size > 5 && activeTier.maxContextTokens >= 4096) {
+                    val chunks = characters.chunked(4)
+                    val sharedPreface = buildCastingPrefillPreface(seriesTitle, storySummary)
+                    val clonedOutputs = mutex.withLock {
+                        queryBatchedPrefillCloneLocked(
+                            modelFile = localModel,
+                            sharedPreface = sharedPreface,
+                            chunkPrompts = chunks.map { chunk ->
+                                buildQwenVoiceCastingPrompt(
+                                    seriesTitle = seriesTitle,
+                                    storySummary = storySummary,
+                                    characters = chunk,
+                                    sampleLinesBySpeaker = sampleLinesBySpeaker
+                                )
+                            },
+                            maxTokens = activeTier.maxContextTokens,
+                            onLog = onLog
+                        )
+                    }
+                    if (!clonedOutputs.isNullOrEmpty()) {
+                        clonedOutputs.forEach { out ->
+                            updatedRoster = MangaVisionResponseParser.parseVoiceDesignRoster(out, updatedRoster)
+                        }
+                        onLog("🎭 VLM cast ${updatedRoster.size} VoiceDesign profile(s) via Session KV-Clone (${chunks.size} batches)")
+                        return@withContext updatedRoster
+                    }
+                }
                 rawCasting = mutex.withLock {
                     queryLiteRtGemmaTextLocked(localModel, castingPrompt, activeTier.maxContextTokens, onLog)
                 }
@@ -672,7 +805,7 @@ Output ONLY valid JSON:
         }
 
         if (!rawCasting.isNullOrBlank()) {
-            val updated = MangaVisionResponseParser.parseVoiceDesignRoster(rawCasting, characters)
+            val updated = MangaVisionResponseParser.parseVoiceDesignRoster(rawCasting, updatedRoster)
             onLog("🎭 VLM crafted ${updated.size} Qwen3 VoiceDesign casting profile(s)")
             return@withContext updated
         }
@@ -721,18 +854,18 @@ Output ONLY valid JSON:
         }.trim().ifEmpty { "(Scanning sequential story — keep cast identity consistent across outfit changes or duplicate comedy shots.)" }
 
         val bubbleScopeRule = if (includeNonBubbleText) {
-            "EXPERIMENTAL ALL-TEXT MODE: Transcribe enclosed speech bubbles, thought clouds, rectangular narration captions, AND dramatic SFX/floating background shouts visible inside THIS panel image."
+            "EXPERIMENTAL ALL-TEXT MODE: Transcribe enclosed speech bubbles, thought clouds, rectangular narration captions, AND dramatic SFX/floating background shouts visible inside THIS panel image. Classify each entry accurately via \"container_type\"."
         } else {
-            "STRICT SPEECH-BUBBLE-ONLY MODE: ONLY transcribe text enclosed inside distinct speech bubbles, thought clouds, jagged speech bursts belonging to a speaker, or rectangular narration boxes. COMPLETELY IGNORE standalone SFX lettering floating on the artwork (e.g. \"Shaaa\", \"GULP\", \"BWO DO\"), floating background laughs, scanlation credit bars, watermarks, and artist signatures. Do NOT emit entries for ignored non-bubble text."
+            "STRICT SPEECH-BUBBLE-ONLY MODE: ONLY transcribe text enclosed inside distinct speech bubbles, thought clouds, jagged speech bursts belonging to a speaker, or rectangular narration boxes. COMPLETELY IGNORE standalone SFX lettering floating on the artwork (e.g. \"Shaaa\", \"GULP\", \"BWO DO\"), unboxed background laughs, scanlation credit bars, page numbers, watermarks, and handwritten signatures. Set \"container_type\" truthfully; never emit SFX or credits."
         }
 
         val readingPosRule = when (readingOrder) {
             MangaReadingOrder.RTL_MANGA ->
-                "STRICT MANGA RIGHT-TO-LEFT ORDER: Start with the RIGHTMOST speech bubble first (\"x_pos\" closest to 1.0), then move LEFTWARD toward smaller \"x_pos\" (0.0). Top bubbles precede lower rows."
+                "STRICT MANGA RIGHT-TO-LEFT Z-ORDER: First visually count ALL enclosed speech bubbles (including small edge bubbles or tiny side interjections). Scan upper vertical bands FIRST from RIGHT (\"x_pos\" ~ 1.0) to LEFT (\"x_pos\" ~ 0.0), then move down to lower rows from RIGHT to LEFT. Never jump down and back up out of order."
             MangaReadingOrder.LTR_COMIC ->
-                "STRICT COMIC LEFT-TO-RIGHT ORDER: Start with the LEFTMOST speech bubble first (\"x_pos\" closest to 0.0), then move RIGHTWARD toward larger \"x_pos\" (1.0). Top bubbles precede lower rows."
+                "STRICT COMIC LEFT-TO-RIGHT Z-ORDER: First visually count ALL enclosed speech bubbles. Scan upper bands FIRST from LEFT (\"x_pos\" ~ 0.0) to RIGHT (\"x_pos\" ~ 1.0), then lower rows LEFT to RIGHT."
             MangaReadingOrder.WEBTOON_VERTICAL ->
-                "STRICT WEBTOON TOP-TO-BOTTOM ORDER: Start with the TOPMOST bubble first (\"y_pos\" closest to 0.0) and proceed downward toward \"y_pos\" 1.0."
+                "STRICT WEBTOON TOP-TO-BOTTOM ORDER: Count ALL enclosed speech bubbles and read strictly TOPMOST (\"y_pos\" ~ 0.0) to BOTTOMMOST (\"y_pos\" ~ 1.0)."
         }
 
         return """
@@ -750,19 +883,23 @@ $contextLines
 
 TASK:
 $bubbleScopeRule
-Order lines strictly by ${readingOrder.label} and include normalized bubble center coordinates "x_pos" (0.0=left .. 1.0=right) and "y_pos" (0.0=top .. 1.0=bottom). Trace bubble tails carefully to identify each speaker (or NARRATOR for boxed captions). If a panel shows the same character wearing a different outfit or twice for comedic motion, reuse the same canonical character name!
+SPEAKER & BUBBLE-TAIL ATTRIBUTION RULES:
+- For every bubble, inspect its pointed tail direction, tiny inline chibi speaker icon, or jagged scream burst pointing toward a character (or follow split `--` sentence continuations belonging to the previous bubble's speaker). Record who the tail points to in `"tail_target"`.
+- If a bubble has NO clear tail and NO chibi head icon (e.g. off-panel interruption among multiple present characters), set `"speaker": "UNKNOWN"`, `"tail_target": "unclear"`, `"confidence": 0.45`, and list likely `"candidate_speakers"`.
+- Order lines strictly by ${readingOrder.label} and provide normalized bubble center coordinates `"x_pos"` (0.0=left..1.0=right) and `"y_pos"` (0.0=top..1.0=bottom).
 
 Output ONLY valid JSON matching this schema:
 {
   "mood": "intense battle | warm romance | rain gloom | calm mystery | action | silent_panel",
-  "thought": "brief note tracing bubble tails inside this panel",
+  "thought": "count enclosed bubbles, note edge bubbles & trace every bubble tail in reading order",
   "lines": [
     {
       "bubble": 1,
       "x_pos": 0.85,
       "y_pos": 0.22,
-      "is_speech_bubble": true,
-      "speaker": "CANONICAL_CHARACTER_NAME or NARRATOR",
+      "container_type": "speech_bubble | thought_bubble | scream_burst | narration_box | floating_sfx | credit_or_signature",
+      "tail_target": "pointed tail character or narrator_box or unclear",
+      "speaker": "CANONICAL_CHARACTER_NAME or NARRATOR or UNKNOWN",
       "is_new_character": false,
       "gender": "male | female | androgynous",
       "visual_description": "concise appearance if new character",
@@ -775,13 +912,12 @@ Output ONLY valid JSON matching this schema:
   ]
 }
 If there is NO spoken speech-bubble text in this panel, output: {"mood":"silent_panel","lines":[]}.
-Only use "speaker": "UNKNOWN" with "confidence": 0.45 when the bubble tail truly leaves speaker ambiguous.
 """.trim()
     }
 
     private fun buildCompactSinglePanelRepairPrompt(previousSnippet: String): String = """
 Convert these single-panel manga transcription notes into strict JSON matching:
-{"mood":"action","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.25,"is_speech_bubble":true,"speaker":"NARRATOR","is_new_character":false,"gender":"male","emotion":"neutral","confidence":0.85,"text":"Dialogue text"}]}
+{"mood":"action","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.25,"container_type":"speech_bubble","tail_target":"narrator_box","speaker":"NARRATOR","is_new_character":false,"gender":"male","emotion":"neutral","confidence":0.85,"text":"Dialogue text"}]}
 Output JSON ONLY.
 
 Notes:
@@ -816,16 +952,16 @@ $previousSnippet
         }.trim().ifEmpty { "(Keep character identity consistent across outfit switches.)" }
 
         val bubbleRule = if (includeNonBubbleText) {
-            "Read speech bubbles, narration boxes, and dramatic SFX lettering in strict ${readingOrder.label} order."
+            "Read speech bubbles, narration boxes, and dramatic SFX lettering in strict ${readingOrder.label} order and label each via \"container_type\"."
         } else {
-            "ONLY transcribe enclosed speech bubbles, thought clouds, and boxed narration captions in strict ${readingOrder.label} order. COMPLETELY SKIP floating SFX, scanlation credits, watermarks, and signatures (never include non-bubble SFX lines)."
+            "ONLY transcribe enclosed speech bubbles, thought clouds, scream bursts, and boxed narration captions in strict ${readingOrder.label} order. COMPLETELY SKIP floating SFX, scanlation credits, page numbers, watermarks, and signatures."
         }
 
         val readingPosRule = when (readingOrder) {
             MangaReadingOrder.RTL_MANGA ->
-                "IMPORTANT: Inside every panel, bubble 1 is the RIGHTMOST bubble (highest \"x_pos\" near 1.0), reading leftward to \"x_pos\" near 0.0."
+                "IMPORTANT: Inside every panel, scan upper horizontal bands RIGHTMOST (\"x_pos\" near 1.0) to LEFTMOST (\"x_pos\" near 0.0) before lower bands."
             MangaReadingOrder.LTR_COMIC ->
-                "IMPORTANT: Inside every panel, bubble 1 is the LEFTMOST bubble (lowest \"x_pos\" near 0.0), reading rightward to \"x_pos\" near 1.0."
+                "IMPORTANT: Inside every panel, scan upper horizontal bands LEFTMOST (\"x_pos\" near 0.0) to RIGHTMOST (\"x_pos\" near 1.0) before lower bands."
             MangaReadingOrder.WEBTOON_VERTICAL ->
                 "IMPORTANT: Inside every panel, bubble 1 is the TOPMOST bubble (lowest \"y_pos\" near 0.0), reading downward."
         }
@@ -847,7 +983,7 @@ $contextLines
 TASK:
 1. First think carefully inside `<thought>...</thought>` about each panel P1..P$panelCount:
    - $bubbleRule
-   - Follow speech bubble tails to identify each speaker (or NARRATOR for boxed captions), reusing canonical roster names across outfit changes.
+   - Inspect every edge bubble, pointed bubble tail, miniature inline speaker icon, and `--` sentence continuation to identify each speaker accurately (or set UNKNOWN / confidence 0.45 with candidate_speakers if unclear).
 2. Immediately output ONLY a valid JSON object matching this schema:
 {
   "story_summary": "1-sentence running summary update",
@@ -855,14 +991,15 @@ TASK:
     {
       "panel_index": 0,
       "scene_mood": "intense battle | warm romance | rain gloom | calm mystery | action",
-      "thought": "brief reasoning for this panel",
+      "thought": "brief reasoning tracing bubble count and tails",
       "lines": [
         {
           "bubble": 1,
           "x_pos": 0.85,
           "y_pos": 0.22,
-          "is_speech_bubble": true,
-          "speaker": "CHARACTER_NAME or NARRATOR",
+          "container_type": "speech_bubble | thought_bubble | scream_burst | narration_box",
+          "tail_target": "pointed tail character or narrator_box or unclear",
+          "speaker": "CHARACTER_NAME or NARRATOR or UNKNOWN",
           "is_new_character": true,
           "gender": "male | female | androgynous",
           "visual_description": "concise appearance traits if new character (age, vibe, armor/uniform)",
@@ -879,7 +1016,7 @@ TASK:
 Rules:
 - Use 0-based panel_index (0 to ${maxOf(0, panelCount - 1)}).
 - Skip empty/SFX-only panels with `"lines": []`.
-- Only set `"speaker": "UNKNOWN"` and `"confidence": 0.45` if it is genuinely impossible to tell which speaker owns a bubble.
+- Only set `"speaker": "UNKNOWN"` and `"confidence": 0.45` if the tail leaves speaker identity genuinely ambiguous.
 """.trim()
     }
 
@@ -904,46 +1041,99 @@ Rules:
         }
 
         return """
-You are casting voices for the dubbed anime adaptation of "$seriesTitle" using Qwen3-TTS 1.7B VoiceDesign.
+You are casting locked canonical character voices for "$seriesTitle" using Qwen3-TTS 1.7B VoiceDesign (each voice will generate a clean reference anchor clip for the entire chapter, so avoid hyper-transient emotion instructions like "currently crying" and specify their enduring vocal identity).
 Story context: ${storySummary.ifBlank { "Chapter 1" }}
-
-Below is the discovered cast roster. For EVERY character, craft a rich acoustic VoiceDesign instruction specifically optimized for Qwen3-TTS 1.7B VoiceDesign (describe vocal pitch register, texture/raspy/breathy/resonant quality, age archetype, tempo, and dramatic delivery — 15 to 30 words, no character proper names inside the voice_design_prompt).
 
 ROSTER:
 $rosterBlock
 
-Output ONLY valid JSON:
+Output ONLY valid JSON with structured casting attributes AND a detailed acoustic description (no character proper names inside voice_design_prompt):
 {
   "characters": [
     {
       "name": "EXACT_CHARACTER_NAME",
       "gender": "male | female | androgynous",
+      "age": "TEEN | YOUNG_ADULT | ADULT | MIDDLE_AGED | ELDERLY",
+      "pitch": "DEEP_BASS | LOW_BARITONE | MID_NATURAL | BRIGHT_UPPER_MID | HIGH_SOPRANO",
+      "timbres": ["WARM_VELVETY", "CRISP_CLEAR"],
+      "pace": "SLOW_DELIBERATE | CALM_STEADY | NATURAL_FLOWING | ENERGETIC_BRISK | RAPID_URGENT",
+      "delivery": "WARM_CONFIDENT | PLAYFUL_TEASING | SHY_HESITANT | SERIOUS_AUTHORITATIVE | MYSTERIOUS_HUSHED | CHEERFUL_UPBEAT | MELANCHOLIC_SOFT | DRY_SARCASTIC | GRUMPY_FRUSTRATED",
+      "accent": "ANIME_EXPRESSIVE | NEUTRAL_AMERICAN | BRITISH_RP | BROADCAST_CLEAN",
+      "acoustics": "CLOSE_MIC_STUDIO | AUDIOBOOK_BOOTH | STAGE_PROJECTED",
+      "persona_role": "e.g. aristocratic anime heiress or calm eccentric scientist",
+      "nuance": "10-20 word acoustic color note describing stable vocal signature, resonance, and diction",
       "visual_description": "refined 1-line character summary",
-      "voice_design_prompt": "Crisp low-baritone raspy warrior voice with fierce gravelly projection, punchy dramatic anime cadence, slight growl on emphasis",
+      "voice_design_prompt": "Detailed 25-40 word acoustic VoiceDesign description covering gender, age, pitch, timbre, cadence, and studio microphone feel",
       "speed_scale": 1.0,
       "pitch_scale": 1.0
     }
   ]
 }
+Allowed timbres: WARM_VELVETY, CRISP_CLEAR, BREATHY_AIRY, RASPY_GRAVELLY, SILKY_SULTRY, BRIGHT_SPARKLY, HOARSE_CROAKY, NASAL_QUIRKY.
 Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
 """.trim()
     }
 
+    @OptIn(ExperimentalApi::class)
     private fun ensureLiteRtEngineMountedLocked(
         modelFile: File,
         maxTokens: Int = 4096,
-        onLog: (String) -> Unit
+        onLog: (String) -> Unit,
+        desiredMaxImages: Int = 1
     ): Engine? {
-        if (engineHandle != null && loadedModelPath == modelFile.absolutePath) {
+        val safeTokens = maxTokens.coerceIn(1024, 4096)
+        val wantImages = if (safeTokens >= 4096) desiredMaxImages.coerceIn(1, 4) else 1
+        if (engineHandle != null &&
+            loadedModelPath == modelFile.absolutePath &&
+            activeMaxImages >= wantImages
+        ) {
             return engineHandle
         }
+        if (engineHandle != null && loadedModelPath == modelFile.absolutePath && wantImages > activeMaxImages) {
+            // Avoid churn if higher maxImages wasn't explicitly needed when engine is already warm
+            if (desiredMaxImages <= 1) return engineHandle
+        }
         unloadLocked()
-        val cacheDir = File(context.cacheDir, "gemma_litert_cache").apply { mkdirs() }.absolutePath
-        val safeTokens = maxTokens.coerceIn(1024, 4096)
+        runCatching {
+            // Keep <thought> channel tokens out of persistent Conversation KV cache so long pages don't overflow
+            ExperimentalFlags.filterChannelContentFromKvCache = true
+        }
+        val cacheDir = File(context.noBackupFilesDir, "litert_kv_program_cache").apply { mkdirs() }.absolutePath
         val compactTokens = minOf(safeTokens, 2048)
 
-        val configs = listOf(
-            "GPU+VISION_GPU" to EngineConfig(
+        val candidates = ArrayList<Triple<String, Int, EngineConfig>>()
+        if (wantImages > 1) {
+            candidates += Triple(
+                "GPU+VISION_GPU",
+                wantImages,
+                EngineConfig(
+                    modelPath = modelFile.absolutePath,
+                    backend = Backend.GPU(),
+                    visionBackend = Backend.GPU(),
+                    audioBackend = null,
+                    maxNumTokens = safeTokens,
+                    maxNumImages = wantImages,
+                    cacheDir = cacheDir
+                )
+            )
+            candidates += Triple(
+                "GPU+VISION_CPU",
+                wantImages,
+                EngineConfig(
+                    modelPath = modelFile.absolutePath,
+                    backend = Backend.GPU(),
+                    visionBackend = Backend.CPU(),
+                    audioBackend = null,
+                    maxNumTokens = safeTokens,
+                    maxNumImages = wantImages,
+                    cacheDir = cacheDir
+                )
+            )
+        }
+        candidates += Triple(
+            "GPU+VISION_GPU",
+            1,
+            EngineConfig(
                 modelPath = modelFile.absolutePath,
                 backend = Backend.GPU(),
                 visionBackend = Backend.GPU(),
@@ -951,8 +1141,12 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
                 maxNumTokens = safeTokens,
                 maxNumImages = 1,
                 cacheDir = cacheDir
-            ),
-            "GPU+VISION_CPU" to EngineConfig(
+            )
+        )
+        candidates += Triple(
+            "GPU+VISION_CPU",
+            1,
+            EngineConfig(
                 modelPath = modelFile.absolutePath,
                 backend = Backend.GPU(),
                 visionBackend = Backend.CPU(),
@@ -960,8 +1154,12 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
                 maxNumTokens = safeTokens,
                 maxNumImages = 1,
                 cacheDir = cacheDir
-            ),
-            "CPU_VISION_CPU" to EngineConfig(
+            )
+        )
+        candidates += Triple(
+            "CPU_VISION_CPU",
+            1,
+            EngineConfig(
                 modelPath = modelFile.absolutePath,
                 backend = Backend.CPU(),
                 visionBackend = Backend.CPU(),
@@ -969,8 +1167,12 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
                 maxNumTokens = safeTokens,
                 maxNumImages = 1,
                 cacheDir = cacheDir
-            ),
-            "CPU_COMPACT" to EngineConfig(
+            )
+        )
+        candidates += Triple(
+            "CPU_COMPACT",
+            1,
+            EngineConfig(
                 modelPath = modelFile.absolutePath,
                 backend = Backend.CPU(),
                 visionBackend = Backend.CPU(),
@@ -982,7 +1184,7 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         )
 
         var lastErr: String? = null
-        for ((label, cfg) in configs) {
+        for ((label, imgSlots, cfg) in candidates) {
             val attempt = runCatching {
                 Engine(cfg).apply { initialize() }
             }
@@ -991,14 +1193,16 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
                 engineHandle = engine
                 loadedModelPath = modelFile.absolutePath
                 activeBackendLabel = label
+                activeMaxImages = imgSlots
+                activeMaxTokens = cfg.maxNumTokens ?: safeTokens
                 lastEngineError = null
-                Log.i(TAG, "[GEMMA4_VISION] Mounted ${modelFile.name} via $label")
-                onLog("Mounted ${modelFile.name} [$label]")
+                Log.i(TAG, "[GEMMA4_VISION] Mounted ${modelFile.name} via $label (maxImages=$imgSlots, cache=noBackup)")
+                onLog("Mounted ${modelFile.name} [$label | KV=$imgSlots]")
                 return engine
             } else {
                 val msg = attempt.exceptionOrNull()?.message ?: "init failed"
-                lastErr = "$label: $msg"
-                Log.w(TAG, "[GEMMA4_VISION] Mount attempt $label skipped: $msg")
+                lastErr = "$label(img=$imgSlots): $msg"
+                Log.w(TAG, "[GEMMA4_VISION] Mount attempt $label (img=$imgSlots) skipped: $msg")
             }
         }
         lastEngineError = lastErr
@@ -1237,6 +1441,92 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         engineHandle = null
         loadedModelPath = null
         activeBackendLabel = "NONE"
+        activeMaxImages = 1
+        activeMaxTokens = 4096
         Log.i(TAG, "[VRAM_EVICT] Unloaded Gemma 4 LiteRT Vision Engine")
+    }
+
+    private fun estimateApproxTokens(text: String): Int =
+        ((text.length + 3) / 4).coerceAtLeast(1)
+
+    private fun buildPageKvSharedPreface(
+        pageIndex: Int,
+        readingOrder: MangaReadingOrder,
+        knownCharacters: List<MangaCharacterProfile>,
+        storySummary: String,
+        pageSynopsis: String,
+        includeNonBubbleText: Boolean
+    ): String {
+        val roster = if (knownCharacters.isEmpty()) {
+            "None yet — introduce consistent uppercase names (or NARRATOR for boxed captions)."
+        } else {
+            knownCharacters.take(12).joinToString("; ") { "${it.name}(${it.gender.tag})" }
+        }
+        val scope = if (includeNonBubbleText) {
+            "Transcribe enclosed bubbles, narration boxes, AND visible SFX/floating text accurately via container_type."
+        } else {
+            "STRICT SPEECH-BUBBLE-ONLY: Transcribe ONLY enclosed speech bubbles, thought clouds, scream bursts, and narration boxes. IGNORE floating SFX, watermarks, page numbers, scanlation credits, and signatures."
+        }
+        return """
+You are MIKA's Manga Dubbing Director scanning sequential cropped panels on Page ${pageIndex + 1}.
+${readingOrder.vlmPromptDirective}
+Story Bible: ${storySummary.ifBlank { "Keep cast identity consistent across outfits." }}
+${if (pageSynopsis.isNotBlank()) "Page Beat: $pageSynopsis" else ""}
+Known Cast: $roster
+Rules: $scope
+Trace pointed bubble tails, chibi speaker icons, and `--` continuations into `"tail_target"`; use speaker `"UNKNOWN"` + confidence `0.45` only if genuinely ambiguous.
+Respond with JSON ONLY matching:
+{"mood":"action","thought":"bubble count + tails","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.22,"container_type":"speech_bubble","tail_target":"CHAR","speaker":"CHAR","is_new_character":false,"gender":"female","visual_description":"","voice_design_prompt":"","emotion":"neutral","confidence":0.90,"candidate_speakers":[],"text":"..."}]}
+Output {"mood":"silent_panel","lines":[]} if a panel has no valid spoken lines.
+""".trim()
+    }
+
+    private fun buildPageKvTurnPrompt(
+        panelIndex: Int,
+        totalPanelsOnPage: Int,
+        newlyDiscoveredChars: List<MangaCharacterProfile>,
+        recentDialogueContext: List<String>,
+        includeNonBubbleText: Boolean
+    ): String {
+        val deltaRoster = if (newlyDiscoveredChars.isEmpty()) "" else
+            "Newly seen cast: " + newlyDiscoveredChars.joinToString("; ") { "${it.name}(${it.gender.tag})" } + "\n"
+        val prev = recentDialogueContext.takeLast(3).joinToString(" | ").ifBlank { "(none)" }
+        val modeNote = if (includeNonBubbleText) "ALL-TEXT" else "SPEECH-BUBBLE-ONLY (skip SFX/credits)"
+        return """
+Scan Panel ${panelIndex + 1}/$totalPanelsOnPage [$modeNote].
+${deltaRoster}Recent lines: $prev
+Count every valid bubble (including small edge bubbles), trace each tail, sort by reading order, output JSON ONLY.
+""".trim()
+    }
+
+    private fun buildCastingPrefillPreface(seriesTitle: String, storySummary: String): String = """
+You are casting canonical voices for the anime dub of "$seriesTitle" using Qwen3-TTS 1.7B VoiceDesign.
+Story Context: ${storySummary.ifBlank { "Manga series adaptation" }}
+Every character needs structured VoiceDesign attributes (gender, age, pitch, timbres, pace, delivery, accent, acoustics, persona_role, nuance) plus a 25-40 word voice_design_prompt specifying enduring vocal identity (no character proper names inside voice_design_prompt). Output valid JSON ONLY.
+""".trim()
+
+    private fun queryBatchedPrefillCloneLocked(
+        modelFile: File,
+        sharedPreface: String,
+        chunkPrompts: List<String>,
+        maxTokens: Int,
+        onLog: (String) -> Unit
+    ): List<String>? {
+        val engine = ensureLiteRtEngineMountedLocked(modelFile, maxTokens, onLog, 1) ?: return null
+        return runCatching {
+            val baseSession = engine.createSession(
+                SessionConfig(samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.3, seed = 42))
+            )
+            baseSession.use { root ->
+                root.runPrefill(listOf(InputData.Text(sharedPreface)))
+                chunkPrompts.map { chunkPrompt ->
+                    root.clone().use { branch ->
+                        branch.generateContent(listOf(InputData.Text(chunkPrompt)))
+                    }
+                }
+            }
+        }.onFailure { err ->
+            Log.w(TAG, "[KV_CLONE] Batched casting prefill/clone fallback: ${err.message}")
+        }.getOrNull()
     }
 }

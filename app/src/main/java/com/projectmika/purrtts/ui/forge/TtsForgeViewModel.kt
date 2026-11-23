@@ -1817,6 +1817,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val includeMangaNonBubbleText: StateFlow<Boolean>
         get() = mangaDubManager.includeNonBubbleText
 
+    val lockMangaVoicesViaCloning: StateFlow<Boolean>
+        get() = mangaDubManager.lockVoicesViaCloning
+
     fun selectMangaVisionModel(tier: MangaVisionModelTier) {
         mangaDubManager.setSelectedVisionModel(tier)
     }
@@ -1827,6 +1830,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun setMangaIncludeNonBubbleText(include: Boolean) {
         mangaDubManager.setIncludeNonBubbleText(include)
+    }
+
+    fun setMangaLockVoicesViaCloning(lock: Boolean) {
+        mangaDubManager.setLockVoicesViaCloning(lock)
     }
 
     fun importMangaCbz(
@@ -1840,6 +1847,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
         includeNonBubbleText: Boolean? = null,
+        lockVoicesViaCloning: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null
     ) {
         mangaDubManager.importCbzChapter(
@@ -1853,6 +1861,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             burnInSubtitles = burnInSubtitles,
             videoQuality = videoQuality,
             includeNonBubbleText = includeNonBubbleText,
+            lockVoicesViaCloning = lockVoicesViaCloning,
             preferredVisionModel = preferredVisionModel
         ) { msg ->
             showToast(msg)
@@ -1948,6 +1957,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         videoQuality: MangaVideoQuality? = null,
         enableAtmosphereFx: Boolean? = null,
         includeNonBubbleText: Boolean? = null,
+        lockVoicesViaCloning: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         autoCookFullMp4: Boolean? = null,
@@ -1960,6 +1970,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         videoQuality = videoQuality,
         enableAtmosphereFx = enableAtmosphereFx,
         includeNonBubbleText = includeNonBubbleText,
+        lockVoicesViaCloning = lockVoicesViaCloning,
         powerUserVisionUrl = powerUserVisionUrl,
         preferredVisionModel = preferredVisionModel,
         autoCookFullMp4 = autoCookFullMp4,

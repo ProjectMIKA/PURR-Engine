@@ -17,6 +17,7 @@ import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrBpeTokenizer
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrHardwareProbe
+import com.projectmika.purrtts.core.purr.PurrPhononTokenizer
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrSentimentScorer
 import com.projectmika.purrtts.engine.PurrSynthesizer
@@ -26,11 +27,14 @@ import java.io.FileInputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.util.EnumSet
+import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.ln
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
+import kotlin.math.PI
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -73,6 +77,44 @@ class OnnxRuntimeEngine(
         const val SPEC_CHATTERBOX = "sub_chatterbox_turbo"
         const val SPEC_NEUTTS_2E = "rom_neutts_2e"
         const val SPEC_SOPRANO = "rom_soprano_80m"
+        const val SPEC_PHONON_31M = "rom_phonon_31m"
+        const val SPEC_PHONON_FP32 = "sub_phonon_fp32"
+
+        private val PHONON_VOICE_FILES = mapOf(
+            "phonon_zoey" to "NbpkqMVS3CJeq2j8.bin",
+            "phonon_juniper" to "NIWIOv5vTi5eRMj8.bin",
+            "phonon_harper" to "4SZHfMpw-p46Ywgs.bin",
+            "phonon_everly" to "vjFyp2BcCyTlUmYb.bin",
+            "phonon_easton" to "LMDIYE0Oa377Qh6Z.bin",
+            "phonon_micah" to "40QrMVgAxFiUnP9f.bin",
+            "phonon_miles" to "d9XCyhjo4JhkHF1d.bin",
+            "phonon_preston" to "qIxlZ7Ei8KvWlyQH.bin",
+            "phonon_maeve" to "6PWnV0Nq4wu7RVBT.bin",
+            "phonon_freya" to "GgfEkEJtxZR7gnpy.bin",
+            "phonon_alfie" to "X6NceqF285Gr04gb.bin",
+            "phonon_hugh" to "YyKcxPG7iIgS3jsK.bin",
+            "phonon_silas" to "xPDpsV3F592srkjA.bin",
+            "phonon_morwenna" to "nOykTmcH9ydsGGIc.bin",
+            "phonon_snowqueen" to "NIWoEurJHMJjyUTe.bin",
+            "phonon_aldric" to "gSgG5Tor0GPEnqzC.bin"
+        )
+
+        /**
+         * Transposes Gradium Phonon `.bin` speaker latents from disk layout `[1, 512, frames]`
+         * into the ONNX `audio_prompt_latents` tensor layout `[frames, 512]`.
+         */
+        fun transposePhononVoiceLatents(raw: FloatArray, voiceDim: Int = 512): FloatArray {
+            if (raw.isEmpty() || voiceDim <= 0 || raw.size < voiceDim) return FloatArray(0)
+            val frames = raw.size / voiceDim
+            val out = FloatArray(frames * voiceDim)
+            for (f in 0 until frames) {
+                val outBase = f * voiceDim
+                for (d in 0 until voiceDim) {
+                    out[outBase + d] = raw[d * frames + f]
+                }
+            }
+            return out
+        }
 
         private const val CHATTERBOX_START_TOKEN = 6561L
         private const val CHATTERBOX_STOP_TOKEN = 6562L
@@ -140,7 +182,7 @@ class OnnxRuntimeEngine(
         }
     }
 
-    private enum class LoadedFamily { NONE, SOPRANO, NEUTTS, CHATTERBOX }
+    private enum class LoadedFamily { NONE, SOPRANO, NEUTTS, CHATTERBOX, PHONON }
 
     private data class TensorPayload(
         val floats: FloatArray?,
@@ -188,7 +230,24 @@ class OnnxRuntimeEngine(
     private var cbTokenizer: PurrBpeTokenizer? = null
     private var cbPromptCache: ChatterboxPromptCache? = null
 
+    private var phononFlowModel: OrtSession? = null
+    private var phononMimiDecoder: OrtSession? = null
+    private var phononTokenizer: PurrPhononTokenizer? = null
+    private var phononLoadedFp32: Boolean = false
+    private val phononVoiceCache = HashMap<String, FloatArray>()
+
     private fun nativeDir(specId: String): File = File(context.filesDir, "models/native/$specId")
+
+    private fun isPhononInstalled(): Boolean {
+        val baseDir = nativeDir(SPEC_PHONON_31M)
+        val fp32Dir = nativeDir(SPEC_PHONON_FP32)
+        val hasTokenizer = File(baseDir, "tokenizer.json").exists() || File(fp32Dir, "tokenizer.json").exists()
+        val hasQ4 = File(baseDir, "onnx/model_q4.onnx").exists() &&
+            File(baseDir, "onnx/mimi_decoder_fp16.onnx").exists()
+        val hasFp32 = File(fp32Dir, "onnx/model.onnx").exists() &&
+            File(fp32Dir, "onnx/mimi_decoder.onnx").exists()
+        return hasTokenizer && (hasQ4 || hasFp32)
+    }
 
     private fun isSopranoInstalled(): Boolean {
         val d = nativeDir(SPEC_SOPRANO)
@@ -215,7 +274,7 @@ class OnnxRuntimeEngine(
     }
 
     override val isModelReady: Boolean
-        get() = isSopranoInstalled() || isNeuTtsInstalled() || isChatterboxInstalled()
+        get() = isSopranoInstalled() || isNeuTtsInstalled() || isChatterboxInstalled() || isPhononInstalled()
 
     override suspend fun warmup(profile: PurrProfile) {
         mutex.withLock {
@@ -223,6 +282,7 @@ class OnnxRuntimeEngine(
             when {
                 clean.startsWith("soprano_") && isSopranoInstalled() -> ensureSopranoLoadedLocked()
                 clean.startsWith("neutts_") && isNeuTtsInstalled() -> ensureNeuTtsLoadedLocked()
+                clean.startsWith("phonon_") && isPhononInstalled() -> ensurePhononLoadedLocked()
                 (clean.startsWith("chatterbox_") || clonedVoicesProvider().any {
                     it.id == clean && it.resolvedCloneEngineId == SPEC_CHATTERBOX
                 }) && isChatterboxInstalled() -> ensureChatterboxLoadedLocked()
@@ -253,6 +313,7 @@ class OnnxRuntimeEngine(
                 when {
                     cleanVoiceId.startsWith("soprano_") -> synthesizeSopranoLocked(text)
                     cleanVoiceId.startsWith("neutts_") -> synthesizeNeuTtsLocked(text, cleanVoiceId, profile)
+                    cleanVoiceId.startsWith("phonon_") -> synthesizePhononLocked(text, cleanVoiceId)
                     clonedCb != null -> synthesizeChatterboxLocked(
                         text = text,
                         refWavFile = File(clonedCb.referenceWavPath),
@@ -340,6 +401,14 @@ class OnnxRuntimeEngine(
         cbCondDecoder = null
         cbTokenizer = null
         cbPromptCache = null
+
+        runCatching { phononFlowModel?.close() }
+        runCatching { phononMimiDecoder?.close() }
+        phononFlowModel = null
+        phononMimiDecoder = null
+        phononTokenizer = null
+        phononLoadedFp32 = false
+        phononVoiceCache.clear()
 
         loadedFamily = LoadedFamily.NONE
         activeSmartOffload = false
@@ -1392,6 +1461,259 @@ class OnnxRuntimeEngine(
                 PurrDspProcessor.resampleMono(mono, sampleRate, SAMPLE_RATE_HZ)
             }
         }.getOrElse { FloatArray(0) }
+    }
+
+    private fun ensurePhononLoadedLocked(): Boolean {
+        val baseDir = nativeDir(SPEC_PHONON_31M)
+        val fp32Dir = nativeDir(SPEC_PHONON_FP32)
+        val useFp32 = File(fp32Dir, "onnx/model.onnx").exists() && File(fp32Dir, "onnx/mimi_decoder.onnx").exists()
+        if (loadedFamily == LoadedFamily.PHONON &&
+            phononFlowModel != null &&
+            phononMimiDecoder != null &&
+            phononTokenizer != null &&
+            phononLoadedFp32 == useFp32
+        ) {
+            return true
+        }
+        val flowFile = if (useFp32) File(fp32Dir, "onnx/model.onnx") else File(baseDir, "onnx/model_q4.onnx")
+        val mimiFile = if (useFp32) File(fp32Dir, "onnx/mimi_decoder.onnx") else File(baseDir, "onnx/mimi_decoder_fp16.onnx")
+        val tokFile = File(baseDir, "tokenizer.json").takeIf { it.exists() } ?: File(fp32Dir, "tokenizer.json")
+        if (!flowFile.exists() || !mimiFile.exists() || !tokFile.exists()) return false
+
+        closeAllSessionsLocked()
+        val smartOffload = smartOffloadProvider()
+        val threads = hardwareProfile.optimalCpuThreads
+        // Phonon relies on MatMulNBits & GroupQueryAttention -> stay on XNNPACK/CPU (`preferNnapi = false`)
+        val (flowSession, _) = createSessionWithFallback(flowFile.absolutePath, threads, preferNnapi = false, smartOffload = smartOffload)
+        val (mimiSession, _) = createSessionWithFallback(mimiFile.absolutePath, threads, preferNnapi = false, smartOffload = smartOffload)
+
+        phononFlowModel = flowSession
+        phononMimiDecoder = mimiSession
+        phononTokenizer = PurrPhononTokenizer.fromFile(tokFile)
+        phononLoadedFp32 = useFp32
+        loadedFamily = LoadedFamily.PHONON
+        activeSmartOffload = smartOffload
+        activeUsedNnapi = false
+        Log.i(TAG, "[ONNX_NATIVE_MOUNT] Mounted Phonon 31M (${if (useFp32) "FP32" else "Q4"})")
+        return true
+    }
+
+    private fun loadPhononSpeakerLatents(cleanVoiceId: String): Pair<FloatArray, Int> {
+        val baseDir = nativeDir(SPEC_PHONON_31M)
+        val voicesDir = File(baseDir, "voices")
+        val preferredName = PHONON_VOICE_FILES[cleanVoiceId] ?: "NbpkqMVS3CJeq2j8.bin"
+        val voiceFile = File(voicesDir, preferredName).takeIf { it.isFile && it.length() >= 512L * 4L }
+            ?: voicesDir.listFiles()?.firstOrNull { it.isFile && it.extension.equals("bin", true) && it.length() >= 512L * 4L }
+            ?: return FloatArray(0) to 0
+        val cached = phononVoiceCache[voiceFile.name]
+        if (cached != null) return cached to (cached.size / 512)
+
+        val bytes = voiceFile.readBytes()
+        val floatCount = bytes.size / 4
+        val raw = FloatArray(floatCount)
+        val bb = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN)
+        for (i in 0 until floatCount) raw[i] = bb.float
+        val transposed = transposePhononVoiceLatents(raw, voiceDim = 512)
+        phononVoiceCache[voiceFile.name] = transposed
+        return transposed to (transposed.size / 512)
+    }
+
+    private fun synthesizePhononLocked(text: String, cleanVoiceId: String): SynthesisOutcome {
+        if (!ensurePhononLoadedLocked()) {
+            return SynthesisOutcome(
+                pcmFloat24k = FloatArray(0),
+                sampleRateHz = SAMPLE_RATE_HZ,
+                hardwareBadge = HardwareStatusBadge.IDLE,
+                engineSummary = "Gradium Phonon 31M (ROM-17) is not installed",
+                isFallbackNeuralPreview = true
+            )
+        }
+        val flowModel = phononFlowModel!!
+        val mimiDecoder = phononMimiDecoder!!
+        val tokenizer = phononTokenizer!!
+
+        val (voiceLatents, voiceFrames) = loadPhononSpeakerLatents(cleanVoiceId)
+        if (voiceFrames <= 0 || voiceLatents.isEmpty()) {
+            return SynthesisOutcome(
+                pcmFloat24k = FloatArray(0),
+                sampleRateHz = SAMPLE_RATE_HZ,
+                hardwareBadge = HardwareStatusBadge.IDLE,
+                engineSummary = "Phonon speaker latents missing in ROM-17 voices/",
+                isFallbackNeuralPreview = true
+            )
+        }
+
+        val chunks = tokenizer.splitIntoChunks(text, maxTokens = 48)
+        if (chunks.isEmpty()) {
+            return SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.CPU_NEON, "Empty Phonon input")
+        }
+
+        val flowInputInfo = flowModel.inputInfo
+        val flowInputNames = flowInputInfo.keys
+        val numKvLayers = (0..15).count { "past_key_values.$it.key" in flowInputNames }.coerceAtLeast(6)
+        val noiseStd = sqrt(0.3f)
+        val rng = Random(System.nanoTime())
+        val pcmSegments = ArrayList<FloatArray>(chunks.size * 2)
+        val gapSamples = FloatArray(1440) // 60ms natural boundary at 24 kHz
+
+        fun nextGaussianNoise(count: Int): FloatArray {
+            val out = FloatArray(count)
+            var i = 0
+            while (i < count) {
+                val u1 = rng.nextDouble().coerceIn(1e-7, 1.0 - 1e-7)
+                val u2 = rng.nextDouble()
+                val mag = sqrt(-2.0 * ln(u1))
+                val z0 = (mag * cos(2.0 * PI * u2)).toFloat() * noiseStd
+                val z1 = (mag * kotlin.math.sin(2.0 * PI * u2)).toFloat() * noiseStd
+                out[i++] = z0
+                if (i < count) out[i++] = z1
+            }
+            return out
+        }
+
+        for ((chunkIdx, chunkPair) in chunks.withIndex()) {
+            val (chunkIds, wordCount) = chunkPair
+            val textLen = chunkIds.size
+            val maxBlocks = (((textLen / 3.0 + 2.5) * 12.5) / 8.0).toInt().coerceIn(3, 40)
+            val framesAfterEos = if (wordCount <= 4) 3 else 1
+            var pastSeqLen = 0L
+            var pastAudioLatents = TensorPayload(FloatArray(0), null, null, longArrayOf(1L, 0L, 32L), OnnxJavaType.FLOAT)
+            val pastKv = HashMap<String, TensorPayload>(numKvLayers * 2)
+            for (l in 0 until numKvLayers) {
+                val kType = (flowInputInfo["past_key_values.$l.key"]?.info as? TensorInfo)?.type ?: OnnxJavaType.FLOAT
+                val vType = (flowInputInfo["past_key_values.$l.value"]?.info as? TensorInfo)?.type ?: OnnxJavaType.FLOAT
+                pastKv["past_key_values.$l.key"] = TensorPayload(FloatArray(0), null, null, longArrayOf(1L, 8L, 0L, 64L), kType)
+                pastKv["past_key_values.$l.value"] = TensorPayload(FloatArray(0), null, null, longArrayOf(1L, 8L, 0L, 64L), vType)
+            }
+
+            var eosHitFrame = -1
+            var finalLatents = FloatArray(0)
+            var finalFrames = 0
+
+            for (step in 0 until maxBlocks) {
+                val isFirst = step == 0
+                val stepInputIds = if (isFirst) chunkIds else LongArray(0)
+                val stepVoice = if (isFirst) voiceLatents else FloatArray(0)
+                val stepVoiceFrames = if (isFirst) voiceFrames.toLong() else 0L
+                val newSeqLen = (if (isFirst) voiceFrames.toLong() + textLen.toLong() + 8L else 8L)
+                val totalSeqLen = pastSeqLen + newSeqLen
+                val posIds = LongArray(newSeqLen.toInt()) { pastSeqLen + it.toLong() }
+                val attnMask = LongArray(totalSeqLen.toInt()) { 1L }
+
+                val feeds = HashMap<String, OnnxTensor>(flowInputNames.size)
+                try {
+                    feeds["input_ids"] = createLongTensor(stepInputIds, longArrayOf(1L, stepInputIds.size.toLong()))
+                    val apType = (flowInputInfo["audio_prompt_latents"]?.info as? TensorInfo)?.type ?: OnnxJavaType.FLOAT
+                    feeds["audio_prompt_latents"] = createFloatTensorMatching(stepVoice, longArrayOf(1L, stepVoiceFrames, 512L), apType)
+                    if ("attention_mask" in flowInputNames) {
+                        feeds["attention_mask"] = createLongTensor(attnMask, longArrayOf(1L, totalSeqLen))
+                    }
+                    if ("position_ids" in flowInputNames) {
+                        feeds["position_ids"] = createLongTensor(posIds, longArrayOf(1L, newSeqLen))
+                    }
+                    val pastLatType = (flowInputInfo["past_key_values.audio_latents"]?.info as? TensorInfo)?.type ?: OnnxJavaType.FLOAT
+                    feeds["past_key_values.audio_latents"] = if (pastAudioLatents.floats != null) {
+                        createFloatTensorMatching(pastAudioLatents.floats!!, pastAudioLatents.shape, pastLatType)
+                    } else {
+                        createFloatTensorMatching(FloatArray(0), longArrayOf(1L, 0L, 32L), pastLatType)
+                    }
+                    val noiseType = (flowInputInfo["noise"]?.info as? TensorInfo)?.type ?: OnnxJavaType.FLOAT
+                    feeds["noise"] = createFloatTensorMatching(nextGaussianNoise(8 * 32), longArrayOf(1L, 8L, 32L), noiseType)
+                    for ((k, payload) in pastKv) {
+                        if (k in flowInputNames) feeds[k] = tensorFromPayload(payload)
+                    }
+
+                    flowModel.run(feeds).use { result ->
+                        val eosTensor = result.get("eos_logits").orElse(null)
+                        val eosLogits = if (eosTensor != null) extractFloatArray(eosTensor) else FloatArray(0)
+                        for (f in 0 until minOf(8, eosLogits.size)) {
+                            val globalFrame = step * 8 + f
+                            if (eosHitFrame < 0 && globalFrame >= 2 && eosLogits[f] > 4.0f) {
+                                eosHitFrame = globalFrame
+                            }
+                        }
+
+                        val framesSoFar = (step + 1) * 8
+                        val stopFrameCount = if (eosHitFrame >= 0) eosHitFrame + 1 + framesAfterEos else Int.MAX_VALUE
+                        if (framesSoFar >= stopFrameCount || step == maxBlocks - 1) {
+                            val latVal = result.get("audio_latents").orElse(null)
+                            val rawLatents = if (latVal != null) extractFloatArray(latVal) else FloatArray(0)
+                            val clampedFrames = minOf(framesSoFar, stopFrameCount).coerceAtMost(rawLatents.size / 32)
+                            finalFrames = clampedFrames
+                            finalLatents = if (clampedFrames > 0) rawLatents.copyOfRange(0, clampedFrames * 32) else FloatArray(0)
+                        } else {
+                            (result.get("present.audio_latents").orElse(null) as? OnnxTensor)?.let {
+                                pastAudioLatents = copyTensorPayload(it)
+                            }
+                            for (l in 0 until numKvLayers) {
+                                (result.get("present.$l.key").orElse(null) as? OnnxTensor)?.let {
+                                    pastKv["past_key_values.$l.key"] = copyTensorPayload(it)
+                                }
+                                (result.get("present.$l.value").orElse(null) as? OnnxTensor)?.let {
+                                    pastKv["past_key_values.$l.value"] = copyTensorPayload(it)
+                                }
+                            }
+                            pastSeqLen = totalSeqLen
+                        }
+                    }
+                } finally {
+                    feeds.values.forEach { runCatching { it.close() } }
+                }
+                if (finalFrames > 0 || (eosHitFrame >= 0 && (step + 1) * 8 >= eosHitFrame + 1 + framesAfterEos)) {
+                    break
+                }
+            }
+
+            if (finalFrames > 0 && finalLatents.size >= finalFrames * 32) {
+                val mimiInfo = mimiDecoder.inputInfo
+                val mimiFeeds = HashMap<String, OnnxTensor>(2)
+                try {
+                    val latType = (mimiInfo["audio_latents"]?.info as? TensorInfo)?.type ?: OnnxJavaType.FLOAT
+                    mimiFeeds["audio_latents"] = createFloatTensorMatching(finalLatents, longArrayOf(1L, finalFrames.toLong(), 32L), latType)
+                    if ("num_frames" in mimiInfo) {
+                        val nfType = (mimiInfo["num_frames"]?.info as? TensorInfo)?.type ?: OnnxJavaType.INT64
+                        mimiFeeds["num_frames"] = if (nfType == OnnxJavaType.INT32) {
+                            createIntTensor(intArrayOf(finalFrames), longArrayOf(1L))
+                        } else {
+                            createLongTensor(longArrayOf(finalFrames.toLong()), longArrayOf(1L))
+                        }
+                    }
+                    mimiDecoder.run(mimiFeeds).use { decOut ->
+                        val audioVal = decOut.get("audio_values").orElse(null)
+                        val decodedPcm = if (audioVal != null) extractFloatArray(audioVal) else FloatArray(0)
+                        val lenTensor = decOut.get("audio_lengths").orElse(null) as? OnnxTensor
+                        val reportedLen = lenTensor?.let {
+                            val p = copyTensorPayload(it)
+                            p.longs?.firstOrNull()?.toInt() ?: p.ints?.firstOrNull()
+                        } ?: decodedPcm.size
+                        val keepLen = reportedLen.coerceIn(0, decodedPcm.size)
+                        if (keepLen > 0) {
+                            if (chunkIdx > 0 && pcmSegments.isNotEmpty()) pcmSegments += gapSamples
+                            pcmSegments += decodedPcm.copyOfRange(0, keepLen)
+                        }
+                    }
+                } finally {
+                    mimiFeeds.values.forEach { runCatching { it.close() } }
+                }
+            }
+        }
+
+        val totalLen = pcmSegments.sumOf { it.size }
+        val combined = FloatArray(totalLen)
+        var pos = 0
+        for (seg in pcmSegments) {
+            seg.copyInto(combined, pos)
+            pos += seg.size
+        }
+        val voiceTag = cleanVoiceId.removePrefix("phonon_").replaceFirstChar { it.uppercaseChar() }
+        val modeLabel = if (phononLoadedFp32) "FP32" else "Q4"
+        return SynthesisOutcome(
+            pcmFloat24k = combined,
+            sampleRateHz = SAMPLE_RATE_HZ,
+            hardwareBadge = HardwareStatusBadge.CPU_NEON,
+            engineSummary = "Phonon 31M $modeLabel ($voiceTag)",
+            isFallbackNeuralPreview = false
+        )
     }
 
     private fun resetIdleTimer() {

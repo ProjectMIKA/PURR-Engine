@@ -325,4 +325,80 @@ class PurrHeavyEnginesTest {
             repoDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `phonon tokenizer normalizes text applies unigram viterbi byte fallback and splits chunks`() {
+        val sampleJson = """
+            {
+              "version": "1.0",
+              "model": {
+                "type": "Unigram",
+                "unk_id": 0,
+                "byte_fallback": true,
+                "vocab": [
+                  ["\u0000<unk>", 0.0],
+                  ["\u0000<s>", 0.0],
+                  ["\u0000</s>", 0.0],
+                  ["\u0000<pad>", 0.0],
+                  ["<|audio_bos|>", 0.0],
+                  ["<|audio_prompt|>", 0.0],
+                  ["<|audio_latent|>", 0.0],
+                  ["<0x41>", 0.0],
+                  ["<0x5A>", 0.0],
+                  ["<0xE2>", 0.0],
+                  ["<0x82>", 0.0],
+                  ["<0xAC>", 0.0],
+                  ["▁", -2.5],
+                  ["▁Hello", -1.2],
+                  ["▁world", -1.4],
+                  [".", -1.1],
+                  [",", -1.1],
+                  ["!", -1.1]
+                ]
+              }
+            }
+        """.trimIndent()
+        val tok = PurrPhononTokenizer.fromJsonString(sampleJson)
+        val encoded = tok.encode("“hello   world”")
+        assertTrue(encoded.isNotEmpty())
+
+        // Known Unigram pieces win over byte fallback; unknown Euro sign (€ -> 0xE2 0x82 0xAC) triggers byte tokens
+        val helloWorld = tok.encode("hello world")
+        assertArrayEquals(longArrayOf(13L, 14L, 15L), helloWorld)
+
+        val euroIds = tok.encode("€", normalizeSentence = false)
+        assertArrayEquals(longArrayOf(12L, 9L, 10L, 11L), euroIds)
+
+        val chunks = tok.splitIntoChunks("Hello world! Hello world.", maxTokens = 4)
+        assertEquals(2, chunks.size)
+        assertTrue(chunks.all { it.first.isNotEmpty() && it.second >= 2 })
+    }
+
+    @Test
+    fun `phonon voice latent transpose reorders disk layout 512xF to Fx512`() {
+        val raw = floatArrayOf(
+            // dim 0: f0=1, f1=2, f2=3
+            1f, 2f, 3f,
+            // dim 1: f0=10, f1=20, f2=30
+            10f, 20f, 30f
+        )
+        val out = OnnxRuntimeEngine.transposePhononVoiceLatents(raw, voiceDim = 2)
+        assertArrayEquals(
+            floatArrayOf(1f, 10f, 2f, 20f, 3f, 30f),
+            out,
+            0.0001f
+        )
+    }
+
+    @Test
+    fun `phonon rom 17 sub 17a and 16 voices are wired in catalog`() {
+        val catalog = PurrDefaultPresets.modelCatalog()
+        val rom17 = catalog.firstOrNull { it.id == "rom_phonon_31m" }
+        val sub17 = catalog.firstOrNull { it.id == "sub_phonon_fp32" }
+        assertTrue(rom17 != null && rom17.romCode == "ROM-17")
+        assertTrue(sub17 != null && sub17.romCode == "SUB-17A" && sub17.parentCartridgeId == "rom_phonon_31m")
+        val phononVoices = PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == "rom_phonon_31m" }
+        assertEquals(16, phononVoices.size)
+        assertTrue(phononVoices.all { it.engine == BackendType.ONNX_NATIVE && it.id.startsWith("phonon_") })
+    }
 }

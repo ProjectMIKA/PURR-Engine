@@ -963,4 +963,164 @@ class MangaDubStudioTest {
         assertEquals("Ooh, what nice drinks do we have here?", ltrSpec.lines[0].rawText)
         assertEquals("But wow, am I thirsty.", ltrSpec.lines[1].rawText)
     }
+
+    @Test
+    fun `bfs panel slicer reads staggered 2x2 RTL page row-first Z-order without column dropping`() {
+        val w = 120
+        val h = 160
+        val lum = IntArray(w * h) { 250 }
+
+        fun drawPanel(x1: Int, y1: Int, x2: Int, y2: Int) {
+            for (y in y1 until y2) {
+                for (x in x1 until x2) {
+                    val isBorder = x == x1 || x == x2 - 1 || y == y1 || y == y2 - 1
+                    lum[y * w + x] = if (isBorder) 15 else 180
+                }
+            }
+        }
+
+        // Staggered 2x2 grid sharing a center vertical gutter, with slightly offset horizontal row boundaries
+        drawPanel(4, 4, 56, 74)     // Top-Left
+        drawPanel(62, 6, 115, 80)   // Top-Right
+        drawPanel(4, 78, 56, 155)   // Bottom-Left
+        drawPanel(62, 84, 115, 155) // Bottom-Right
+
+        val rtl = MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(
+            luminance = lum,
+            width = w,
+            height = h,
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertEquals(4, rtl.size)
+        // Row-first Z-order: Top-Right -> Top-Left -> Bottom-Right -> Bottom-Left
+        assertTrue(rtl[0].centerX > 0.5f && rtl[0].centerY < 0.5f)
+        assertTrue(rtl[1].centerX < 0.5f && rtl[1].centerY < 0.5f)
+        assertTrue(rtl[2].centerX > 0.5f && rtl[2].centerY > 0.5f)
+        assertTrue(rtl[3].centerX < 0.5f && rtl[3].centerY > 0.5f)
+    }
+
+    @Test
+    fun `parser enforces container_type non-bubble exclusion, tightened band Z-order, and tail ambiguity`() {
+        val rawPanelJson = """
+            {
+              "mood": "comedy",
+              "lines": [
+                {
+                  "bubble": 1,
+                  "x_pos": 0.86,
+                  "y_pos": 0.42,
+                  "container_type": "speech_bubble",
+                  "tail_target": "SEBASTIAN",
+                  "speaker": "SEBASTIAN",
+                  "confidence": 0.92,
+                  "text": "Lower right first?"
+                },
+                {
+                  "bubble": 2,
+                  "x_pos": 0.16,
+                  "y_pos": 0.14,
+                  "container_type": "speech_bubble",
+                  "tail_target": "OJOU",
+                  "speaker": "OJOU",
+                  "confidence": 0.90,
+                  "text": "Upper left earlier!"
+                },
+                {
+                  "bubble": 3,
+                  "x_pos": 0.50,
+                  "y_pos": 0.92,
+                  "container_type": "credit_or_signature",
+                  "speaker": "OJOU",
+                  "confidence": 0.95,
+                  "text": "Scanlation by: JasmineTea"
+                },
+                {
+                  "bubble": 4,
+                  "x_pos": 0.45,
+                  "y_pos": 0.65,
+                  "container_type": "floating_sfx",
+                  "speaker": "OJOU",
+                  "confidence": 0.95,
+                  "text": "SHAAA!"
+                },
+                {
+                  "bubble": 5,
+                  "x_pos": 0.14,
+                  "y_pos": 0.72,
+                  "container_type": "speech_bubble",
+                  "tail_target": "unclear",
+                  "speaker": "OJOU",
+                  "confidence": 0.62,
+                  "text": "Wait what?"
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val filtered = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = rawPanelJson,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false,
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertEquals(3, filtered.lines.size)
+        // Upper band (0.14) strictly precedes lower band (0.42), which precedes bottom band (0.72)
+        assertEquals("Upper left earlier!", filtered.lines[0].rawText)
+        assertEquals("Lower right first?", filtered.lines[1].rawText)
+        assertEquals("Wait what?", filtered.lines[2].rawText)
+        assertTrue(filtered.lines[2].needsUserDecision)
+
+        val unfiltered = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = rawPanelJson,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = true,
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertEquals(5, unfiltered.lines.size)
+    }
+
+    @Test
+    fun `voice casting parser compiles structured VoiceDesignBuilder prompts and clone lock defaults true`() {
+        val defaultProj = MangaSeriesProject(
+            id = "p1",
+            seriesTitle = "Test Series",
+            createdAtEpochMs = 1L,
+            updatedAtEpochMs = 1L
+        )
+        assertTrue(defaultProj.lockVoicesViaCloning)
+        assertFalse(defaultProj.includeNonBubbleText)
+
+        val roster = listOf(
+            MangaCharacterProfile(id = "c1", name = "SEBASTIAN", gender = VoiceGender.MALE)
+        )
+        val rawCasting = """
+            {
+              "characters": [
+                {
+                  "name": "SEBASTIAN",
+                  "gender": "male",
+                  "age": "ADULT",
+                  "pitch": "LOW_BARITONE",
+                  "timbres": ["WARM_VELVETY", "CRISP_CLEAR"],
+                  "pace": "CALM_STEADY",
+                  "delivery": "SERIOUS_AUTHORITATIVE",
+                  "accent": "BRITISH_RP",
+                  "acoustics": "CLOSE_MIC_STUDIO",
+                  "persona_role": "Composed rabbit scientist butler",
+                  "nuance": "Dry deadpan composure with silky authority.",
+                  "visual_description": "Rabbit scientist in lab coat",
+                  "speed_scale": 1.0,
+                  "pitch_scale": 0.98
+                }
+              ]
+            }
+        """.trimIndent()
+        val updated = MangaVisionResponseParser.parseVoiceDesignRoster(rawCasting, roster)
+        assertEquals(1, updated.size)
+        assertTrue(updated[0].voiceDesignPrompt.contains("low-baritone", ignoreCase = true))
+        assertTrue(updated[0].voiceDesignPrompt.contains("Rabbit scientist in lab coat", ignoreCase = true) ||
+            updated[0].voiceDesignPrompt.contains("scientist butler", ignoreCase = true))
+    }
 }

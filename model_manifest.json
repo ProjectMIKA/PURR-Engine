@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAtUtc": "2026-11-23T08:35:39Z",
+  "generatedAtUtc": "2026-11-23T22:54:48Z",
   "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
   "assets": {
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
@@ -38,6 +38,14 @@
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/matcha-icefall-en_US-ljspeech.tar.bz2": {
       "sha256": "cff849fee69d7d3b22e0b0267aa6b863e32d05039a1eca963765a314a73450c0",
       "sizeBytes": 76764067
+    },
+    "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/model_q4.onnx_data": {
+      "sha256": "1b253aa56a8961cd8ffb96d5f3239af3bfebc19b8f9112de16ff2dedc6474a4c",
+      "sizeBytes": 28428288
+    },
+    "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/model.onnx_data": {
+      "sha256": "404bd74fa953816404a5be303f3362bf7afebd4f9b752b4e5c80f86589a50138",
+      "sizeBytes": 121833472
     },
     "https://huggingface.co/litert-community/Kokoro-G2P-en-US/resolve/main/dp_g2p_litert.tflite": {
       "sha256": "f8d6bbd16197b2468f53273de13f971a0e1e8657709d7f4285f2cd1c31f26620",

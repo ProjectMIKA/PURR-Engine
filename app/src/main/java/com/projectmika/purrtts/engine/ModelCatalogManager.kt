@@ -186,18 +186,34 @@ class ModelCatalogManager(
                 File(espeakDir, "intonations").isFile
             if (!espeakValid) return false
         }
+        val sharedEspeakValid = File(context.filesDir, "models/sherpa/shared_espeak/espeak-ng-data/phondata").isFile
         return when (spec.sherpaFamily) {
             SherpaModelFamily.KOKORO,
-            SherpaModelFamily.KITTEN_TTS -> files.any { it.name == "voices.bin" } && files.any { it.name == "tokens.txt" }
+            SherpaModelFamily.KITTEN_TTS -> files.any { it.name == "voices.bin" } &&
+                files.any { it.name == "tokens.txt" } &&
+                (espeakDir != null || sharedEspeakValid)
             SherpaModelFamily.SUPERTONIC_3 -> files.any { it.name == "tts.json" } &&
                 files.any { it.name.contains("unicode_indexer") } &&
                 files.any { it.name.contains("voice") && it.extension.equals("bin", true) }
             SherpaModelFamily.POCKET_TTS -> files.any { it.name.contains("lm_flow") } &&
                 files.any { it.name.contains("lm_main") } &&
+                files.any { it.name.contains("encoder") } &&
+                files.any { it.name.contains("decoder") } &&
                 files.any { it.name.contains("vocab") && it.extension.equals("json", true) }
-            SherpaModelFamily.ZIPVOICE,
-            SherpaModelFamily.MATCHA,
-            SherpaModelFamily.PIPER,
+            SherpaModelFamily.ZIPVOICE -> files.any { it.name == "tokens.txt" } &&
+                files.any { it.name.contains("encoder") && it.extension.equals("onnx", true) } &&
+                files.any { it.name.contains("decoder") && it.extension.equals("onnx", true) } &&
+                files.any { it.name.contains("vocoder") && it.extension.equals("onnx", true) }
+            SherpaModelFamily.MATCHA -> files.any { it.name == "tokens.txt" } &&
+                files.any {
+                    it.extension.equals("onnx", true) &&
+                        !it.name.contains("vocos", true) &&
+                        !it.name.contains("hifigan", true) &&
+                        !it.name.contains("vocoder", true)
+                } &&
+                (spec.companionFileName.isNullOrBlank() || files.any { it.name == spec.companionFileName })
+            SherpaModelFamily.PIPER -> files.any { it.name == "tokens.txt" } &&
+                (files.any { it.name.startsWith("lexicon") } || espeakDir != null || sharedEspeakValid)
             SherpaModelFamily.MELO_TTS -> files.any { it.name == "tokens.txt" }
             null -> true
         }
@@ -686,30 +702,57 @@ class ModelCatalogManager(
         }
     }
 
+    private fun mirrorSharedEspeakDataIfValid(extractDir: File) {
+        val espeakDir = extractDir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" } ?: return
+        val isComplete = File(espeakDir, "phontab").isFile &&
+            File(espeakDir, "phonindex").isFile &&
+            File(espeakDir, "phondata").isFile &&
+            File(espeakDir, "intonations").isFile
+        if (!isComplete) return
+        val sharedDir = File(context.filesDir, "models/sherpa/shared_espeak/espeak-ng-data")
+        val sharedReady = File(sharedDir, "phontab").isFile &&
+            File(sharedDir, "phonindex").isFile &&
+            File(sharedDir, "phondata").isFile &&
+            File(sharedDir, "intonations").isFile
+        if (!sharedReady) {
+            sharedDir.parentFile?.mkdirs()
+            runCatching { espeakDir.copyRecursively(sharedDir, overwrite = true) }
+        }
+    }
+
     private fun extractTarBz2(archiveFile: File, targetDir: File) {
         targetDir.mkdirs()
-        val canonicalRoot = targetDir.canonicalPath
-        BufferedInputStream(FileInputStream(archiveFile)).use { bis ->
-            BZip2CompressorInputStream(bis).use { bzIn ->
-                TarArchiveInputStream(bzIn).use { tarIn ->
-                    while (true) {
-                        val entry = tarIn.nextEntry ?: break
-                        val outFile = File(targetDir, entry.name)
-                        // ZipSlip / TarSlip path traversal guard
-                        if (!outFile.canonicalPath.startsWith(canonicalRoot)) {
-                            throw SecurityException("Blocked unsafe tar entry path: ${entry.name}")
-                        }
-                        if (entry.isDirectory) {
-                            outFile.mkdirs()
-                        } else {
-                            outFile.parentFile?.mkdirs()
-                            FileOutputStream(outFile).use { out ->
-                                tarIn.copyTo(out)
+        val stagingDir = File(targetDir.parentFile ?: targetDir, "${targetDir.name}.extract_tmp")
+        stagingDir.deleteRecursively()
+        stagingDir.mkdirs()
+        try {
+            val canonicalRoot = stagingDir.canonicalPath
+            BufferedInputStream(FileInputStream(archiveFile)).use { bis ->
+                BZip2CompressorInputStream(bis).use { bzIn ->
+                    TarArchiveInputStream(bzIn).use { tarIn ->
+                        while (true) {
+                            val entry = tarIn.nextEntry ?: break
+                            val outFile = File(stagingDir, entry.name)
+                            // ZipSlip / TarSlip path traversal guard
+                            if (!outFile.canonicalPath.startsWith(canonicalRoot)) {
+                                throw SecurityException("Blocked unsafe tar entry path: ${entry.name}")
+                            }
+                            if (entry.isDirectory) {
+                                outFile.mkdirs()
+                            } else {
+                                outFile.parentFile?.mkdirs()
+                                FileOutputStream(outFile).use { out ->
+                                    tarIn.copyTo(out)
+                                }
                             }
                         }
                     }
                 }
             }
+            stagingDir.copyRecursively(targetDir, overwrite = true)
+            mirrorSharedEspeakDataIfValid(targetDir)
+        } finally {
+            stagingDir.deleteRecursively()
         }
     }
 

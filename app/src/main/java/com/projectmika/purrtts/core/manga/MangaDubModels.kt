@@ -1,5 +1,15 @@
 package com.projectmika.purrtts.core.manga
 
+import com.projectmika.purrtts.core.purr.QwenVoiceDesignBuilder
+import com.projectmika.purrtts.core.purr.VoiceDesignAccent
+import com.projectmika.purrtts.core.purr.VoiceDesignAcoustics
+import com.projectmika.purrtts.core.purr.VoiceDesignAge
+import com.projectmika.purrtts.core.purr.VoiceDesignDelivery
+import com.projectmika.purrtts.core.purr.VoiceDesignGender
+import com.projectmika.purrtts.core.purr.VoiceDesignPace
+import com.projectmika.purrtts.core.purr.VoiceDesignPitch
+import com.projectmika.purrtts.core.purr.VoiceDesignSpec
+import com.projectmika.purrtts.core.purr.VoiceDesignTimbre
 import com.projectmika.purrtts.core.purr.VoiceGender
 import java.io.BufferedInputStream
 import java.io.File
@@ -45,8 +55,8 @@ enum class MangaReadingOrder(
     RTL_MANGA(
         label = "MANGA (Right -> Left)",
         shortLabel = "MANGA (R -> L)",
-        instructionHint = "Japanese Manga (Default): Panels & speech bubbles read RIGHT -> LEFT, TOP -> BOTTOM. Rightmost bubble speaks first.",
-        vlmPromptDirective = "CRITICAL MANGA READING DIRECTION (RIGHT-TO-LEFT): Read panels and speech bubbles from TOP-RIGHT toward BOTTOM-LEFT. When two speech bubbles are side-by-side, the RIGHT bubble is spoken FIRST and the LEFT bubble is spoken SECOND. When bubbles are stacked on the right before a left bubble, order them Top-Right -> Bottom-Right -> Left."
+        instructionHint = "Japanese Manga (Default): Panels & speech bubbles read RIGHT -> LEFT, TOP -> BOTTOM across each horizontal row tier before dropping down.",
+        vlmPromptDirective = "CRITICAL MANGA READING DIRECTION (RIGHT-TO-LEFT Z-ORDER): Read horizontal row tiers TOP-TO-BOTTOM, and within each horizontal tier read panels and bubbles STRICTLY RIGHT-TO-LEFT (Top-Right -> Top-Left BEFORE dropping to Bottom-Right -> Bottom-Left). Never drop down to a lower panel on the right and jump back up to an upper panel on the left unless a single tall right panel clearly spans beside multiple stacked left panels. Inside one panel, read TOP-RIGHT -> LEFT along the upper band before dropping to a lower bubble band."
     ),
     LTR_COMIC(
         label = "COMIC / MANHWA (Left -> Right)",
@@ -200,6 +210,9 @@ data class MangaCharacterProfile(
     val voiceDesignPrompt: String = "",
     val assignedVoiceId: String = "",
     val assignedVoiceLabel: String = "AUTO (Qwen VoiceDesign)",
+    val autoCloneVoiceId: String = "",
+    val autoCloneSeedWavPath: String = "",
+    val autoClonePromptHash: String = "",
     val speedScale: Float = 1.0f,
     val pitchScale: Float = 1.0f,
     val lineCount: Int = 0
@@ -335,6 +348,7 @@ data class MangaSeriesProject(
     val videoQuality: MangaVideoQuality = MangaVideoQuality.HD_720P,
     val enableAtmosphereFx: Boolean = true,
     val includeNonBubbleText: Boolean = false,
+    val lockVoicesViaCloning: Boolean = true,
     val powerUserVisionUrl: String = "",
     val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
     val autoCookFullMp4: Boolean = true,
@@ -429,8 +443,9 @@ object MangaTextBender {
 
     private val NON_DIALOGUE_SPEAKERS = setOf(
         "SFX", "SOUND", "SOUND EFFECT", "SOUND_EFFECT", "ONOMATOPOEIA",
-        "CREDIT", "CREDITS", "SCANLATION", "WATERMARK", "SIGN",
-        "BACKGROUND", "BG_TEXT", "FLOATING_TEXT", "SIGNATURE"
+        "CREDIT", "CREDITS", "SCANLATION", "TRANSLATOR", "TYPESETTER",
+        "WATERMARK", "SIGN", "BACKGROUND", "BG_TEXT", "FLOATING_TEXT",
+        "SIGNATURE", "CAPTION_SFX", "EFFECT", "PAGE_NUMBER", "MARGIN_NOTE"
     )
 
     private val PURE_SFX_TOKENS = setOf(
@@ -439,12 +454,22 @@ object MangaTextBender {
         "rustle", "rumble", "menacing", "gasp", "pant", "puff", "huff",
         "shiver", "tremble", "boing", "bonk", "splat", "squish", "slurp",
         "munch", "chomp", "sfx", "clink", "clack", "creak", "crack",
-        "boom", "bang", "zip", "zap", "zing", "bwo", "bwodo"
+        "boom", "bang", "zip", "zap", "zing", "bwo", "bwodo", "shaaa",
+        "shaa", "sha", "ba-dump", "badump", "doki", "dokidoki", "fssss",
+        "sizzle", "drip", "drop", "plop", "tap", "pat", "ring", "ding",
+        "dong", "buzz", "hum", "whir", "vroom", "screech", "skid", "stomp",
+        "step", "shuffle", "flutter", "flap", "twinkle", "sparkle", "glint",
+        "flash", "grin", "stare", "glare", "nod", "shake", "twitch", "flinch",
+        "sob", "sniff", "sigh", "phew", "groan", "moan", "grunt", "hiss",
+        "growl", "roar", "howl", "yelp", "shriek", "cackle", "chuckle",
+        "giggle", "snicker", "snort", "cough", "sneeze", "yawn", "hiccup",
+        "burp", "chew", "lick", "bite", "nibble", "swallow", "sip", "glug",
+        "pour", "gush", "spurt", "spray", "spatter", "rattle", "jingle"
     )
 
     /**
      * Returns true when a raw OCR candidate is clearly a floating SFX, scanlation credit bar,
-     * URL watermark, or handwritten artist signature rather than spoken bubble dialogue.
+     * URL watermark, page counter, or handwritten artist signature rather than spoken bubble dialogue.
      */
     fun isNonBubbleOrCreditNoise(speaker: String, rawText: String): Boolean {
         val spNorm = speaker.trim().uppercase(Locale.ROOT)
@@ -456,26 +481,33 @@ object MangaTextBender {
         if (lower.startsWith("[sfx") || lower.startsWith("(sfx") ||
             lower.startsWith("sfx:") || lower.startsWith("fx:") ||
             lower.startsWith("*sfx") || lower.startsWith("tl:") ||
-            lower.startsWith("t/n:")
+            lower.startsWith("t/n:") || lower.startsWith("ed note")
         ) return true
 
         if (listOf(
                 "scanlation", "scanlated", "typeset", "redraw",
                 "translated by", "cleaned by", "proofread by",
-                "brought to you by", "read more at", "https://", "http://"
+                "brought to you by", "read more at", "https://", "http://",
+                "patreon", "ko-fi", "discord.gg", "twitter.com", "x.com/"
             ).any { it in lower }
         ) return true
 
-        val hasKana = t.any { ch -> ch in '\u3040'..'\u309F' || ch in '\u30A0'..'\u30FF' }
+        if (Regex("""^(?:p\.?\s*|pg\.?\s*)?\d{1,3}(?:\s*/\s*\d{1,3})?$""").matches(lower)) {
+            return true
+        }
+
+        val hasKanaOrHangul = t.any { ch ->
+            ch in '\u3040'..'\u309F' || ch in '\u30A0'..'\u30FF' || ch in '\uAC00'..'\uD7AF'
+        }
         val asciiLetters = t.count { it in 'a'..'z' || it in 'A'..'Z' }
-        if (lower.contains("さんへ") || (hasKana && asciiLetters <= 8)) return true
+        if (lower.contains("さんへ") || (hasKanaOrHangul && asciiLetters <= 10)) return true
 
         val stripped = lower.replace(Regex("[*\\[\\]()~—–\\-!?.…,\"']"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
         if (stripped.isEmpty()) return true
         val words = stripped.split(' ')
-        val isElongatedSfx = Regex("""^(?:sh+a+|f+w+o+s+h+|b+w+o+(?:\s+d+o+)?|k+r+a+k+|z+a+p+|g+r+r+|s+h+h+)$""")
+        val isElongatedSfx = Regex("""^(?:sh+a+|f+w+o+s+h+|b+w+o+(?:\s+d+o+)?|k+r+a+k+|z+a+p+|g+r+r+|s+h+h+|oh+(?:\s+ho+){2,}|ha+(?:\s+ha+){3,})$""")
             .matches(stripped)
         if (isElongatedSfx) return true
         if (words.size <= 2 && words.all { it in PURE_SFX_TOKENS }) return true
@@ -1010,8 +1042,10 @@ object MangaBfsPanelSlicer {
         val hCut = findBestHorizontalCut(luminance, width, height, gutterMed, tolerance, x0, y0, x1, y1)
         val vCut = if (webtoon) null else findBestVerticalCut(luminance, width, height, gutterMed, tolerance, x0, y0, x1, y1)
 
+        // Prioritize clean full-width horizontal row gutters so manga reads in strict
+        // row-first Z-order (Top-Right -> Top-Left before Bottom-Right -> Bottom-Left).
         return when {
-            hCut != null && (vCut == null || hCut.score >= vCut.score) -> {
+            hCut != null -> {
                 val top = sliceRegionRecursive(
                     luminance, width, height, gutterMed, tolerance,
                     x0, y0, x1, hCut.start, depth + 1, maxDepth, rtl, webtoon
@@ -1252,12 +1286,18 @@ object MangaBfsPanelSlicer {
             }
         }
 
-        // 2. Clean vertical column guillotine cut (guarantees staggered right column finishes before left column in RTL)
+        // 2. Clean vertical column guillotine cut (used for true tall-sidebar columns like a tall right panel
+        // beside stacked left panels, NEVER for staggered 2x2 grids where row-first Z-order applies)
         val xCandidates = pool.flatMap { listOf(it.right, it.left) }.distinct().sorted()
         for (x in xCandidates) {
             val left = pool.filter { it.right <= x + 0.025f }
             val right = pool.filter { it.left >= x - 0.025f && it !in left }
             if (left.isNotEmpty() && right.isNotEmpty() && left.size + right.size == pool.size) {
+                val bothMultiRow = left.distinctRowCount() >= 2 && right.distinctRowCount() >= 2
+                val hasTrueTallColumnBridge = left.hasBridgingColumnPanelAgainst(right) || right.hasBridgingColumnPanelAgainst(left)
+                if (bothMultiRow && !hasTrueTallColumnBridge) {
+                    continue
+                }
                 return if (rtl) {
                     partitionByGuillotine(right, rtl) + partitionByGuillotine(left, rtl)
                 } else {
@@ -1344,6 +1384,34 @@ object MangaBfsPanelSlicer {
             }
         }
         return result
+    }
+
+    private fun List<MangaNormalizedRect>.distinctRowCount(): Int {
+        if (size <= 1) return size
+        val sorted = sortedBy { it.top }
+        var rows = 1
+        var rowBot = sorted.first().bottom
+        for (i in 1 until sorted.size) {
+            val box = sorted[i]
+            if (box.top >= rowBot - 0.04f) {
+                rows++
+                rowBot = box.bottom
+            } else {
+                rowBot = max(rowBot, box.bottom)
+            }
+        }
+        return rows
+    }
+
+    private fun List<MangaNormalizedRect>.hasBridgingColumnPanelAgainst(other: List<MangaNormalizedRect>): Boolean {
+        if (other.size < 2) return false
+        return any { panel ->
+            val overlappedRows = other.count { o ->
+                val overlapH = (min(panel.bottom, o.bottom) - max(panel.top, o.top)).coerceAtLeast(0f)
+                overlapH >= o.height.coerceAtLeast(0.01f) * 0.30f
+            }
+            overlappedRows >= 2
+        }
     }
 
     /**
@@ -1713,7 +1781,15 @@ object MangaVisionResponseParser {
             val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
                 ?.contentOrNull.orEmpty().trim()
                 .ifEmpty { "UNKNOWN" }
-            val isSpeechBubble = (lObj["is_speech_bubble"] as? JsonPrimitive)?.booleanOrNull ?: true
+            val containerType = ((lObj["container_type"] ?: lObj["bubble_type"] ?: lObj["container"] ?: lObj["type"]) as? JsonPrimitive)
+                ?.contentOrNull.orEmpty().trim().lowercase(Locale.ROOT)
+            val isExplicitNonBubble = containerType in setOf(
+                "sfx", "floating_sfx", "floating", "background", "bg_text",
+                "credit", "credits", "credit_or_signature", "signature",
+                "watermark", "margin", "margin_note", "sign", "onomatopoeia", "page_number"
+            )
+            val isSpeechBubble = ((lObj["is_speech_bubble"] as? JsonPrimitive)?.booleanOrNull ?: true) &&
+                !isExplicitNonBubble
             if (!includeNonBubbleText && (!isSpeechBubble || MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText))) {
                 return@mapIndexedNotNull null
             }
@@ -1740,13 +1816,22 @@ object MangaVisionResponseParser {
             val explicitCandidates = (lObj["candidate_speakers"] as? JsonArray)
                 ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { s -> s.isNotEmpty() } }
                 .orEmpty()
+            val tailTarget = ((lObj["tail_target"] ?: lObj["tail"]) as? JsonPrimitive)
+                ?.contentOrNull.orEmpty().trim()
+            val isNarrationBox = containerType.contains("narration") || speakerRaw.equals("NARRATOR", ignoreCase = true)
+            val tailAmbiguous = tailTarget.equals("unclear", ignoreCase = true) ||
+                tailTarget.equals("ambiguous", ignoreCase = true) ||
+                tailTarget.equals("unknown", ignoreCase = true) ||
+                tailTarget.equals("none", ignoreCase = true) ||
+                tailTarget == "?"
             val ambiguousSpeaker = speakerRaw.equals("UNKNOWN", ignoreCase = true) ||
                 speakerRaw.equals("AMBIGUOUS", ignoreCase = true) ||
                 speakerRaw == "?"
-            val needsDecision = ambiguousSpeaker || conf < 0.55f
+            val needsDecision = ambiguousSpeaker || (!isNarrationBox && tailAmbiguous && conf < 0.82f) || conf < 0.68f
             val reason = when {
                 ambiguousSpeaker -> "VLM flagged ambiguous speaker in Panel ${pIdx + 1} — tap a character below"
-                conf < 0.55f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
+                !isNarrationBox && tailAmbiguous && conf < 0.82f -> "Bubble tail target unclear in Panel ${pIdx + 1} — verify speaker attribution"
+                conf < 0.68f -> "Low VLM confidence (${(conf * 100).toInt()}%) — verify speaker attribution"
                 else -> ""
             }
             val mergedCandidates = (explicitCandidates + knownNames).distinct().take(6)
@@ -1794,11 +1879,12 @@ object MangaVisionResponseParser {
         var bandAnchorY = -1f
         for (item in byY) {
             val y = item.yPos ?: 0.5f
-            if (bands.isEmpty() || (y - bandAnchorY) > 0.35f) {
+            if (bands.isEmpty() || (y - bandAnchorY) > 0.20f) {
                 bands += mutableListOf(item)
                 bandAnchorY = y
             } else {
                 bands.last() += item
+                bandAnchorY = bands.last().minOf { it.yPos ?: 0.5f }
             }
         }
         val rtl = readingOrder == MangaReadingOrder.RTL_MANGA
@@ -1856,8 +1942,18 @@ object MangaVisionResponseParser {
             }
             val nextVis = (update["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                 .ifBlank { ch.visualDescription }
-            val nextVoice = (update["voice_design_prompt"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            val rawVoice = (update["voice_design_prompt"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                 .ifBlank { ch.voiceDesignPrompt }
+            val hasStructuredAttrs = listOf("age", "pitch", "timbre", "timbres", "pace", "delivery", "accent", "acoustics")
+                .any { update.containsKey(it) }
+            val nextVoice = compileRosterVoiceDesignPrompt(
+                characterName = ch.name,
+                gender = nextGender,
+                visualDesc = nextVis,
+                rawPrompt = rawVoice,
+                update = update,
+                hasStructuredAttrs = hasStructuredAttrs
+            )
             val nextSpeed = ((update["speed_scale"] as? JsonPrimitive)?.floatOrNull ?: ch.speedScale).coerceIn(0.85f, 1.15f)
             val nextPitch = ((update["pitch_scale"] as? JsonPrimitive)?.floatOrNull ?: ch.pitchScale).coerceIn(0.90f, 1.10f)
 
@@ -1869,6 +1965,99 @@ object MangaVisionResponseParser {
                 pitchScale = nextPitch
             )
         }
+    }
+
+    private fun compileRosterVoiceDesignPrompt(
+        characterName: String,
+        gender: VoiceGender,
+        visualDesc: String,
+        rawPrompt: String,
+        update: JsonObject,
+        hasStructuredAttrs: Boolean
+    ): String {
+        val wordCount = rawPrompt.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
+        if (!hasStructuredAttrs && wordCount >= 28) return rawPrompt
+
+        val vdGender = when (gender) {
+            VoiceGender.FEMALE -> VoiceDesignGender.FEMALE
+            VoiceGender.MALE -> VoiceDesignGender.MALE
+            VoiceGender.ANDROGYNOUS -> VoiceDesignGender.ANDROGYNOUS
+        }
+        val corpus = "$rawPrompt $visualDesc $characterName".lowercase(Locale.ROOT)
+        fun strField(key: String) = (update[key] as? JsonPrimitive)?.contentOrNull.orEmpty().trim().uppercase(Locale.ROOT)
+
+        val age = when (strField("age")) {
+            "TEEN" -> VoiceDesignAge.TEEN
+            "YOUNG_ADULT" -> VoiceDesignAge.YOUNG_ADULT
+            "ADULT" -> VoiceDesignAge.ADULT
+            "MIDDLE_AGED" -> VoiceDesignAge.MIDDLE_AGED
+            "ELDERLY" -> VoiceDesignAge.ELDERLY
+            else -> when {
+                listOf("elder", "old", "grand", "ancient").any { it in corpus } -> VoiceDesignAge.ELDERLY
+                listOf("teen", "school", "kid", "child").any { it in corpus } -> VoiceDesignAge.TEEN
+                else -> VoiceDesignAge.YOUNG_ADULT
+            }
+        }
+        val pitch = when (strField("pitch")) {
+            "DEEP_BASS" -> VoiceDesignPitch.DEEP_BASS
+            "LOW_BARITONE" -> VoiceDesignPitch.LOW_BARITONE
+            "MID_NATURAL" -> VoiceDesignPitch.MID_NATURAL
+            "BRIGHT_UPPER_MID" -> VoiceDesignPitch.BRIGHT_UPPER_MID
+            "HIGH_SOPRANO" -> VoiceDesignPitch.HIGH_SOPRANO
+            else -> when (vdGender) {
+                VoiceDesignGender.FEMALE -> if ("mature" in corpus || "deep" in corpus) VoiceDesignPitch.MID_NATURAL else VoiceDesignPitch.BRIGHT_UPPER_MID
+                VoiceDesignGender.MALE -> if ("boy" in corpus || "teen" in corpus) VoiceDesignPitch.MID_NATURAL else VoiceDesignPitch.LOW_BARITONE
+                VoiceDesignGender.ANDROGYNOUS -> VoiceDesignPitch.MID_NATURAL
+            }
+        }
+        val timbreRaw = (update["timbres"] as? JsonArray)
+            ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.uppercase(Locale.ROOT) }
+            ?: strField("timbre").takeIf { it.isNotEmpty() }?.split(',', '|')?.map { it.trim() }.orEmpty()
+        val timbres = timbreRaw.mapNotNull { runCatching { VoiceDesignTimbre.valueOf(it) }.getOrNull() }
+            .ifEmpty {
+                listOf(
+                    if ("raspy" in corpus || "gruff" in corpus) VoiceDesignTimbre.RASPY_GRAVELLY else VoiceDesignTimbre.WARM_VELVETY,
+                    VoiceDesignTimbre.CRISP_CLEAR
+                )
+            }
+        val pace = runCatching { VoiceDesignPace.valueOf(strField("pace")) }.getOrElse {
+            if ("fast" in corpus || "brisk" in corpus || "energetic" in corpus) VoiceDesignPace.ENERGETIC_BRISK else VoiceDesignPace.NATURAL_FLOWING
+        }
+        val delivery = runCatching { VoiceDesignDelivery.valueOf(strField("delivery")) }.getOrElse {
+            when {
+                listOf("cheerful", "upbeat", "genki", "playful").any { it in corpus } -> VoiceDesignDelivery.CHEERFUL_UPBEAT
+                listOf("serious", "butler", "calm", "stoic", "command").any { it in corpus } -> VoiceDesignDelivery.SERIOUS_AUTHORITATIVE
+                listOf("shy", "hesitant", "nervous").any { it in corpus } -> VoiceDesignDelivery.SHY_HESITANT
+                listOf("teas", "smug", "ojou").any { it in corpus } -> VoiceDesignDelivery.PLAYFUL_TEASING
+                else -> VoiceDesignDelivery.WARM_CONFIDENT
+            }
+        }
+        val accent = runCatching { VoiceDesignAccent.valueOf(strField("accent")) }.getOrElse {
+            VoiceDesignAccent.ANIME_EXPRESSIVE
+        }
+        val acoustics = runCatching { VoiceDesignAcoustics.valueOf(strField("acoustics")) }.getOrElse {
+            VoiceDesignAcoustics.CLOSE_MIC_STUDIO
+        }
+        val personaRole = (update["persona_role"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            .ifBlank { visualDesc.takeIf { it.isNotBlank() } ?: "Manga character ($characterName)" }
+        val customNuance = ((update["nuance"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim() +
+            (if (rawPrompt.isNotBlank()) " $rawPrompt" else "")).trim()
+            .ifBlank { "Distinct, emotionally expressive manga voice acting with steady pitch identity across lines." }
+
+        return QwenVoiceDesignBuilder.composePrompt(
+            VoiceDesignSpec(
+                gender = vdGender,
+                age = age,
+                pitch = pitch,
+                timbres = timbres,
+                pace = pace,
+                delivery = delivery,
+                accent = accent,
+                acoustics = acoustics,
+                personaRole = personaRole,
+                customNuance = customNuance
+            )
+        )
     }
 
     private fun cleanupTrailingCommas(jsonText: String): String =

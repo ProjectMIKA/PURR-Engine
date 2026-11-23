@@ -1467,7 +1467,142 @@ object PurrDefaultPresets {
             )
         }
 
-        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + vitsLjsVoices + aishell3Voices + sherpaSpecialized + heavyNativeVoices + proxyVoices
+        val phononVoices = listOf(
+            VoiceDescriptor(
+                id = "phonon_zoey",
+                displayName = "Phonon // Zoey (US Female • Upbeat)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                nativeTags = listOf("female", "american", "upbeat", "phonon", "24khz")
+            ),
+            VoiceDescriptor(
+                id = "phonon_juniper",
+                displayName = "Phonon // Juniper (US Female • Cheerful)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                nativeTags = listOf("female", "american", "cheerful", "warm", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_harper",
+                displayName = "Phonon // Harper (US Female • Clear)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                nativeTags = listOf("female", "american", "clear", "crisp", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_everly",
+                displayName = "Phonon // Everly (US Female • Soft)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                nativeTags = listOf("female", "american", "soft", "warm", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_easton",
+                displayName = "Phonon // Easton (US Male • Steady)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                nativeTags = listOf("male", "american", "steady", "confident", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_micah",
+                displayName = "Phonon // Micah (US Male • Natural)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                nativeTags = listOf("male", "american", "natural", "young", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_miles",
+                displayName = "Phonon // Miles (US Male • Warm)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                nativeTags = listOf("male", "american", "warm", "baritone", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_preston",
+                displayName = "Phonon // Preston (US Male • Poised)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                nativeTags = listOf("male", "american", "poised", "narrator", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_maeve",
+                displayName = "Phonon // Maeve (UK Female • Smooth)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-GB",
+                nativeTags = listOf("female", "british", "smooth", "narrator", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_freya",
+                displayName = "Phonon // Freya (UK Female • Bright)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-GB",
+                nativeTags = listOf("female", "british", "bright", "crisp", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_alfie",
+                displayName = "Phonon // Alfie (UK Male • Lively)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                languageCode = "en-GB",
+                nativeTags = listOf("male", "british", "lively", "energetic", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_hugh",
+                displayName = "Phonon // Hugh (UK Male • Classic)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                languageCode = "en-GB",
+                nativeTags = listOf("male", "british", "classic", "deep", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_silas",
+                displayName = "Phonon // Captain Silas (Character Male)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                nativeTags = listOf("male", "character", "gruff", "warrior", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_morwenna",
+                displayName = "Phonon // Morwenna (Character Female)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                nativeTags = listOf("female", "character", "mysterious", "theatrical", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_snowqueen",
+                displayName = "Phonon // Snow Queen (Character Female)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.FEMALE,
+                nativeTags = listOf("female", "character", "regal", "ice", "noble", "phonon")
+            ),
+            VoiceDescriptor(
+                id = "phonon_aldric",
+                displayName = "Phonon // Master Aldric (Character Male)",
+                engine = BackendType.ONNX_NATIVE,
+                cartridgeId = "rom_phonon_31m",
+                gender = VoiceGender.MALE,
+                nativeTags = listOf("male", "character", "elder", "wise", "mentor", "phonon")
+            )
+        )
+
+        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + vitsLjsVoices + aishell3Voices + phononVoices + sherpaSpecialized + heavyNativeVoices + proxyVoices
     }
 
     /**
@@ -2118,6 +2253,74 @@ object PurrDefaultPresets {
             unlocksSummary = "UNLOCKS: 10 curated Mandarin speakers (female & male) under zh-CN.",
             category = CartridgeCategory.TTS,
             releaseOrder = 16
+        ),
+        ModelBundleSpec(
+            id = "rom_phonon_31m",
+            romCode = "ROM-17",
+            badge = "PHONON_31M",
+            accentHex = 0xFFFF2E93,
+            name = "GRADIUM_PHONON_31M",
+            subtitle = "Gradium Phonon 31M Q4 Flow-LM + Mimi 24kHz • 16 Expressive Voices (55MB)",
+            description = "Ultra-efficient 31M-parameter Gradium Phonon flow-matching TTS with 8-frame causal latent generation, Unigram byte-fallback tokenizer, Mimi 24kHz decoder, and 16 US/UK/Character speaker latents (Apache-2.0).",
+            backend = BackendType.ONNX_NATIVE,
+            downloadUrl = "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/model_q4.onnx_data",
+            fileName = "onnx/model_q4.onnx_data",
+            expectedSha256 = "1b253aa56a8961cd8ffb96d5f3239af3bfebc19b8f9112de16ff2dedc6474a4c",
+            approximateSizeMb = 55,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Gradium Phonon 31M Q4 + Mimi FP16 ONNX • 24kHz • Apache-2.0",
+            unlocksSummary = "UNLOCKS: 16 Gradium Phonon 24kHz voices (US, UK & Character archetypes) under ROM-17.",
+            extraAssets = listOf(
+                BundleAssetFile("onnx/model_q4.onnx", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/model_q4.onnx", "dc2f4885ca6c148368effc74dd7e7bc593c780731867f0f43ce5a3dc26fe42b5", 283544L),
+                BundleAssetFile("onnx/mimi_decoder_fp16.onnx", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/mimi_decoder_fp16.onnx", "69c67f52723080f913c7ec9cb1dc77d8d99f762d882da4cd9e9b9be2fea79fdf", 33198L),
+                BundleAssetFile("onnx/mimi_decoder_fp16.onnx_data", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/mimi_decoder_fp16.onnx_data", "9bec29824bab84ff7a5a643819460d822803369caf6a65d1d537a33ea7d91dcb", 21835472L),
+                BundleAssetFile("tokenizer.json", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/tokenizer.json", "", 169734L),
+                BundleAssetFile("voices/NbpkqMVS3CJeq2j8.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/NbpkqMVS3CJeq2j8.bin", "2023c0fddede488a609b911803345ebc333b406fbfb39d3444fae5c7459000db", 256000L),
+                BundleAssetFile("voices/NIWIOv5vTi5eRMj8.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/NIWIOv5vTi5eRMj8.bin", "762de2a472be583d3e358ad1c1e3fca0e16e7d0be7c96c70ff5116ce7437e633", 256000L),
+                BundleAssetFile("voices/4SZHfMpw-p46Ywgs.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/4SZHfMpw-p46Ywgs.bin", "331b969dbe31746edfdff9937fa8c27029d21c1fb3f41a6aa3dee6def0d17ce2", 256000L),
+                BundleAssetFile("voices/vjFyp2BcCyTlUmYb.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/vjFyp2BcCyTlUmYb.bin", "a2bbd50a8587c0236c0d84ed81e10d91bce89ff92bb6604f830c4dcc0fc294e2", 256000L),
+                BundleAssetFile("voices/LMDIYE0Oa377Qh6Z.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/LMDIYE0Oa377Qh6Z.bin", "6467e69cb22525b9a2784f661a543c0b018cba655ccc30be2e153ed2ac0f30ef", 256000L),
+                BundleAssetFile("voices/40QrMVgAxFiUnP9f.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/40QrMVgAxFiUnP9f.bin", "186b193668d0e53f7570d24aa0f68609b6111208740eede15c15d52861c0457a", 256000L),
+                BundleAssetFile("voices/d9XCyhjo4JhkHF1d.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/d9XCyhjo4JhkHF1d.bin", "ab542932f553e16be04d530ea2cddf1fbfc655d13074343d416bb76efaee86ae", 256000L),
+                BundleAssetFile("voices/qIxlZ7Ei8KvWlyQH.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/qIxlZ7Ei8KvWlyQH.bin", "1b81d1228569972a7abeb81a854d34f18f37c1f6f7243a02b31c184308ebbae7", 256000L),
+                BundleAssetFile("voices/6PWnV0Nq4wu7RVBT.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/6PWnV0Nq4wu7RVBT.bin", "f00756d86bcd873c0ab3c240a52a7470ac7f02e8cb12718e86d7563ecd9fa932", 256000L),
+                BundleAssetFile("voices/GgfEkEJtxZR7gnpy.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/GgfEkEJtxZR7gnpy.bin", "ad1c36dc0e9a601ee13c75a418314263b7555ab44ee4428490c27c36d9b0ffa6", 256000L),
+                BundleAssetFile("voices/X6NceqF285Gr04gb.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/X6NceqF285Gr04gb.bin", "58792454eab6b4f10235bec6f37c50794965ad60e24af349acaf784cdae3539b", 256000L),
+                BundleAssetFile("voices/YyKcxPG7iIgS3jsK.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/YyKcxPG7iIgS3jsK.bin", "f73e14157996adc0b4269acbe3d5b6d7d069e814452edd811686aaa913090af4", 256000L),
+                BundleAssetFile("voices/xPDpsV3F592srkjA.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/xPDpsV3F592srkjA.bin", "912924e4e01b22611359e2410242a97b8144dc7b7303f848e7bfce766f720d01", 256000L),
+                BundleAssetFile("voices/nOykTmcH9ydsGGIc.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/nOykTmcH9ydsGGIc.bin", "a722d2c1add8deb449126e573cd07a09d5412df62fc171f71ec9121a46819323", 256000L),
+                BundleAssetFile("voices/NIWoEurJHMJjyUTe.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/NIWoEurJHMJjyUTe.bin", "9a1eab420fa3bc69962fe9db70a256eeb0ebad7f37a90acb6eb001e106227038", 256000L),
+                BundleAssetFile("voices/gSgG5Tor0GPEnqzC.bin", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/voices/gSgG5Tor0GPEnqzC.bin", "7d092280b59854b57ca6bd8775203dd9bd54b09983bcc9975cc4bdfb2488ded7", 256000L)
+            ),
+            category = CartridgeCategory.TTS,
+            releaseOrder = 17
+        ),
+        ModelBundleSpec(
+            id = "sub_phonon_fp32",
+            romCode = "SUB-17A",
+            badge = "FP32_STUDIO",
+            accentHex = 0xFFFF79C6,
+            name = "PHONON_31M_FP32_CHIP",
+            subtitle = "Unquantized FP32 Flow-LM & Mimi Decoder Weights for ROM-17 (+158 MB)",
+            description = "Optional unquantized full-precision FP32 graph upgrade for ROM-17 Gradium Phonon 31M delivering maximum spectral fidelity on XNNPACK.",
+            backend = BackendType.ONNX_NATIVE,
+            downloadUrl = "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/model.onnx_data",
+            fileName = "onnx/model.onnx_data",
+            expectedSha256 = "404bd74fa953816404a5be303f3362bf7afebd4f9b752b4e5c80f86589a50138",
+            approximateSizeMb = 158,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "Unquantized FP32 Flow-LM + Mimi Decoder Upgrade",
+            unlocksSummary = "UPGRADES: ROM-17 Phonon 31M to unquantized FP32 neural weights when slotted.",
+            extraAssets = listOf(
+                BundleAssetFile("onnx/model.onnx", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/model.onnx", "4374b2f3bf69f2dcc0bcecfc91742f46d3b0934c9c4fa2f52126d02fb2de6c94", 225310L),
+                BundleAssetFile("onnx/mimi_decoder.onnx", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/mimi_decoder.onnx", "3a33403772d285ac77279b61902e836c1ef031568548f83831f04da889a457f8", 33479L),
+                BundleAssetFile("onnx/mimi_decoder.onnx_data", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/onnx/mimi_decoder.onnx_data", "35c735bfde62100182ee84747135515612c960f9b54e74233d44a9b509e4128e", 43670480L),
+                BundleAssetFile("tokenizer.json", "https://huggingface.co/onnx-community/phonon-31m-en-ONNX/resolve/main/tokenizer.json", "", 169734L)
+            ),
+            isSubCartridge = true,
+            parentCartridgeId = "rom_phonon_31m",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 17
         ),
 
         // =========================================================================

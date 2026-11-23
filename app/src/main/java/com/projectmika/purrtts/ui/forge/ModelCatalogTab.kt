@@ -1084,6 +1084,7 @@ fun ModelCatalogTab(
                                 "rom_coqui_vits" -> "COQUI VITS LJSPEECH PACKS (${childSubs.size})"
                                 "rom_meta_mms" -> "META MMS LANGUAGE PACKS (${childSubs.size})"
                                 "rom_mimic3_neural" -> "MIMIC3 LANGUAGE PACKS (${childSubs.size})"
+                                "rom_phonon_31m" -> "PHONON FP32 STUDIO UPGRADE (${childSubs.size})"
                                 "tool_manga_dub_studio" -> "GEMMA 4 VISION CARTRIDGES (${childSubs.size})"
                                 else -> "SUB-MODULES FOR ${spec.romCode} (${childSubs.size})"
                             }
@@ -1230,6 +1231,7 @@ fun ModelCatalogTab(
                                         "rom_coqui_vits" -> "// Install Coqui VCTK 109-Speaker Hub above OR standalone Coqui LJSpeech / Neon AI Studio below!"
                                         "rom_meta_mms" -> "// Install Meta MMS English above OR add Spanish, French & German language packs below!"
                                         "rom_mimic3_neural" -> "// Install Mycroft Mimic3 Spanish above OR add Korean KSS (ko-KR) below!"
+                                        "rom_phonon_31m" -> "// Install ROM-17 Phonon 31M Q4 (55MB, 16 voices) above; optionally add SUB-17A FP32 weights below!"
                                         else -> "// Expansion sub-cartridges for ${spec.romCode}:"
                                     }
                                     Text(
