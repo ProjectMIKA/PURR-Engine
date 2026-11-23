@@ -1,8 +1,18 @@
 package com.projectmika.purrtts.core.manga
 
 import com.projectmika.purrtts.core.purr.VoiceGender
+import java.io.ByteArrayOutputStream
+import java.io.File
+import java.nio.charset.Charset
+import java.nio.file.Files
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -144,5 +154,104 @@ class MangaDubStudioTest {
         val line2 = parsed.panels[1].lines.single()
         assertTrue(line2.needsUserDecision)
         assertTrue("KAEL" in line2.candidateSpeakers)
+    }
+
+    @Test
+    fun `hardened cbz extractor unpacks nested zip natural order shift-jis and magic-byte extensionless images`() {
+        val tempRoot = Files.createTempDirectory("purr_cbz_test").toFile()
+        try {
+            val cbzFile = File(tempRoot, "manga_test.cbz")
+            val destDir = File(tempRoot, "out")
+            val fakePng = byteArrayOf(
+                0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+                0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0
+            )
+            val fakeJpg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 16, 74, 70, 73, 70, 0, 1) +
+                ByteArray(32) { 1 }
+
+            ZipArchiveOutputStream(cbzFile.outputStream()).use { zos ->
+                zos.setEncoding("Shift_JIS")
+                fun addEntry(name: String, bytes: ByteArray) {
+                    val entry = ZipArchiveEntry(name)
+                    zos.putArchiveEntry(entry)
+                    zos.write(bytes)
+                    zos.closeArchiveEntry()
+                }
+                addEntry("__MACOSX/._001.png", ByteArray(40))
+                addEntry("ch01/10.jpg", fakeJpg)
+                addEntry("ch01/2_extensionless", fakePng) // magic byte PNG detection!
+                addEntry("第1話/page_01.jpg", fakeJpg)
+            }
+
+            val pages = MangaCbzExtractorUtils.extractArchiveFromFile(cbzFile, destDir, "manga_test.cbz")
+            assertEquals(3, pages.size)
+            assertTrue(pages[0].name.startsWith("page_00000."))
+            assertEquals("png", pages[1].extension)
+            assertTrue(pages.all { it.exists() && it.length() >= 32L })
+        } finally {
+            tempRoot.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `cbz extractor identifies rar cbr and pdf containers with explicit guidance`() {
+        val tempRoot = Files.createTempDirectory("purr_cbz_err_test").toFile()
+        try {
+            val fakeRar = File(tempRoot, "secret_cbr.cbz").apply {
+                writeBytes(byteArrayOf('R'.code.toByte(), 'a'.code.toByte(), 'r'.code.toByte(), '!'.code.toByte(), 0x1A, 0x07, 1, 0) + ByteArray(32))
+            }
+            val rarErr = runCatching {
+                MangaCbzExtractorUtils.extractArchiveFromFile(fakeRar, File(tempRoot, "out1"))
+            }.exceptionOrNull()
+            assertNotNull(rarErr)
+            assertTrue(rarErr!!.message!!.contains("RAR (.cbr)", ignoreCase = true))
+
+            val fakePdf = File(tempRoot, "doc.cbz").apply {
+                writeBytes("%PDF-1.7\n...".toByteArray() + ByteArray(32))
+            }
+            val pdfErr = runCatching {
+                MangaCbzExtractorUtils.extractArchiveFromFile(fakePdf, File(tempRoot, "out2"))
+            }.exceptionOrNull()
+            assertNotNull(pdfErr)
+            assertTrue(pdfErr!!.message!!.contains(".pdf", ignoreCase = true))
+        } finally {
+            tempRoot.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `gemma4 vision tier defaults to AUTO and deserializes legacy project json cleanly`() {
+        assertTrue(MangaVisionModelTier.GEMMA4_E2B.isRecommended)
+        assertFalse(MangaVisionModelTier.GEMMA4_E4B.isRecommended)
+        assertEquals("sub_gemma4_e2b_vision", MangaVisionModelTier.GEMMA4_E2B.specId)
+        assertEquals("sub_gemma4_e4b_vision", MangaVisionModelTier.GEMMA4_E4B.specId)
+
+        val legacyJson = """
+            {
+              "id": "p1",
+              "seriesTitle": "Legacy Series",
+              "createdAtEpochMs": 1000,
+              "updatedAtEpochMs": 2000
+            }
+        """.trimIndent()
+        val parser = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+        val decoded = parser.decodeFromString<MangaSeriesProject>(legacyJson)
+        assertEquals(MangaVisionModelTier.AUTO, decoded.preferredVisionModel)
+
+        val encoded = parser.encodeToString(decoded.copy(preferredVisionModel = MangaVisionModelTier.GEMMA4_E4B))
+        assertEquals(MangaVisionModelTier.GEMMA4_E4B, parser.decodeFromString<MangaSeriesProject>(encoded).preferredVisionModel)
+    }
+
+    @Test
+    fun `telemetry eta calculator and formatter produce accurate remaining estimates`() {
+        assertNull(MangaTelemetryUtils.estimateRemainingSec(500L, 0.5f))
+        assertNull(MangaTelemetryUtils.estimateRemainingSec(5000L, 0.01f))
+        assertNull(MangaTelemetryUtils.estimateRemainingSec(10_000L, 1.0f))
+
+        // At 10s elapsed and 25% complete -> ~40s total -> ~30s remaining
+        val eta = MangaTelemetryUtils.estimateRemainingSec(10_000L, 0.25f)
+        assertEquals(30, eta)
+        assertEquals("1m 05s", MangaTelemetryUtils.formatDurationShort(65))
+        assertEquals("9s", MangaTelemetryUtils.formatDurationShort(9))
     }
 }

@@ -206,6 +206,7 @@ object MangaMotionVideoMuxer {
         if (destMp4File.exists()) destMp4File.delete()
 
         try {
+            onProgress(0.05f, "ENCODING VIDEO ($totalFrames FRAMES @ ${aspect.widthPx}x${aspect.heightPx})...")
             encodeVideoTrack(
                 width = aspect.widthPx,
                 height = aspect.heightPx,
@@ -214,18 +215,31 @@ object MangaMotionVideoMuxer {
                 shots = shots,
                 burnInSubtitles = burnInSubtitles,
                 tempVideoFile = tempVideoFile,
-                onProgress = { p -> onProgress(0.05f + p * 0.65f, "RENDERING VIDEO FRAMES (${(p * 100).toInt()}%)...") }
+                onProgress = { frameDone, frameTotal ->
+                    val p = frameDone.toFloat() / frameTotal.coerceAtLeast(1).toFloat()
+                    onProgress(
+                        0.05f + p * 0.65f,
+                        "RENDERING VIDEO FRAME $frameDone/$frameTotal (${(p * 100).toInt()}%)..."
+                    )
+                }
             )
 
-            onProgress(0.74f, "ENCODING AAC VOICEOVER TRACK...")
+            onProgress(0.71f, "ASSEMBLING PCM AUDIO TIMELINE (${audioSpans.size} SPANS)...")
             val pcmStream = buildCombinedPcmStream(audioSpans, sampleRate)
+            onProgress(0.74f, "ENCODING AAC VOICEOVER TRACK (0%)...")
             encodeAacTrack(
                 pcm16 = pcmStream,
                 sampleRate = sampleRate,
-                tempAudioFile = tempAudioFile
+                tempAudioFile = tempAudioFile,
+                onProgress = { p ->
+                    onProgress(
+                        0.74f + p * 0.16f,
+                        "ENCODING AAC VOICEOVER TRACK (${(p * 100).toInt()}%)..."
+                    )
+                }
             )
 
-            onProgress(0.90f, "MUXING .MP4 VIDEO & AUDIO...")
+            onProgress(0.91f, "MUXING .MP4 VIDEO & AUDIO...")
             muxVideoAndAudio(tempVideoFile, tempAudioFile, destMp4File)
 
             onProgress(0.96f, "PUBLISHING TO DOWNLOADS/PURR-TTS/MANGADUBS...")
@@ -250,7 +264,7 @@ object MangaMotionVideoMuxer {
         shots: List<ShotSegment>,
         burnInSubtitles: Boolean,
         tempVideoFile: File,
-        onProgress: (Float) -> Unit
+        onProgress: (Int, Int) -> Unit
     ) {
         val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
@@ -273,12 +287,14 @@ object MangaMotionVideoMuxer {
             if (endOfStream) {
                 encoder.signalEndOfInputStream()
             }
+            var eosWaitTries = 0
             while (true) {
                 val timeout = if (endOfStream) 10_000L else 0L
                 val outIdx = encoder.dequeueOutputBuffer(bufferInfo, timeout)
                 when {
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                         if (!endOfStream) break
+                        if (++eosWaitTries >= 300) break
                     }
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         if (!muxerStarted) {
@@ -288,6 +304,7 @@ object MangaMotionVideoMuxer {
                         }
                     }
                     outIdx >= 0 -> {
+                        eosWaitTries = 0
                         val outBuf = encoder.getOutputBuffer(outIdx)
                         if (outBuf != null && bufferInfo.size > 0 && muxerStarted &&
                             (bufferInfo.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
@@ -312,7 +329,7 @@ object MangaMotionVideoMuxer {
 
         try {
             for (frameIdx in 0 until totalFrames) {
-                val timeMs = (frameIdx.toLong() * 1000L) / FPS.toLong()
+                val timeMs = ((frameIdx.toLong() * 1000L) / FPS.toLong()).coerceAtMost(totalDurationMs)
                 val activeShot = shots.firstOrNull { timeMs in it.startMs until it.endMs } ?: shots.last()
 
                 if (cachedPagePath != activeShot.page.localImagePath) {
@@ -342,8 +359,8 @@ object MangaMotionVideoMuxer {
                 }
 
                 drainVideo(endOfStream = false)
-                if (frameIdx % 12 == 0 || frameIdx == totalFrames - 1) {
-                    onProgress((frameIdx + 1).toFloat() / totalFrames.toFloat())
+                if (frameIdx % 8 == 0 || frameIdx == totalFrames - 1) {
+                    onProgress(frameIdx + 1, totalFrames)
                 }
             }
             drainVideo(endOfStream = true)
@@ -607,8 +624,11 @@ object MangaMotionVideoMuxer {
     private fun encodeAacTrack(
         pcm16: ByteArray,
         sampleRate: Int,
-        tempAudioFile: File
+        tempAudioFile: File,
+        onProgress: (Float) -> Unit = {}
     ) {
+        val safePcm = if (pcm16.size >= 2) pcm16 else ByteArray(2048)
+        val evenSize = safePcm.size - (safePcm.size and 1)
         val format = MediaFormat.createAudioFormat(MediaFormat.MIMETYPE_AUDIO_AAC, sampleRate, 1).apply {
             setInteger(MediaFormat.KEY_BIT_RATE, 96_000)
             setInteger(MediaFormat.KEY_AAC_PROFILE, MediaCodecInfo.CodecProfileLevel.AACObjectLC)
@@ -624,13 +644,16 @@ object MangaMotionVideoMuxer {
         var muxerStarted = false
         val info = MediaCodec.BufferInfo()
 
-        fun drainAudio(eos: Boolean) {
+        fun drainAudio(eos: Boolean): Boolean {
+            var sawEos = false
+            var eosWaitTries = 0
             while (true) {
                 val timeout = if (eos) 10_000L else 0L
                 val outIdx = encoder.dequeueOutputBuffer(info, timeout)
                 when {
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                         if (!eos) break
+                        if (++eosWaitTries >= 250) break
                     }
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         if (!muxerStarted) {
@@ -640,6 +663,7 @@ object MangaMotionVideoMuxer {
                         }
                     }
                     outIdx >= 0 -> {
+                        eosWaitTries = 0
                         val outBuf = encoder.getOutputBuffer(outIdx)
                         if (outBuf != null && info.size > 0 && muxerStarted &&
                             (info.flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0
@@ -650,38 +674,57 @@ object MangaMotionVideoMuxer {
                         }
                         val done = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                         encoder.releaseOutputBuffer(outIdx, false)
-                        if (done) break
+                        if (done) {
+                            sawEos = true
+                            break
+                        }
                     }
                 }
             }
+            return sawEos
         }
 
         try {
             var off = 0
             var framesFed = 0L
-            while (off < pcm16.size) {
+            var lastReportedBucket = -1
+            while (off < evenSize) {
                 val inIdx = encoder.dequeueInputBuffer(10_000L)
                 if (inIdx >= 0) {
                     val inBuf = encoder.getInputBuffer(inIdx)!!
                     inBuf.clear()
-                    val step = minOf(inBuf.remaining(), pcm16.size - off)
-                    inBuf.put(pcm16, off, step)
-                    val ptsUs = (framesFed * 1_000_000L) / sampleRate.toLong()
-                    framesFed += (step / 2L)
-                    encoder.queueInputBuffer(inIdx, 0, step, ptsUs, 0)
-                    off += step
+                    val step = minOf(inBuf.remaining(), evenSize - off) and 1.inv()
+                    if (step > 0) {
+                        inBuf.put(safePcm, off, step)
+                        val ptsUs = (framesFed * 1_000_000L) / sampleRate.toLong()
+                        framesFed += (step / 2L)
+                        encoder.queueInputBuffer(inIdx, 0, step, ptsUs, 0)
+                        off += step
+                        val bucket = ((off.toFloat() / evenSize.coerceAtLeast(1).toFloat()) * 20f).toInt()
+                        if (bucket != lastReportedBucket) {
+                            lastReportedBucket = bucket
+                            onProgress(off.toFloat() / evenSize.coerceAtLeast(1).toFloat())
+                        }
+                    }
                 }
                 drainAudio(eos = false)
             }
-            while (true) {
+            onProgress(1f)
+
+            var eosQueued = false
+            for (attempt in 0 until 200) {
                 val inIdx = encoder.dequeueInputBuffer(10_000L)
                 if (inIdx >= 0) {
                     val eosPts = (framesFed * 1_000_000L) / sampleRate.toLong()
                     encoder.queueInputBuffer(inIdx, 0, 0, eosPts, MediaCodec.BUFFER_FLAG_END_OF_STREAM)
+                    eosQueued = true
                     break
                 }
+                if (drainAudio(eos = false)) break
             }
-            drainAudio(eos = true)
+            if (eosQueued) {
+                drainAudio(eos = true)
+            }
         } finally {
             runCatching { encoder.stop() }
             runCatching { encoder.release() }
@@ -714,6 +757,7 @@ object MangaMotionVideoMuxer {
             val info = MediaCodec.BufferInfo()
 
             while (true) {
+                buf.clear()
                 val size = vExt.readSampleData(buf, 0)
                 if (size < 0) break
                 info.offset = 0
@@ -729,6 +773,7 @@ object MangaMotionVideoMuxer {
             }
 
             while (true) {
+                buf.clear()
                 val size = aExt.readSampleData(buf, 0)
                 if (size < 0) break
                 info.offset = 0

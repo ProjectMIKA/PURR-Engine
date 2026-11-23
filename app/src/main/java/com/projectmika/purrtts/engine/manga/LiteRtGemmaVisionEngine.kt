@@ -12,6 +12,7 @@ import com.projectmika.purrtts.core.manga.MangaBfsPanelSlicer
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaNormalizedRect
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
+import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.manga.MangaVisionResponseParser
 import com.projectmika.purrtts.core.purr.VoiceGender
 import java.io.ByteArrayOutputStream
@@ -49,7 +50,10 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     companion object {
         private const val TAG = "PurrGemmaVision"
         const val GEMMA_VISION_SPEC_ID = "sub_gemma4_e2b_vision"
+        const val GEMMA_E2B_SPEC_ID = "sub_gemma4_e2b_vision"
+        const val GEMMA_E4B_SPEC_ID = "sub_gemma4_e4b_vision"
         const val GEMMA_PRIMARY_FILE = "gemma-4-E2B-it-gpu.litertlm"
+        const val GEMMA_E4B_FILE = "gemma-4-E4B-it-gpu.litertlm"
     }
 
     private val mutex = Mutex()
@@ -64,11 +68,18 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
 
     private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
 
-    fun resolveInstalledGemmaModelFile(): File? {
+    fun resolveInstalledGemmaModelFile(
+        preferredTier: MangaVisionModelTier = MangaVisionModelTier.AUTO
+    ): File? {
         val litertDir = File(context.filesDir, "models/litert")
         if (!litertDir.isDirectory) return null
-        val exact = File(litertDir, GEMMA_PRIMARY_FILE)
-        if (exact.isFile && exact.length() > 1024L * 1024L) return exact
+        val e2b = File(litertDir, GEMMA_PRIMARY_FILE).takeIf { it.isFile && it.length() > 1024L * 1024L }
+        val e4b = File(litertDir, GEMMA_E4B_FILE).takeIf { it.isFile && it.length() > 1024L * 1024L }
+        val preferred = when (preferredTier) {
+            MangaVisionModelTier.GEMMA4_E4B -> e4b ?: e2b
+            MangaVisionModelTier.GEMMA4_E2B, MangaVisionModelTier.AUTO -> e2b ?: e4b
+        }
+        if (preferred != null) return preferred
         return litertDir.listFiles()
             ?.firstOrNull {
                 it.isFile &&
@@ -76,6 +87,15 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
                     it.extension.equals("litertlm", ignoreCase = true) &&
                     it.length() > 1024L * 1024L
             }
+    }
+
+    fun isModelTierInstalled(tier: MangaVisionModelTier): Boolean {
+        val litertDir = File(context.filesDir, "models/litert")
+        return when (tier) {
+            MangaVisionModelTier.GEMMA4_E4B -> File(litertDir, GEMMA_E4B_FILE).let { it.isFile && it.length() > 1024L * 1024L }
+            MangaVisionModelTier.GEMMA4_E2B -> File(litertDir, GEMMA_PRIMARY_FILE).let { it.isFile && it.length() > 1024L * 1024L }
+            MangaVisionModelTier.AUTO -> resolveInstalledGemmaModelFile(MangaVisionModelTier.AUTO) != null
+        }
     }
 
     val isOnDeviceGemmaReady: Boolean
@@ -147,7 +167,8 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         readingOrder: MangaReadingOrder,
         existingCharacters: List<MangaCharacterProfile>,
         recentDialogueContext: List<String>,
-        powerUserVisionUrl: String
+        powerUserVisionUrl: String,
+        preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO
     ): Pair<MangaVisionResponseParser.ParsedPageAnalysis, String> = withContext(Dispatchers.IO) {
         val annotatedFile = File(context.cacheDir, "manga_vision_page_$pageIndex.jpg")
         renderAnnotatedPageForVision(pageBitmap, panels, annotatedFile)
@@ -170,16 +191,21 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
             }
         }
 
-        // Tier 2: On-Device Google Gemma 4 E2B LiteRT-LM (with Thinking Mode)
-        val localModel = resolveInstalledGemmaModelFile()
+        // Tier 2: On-Device Google Gemma 4 E2B / E4B LiteRT-LM (with Thinking Mode)
+        val localModel = resolveInstalledGemmaModelFile(preferredVisionModel)
         if (localModel != null) {
+            val modelLabel = if (localModel.name.contains("E4B", ignoreCase = true)) {
+                "Gemma 4 E4B LiteRT"
+            } else {
+                "Gemma 4 E2B LiteRT"
+            }
             val rawLocal = mutex.withLock {
                 queryLiteRtGemmaOnDevice(localModel, annotatedFile, prompt)
             }
             if (!rawLocal.isNullOrBlank()) {
                 val parsed = MangaVisionResponseParser.parsePageAnalysis(rawLocal, panels.size, existingCharacters)
                 if (parsed.panels.isNotEmpty()) {
-                    return@withContext parsed to "Gemma 4 E2B LiteRT ($activeBackendLabel)"
+                    return@withContext parsed to "$modelLabel ($activeBackendLabel)"
                 }
             }
         }
@@ -191,7 +217,7 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
             existingCharacters = existingCharacters
         )
         fallback to if (localModel == null) {
-            "Offline Layout Slicer (Install SUB-11V Gemma 4 E2B for Auto-OCR)"
+            "Offline Layout Slicer (Install SUB-11V Gemma 4 E2B [Rec] or SUB-11X E4B)"
         } else {
             "Gemma Fallback Review"
         }

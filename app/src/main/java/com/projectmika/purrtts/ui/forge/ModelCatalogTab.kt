@@ -1084,7 +1084,7 @@ fun ModelCatalogTab(
                                 "rom_coqui_vits" -> "COQUI VITS LJSPEECH PACKS (${childSubs.size})"
                                 "rom_meta_mms" -> "META MMS LANGUAGE PACKS (${childSubs.size})"
                                 "rom_mimic3_neural" -> "MIMIC3 LANGUAGE PACKS (${childSubs.size})"
-                                "tool_manga_dub_studio" -> "GEMMA 4 E2B VISION CARTRIDGE (${childSubs.size})"
+                                "tool_manga_dub_studio" -> "GEMMA 4 VISION CARTRIDGES (${childSubs.size})"
                                 else -> "SUB-MODULES FOR ${spec.romCode} (${childSubs.size})"
                             }
 

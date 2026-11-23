@@ -1,6 +1,13 @@
 package com.projectmika.purrtts.core.manga
 
 import com.projectmika.purrtts.core.purr.VoiceGender
+import java.io.BufferedInputStream
+import java.io.File
+import java.io.FileOutputStream
+import java.io.InputStream
+import java.nio.charset.Charset
+import java.util.Locale
+import java.util.zip.ZipFile as JavaZipFile
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -13,6 +20,9 @@ import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.intOrNull
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
+import org.apache.commons.compress.archivers.zip.ZipArchiveInputStream
+import org.apache.commons.compress.archivers.zip.ZipFile as CommonsZipFile
 
 /**
  * ✨ MIKA'S MANGA DUB & MOTION-COMIC STUDIO MODELS & PURE-KOTLIN ENGINES (TOOL-11) ✨
@@ -162,6 +172,59 @@ data class MangaChapterEntry(
 }
 
 @Serializable
+enum class MangaVisionModelTier(
+    val specId: String,
+    val fileName: String,
+    val shortLabel: String,
+    val displayTitle: String,
+    val sizeNote: String,
+    val isRecommended: Boolean = false
+) {
+    AUTO(
+        specId = "sub_gemma4_e2b_vision",
+        fileName = "gemma-4-E2B-it-gpu.litertlm",
+        shortLabel = "AUTO (E2B REC.)",
+        displayTitle = "Auto — Prefer Gemma 4 E2B [Recommended]",
+        sizeNote = "Auto-picks installed E2B (Recommended) or E4B",
+        isRecommended = true
+    ),
+    GEMMA4_E2B(
+        specId = "sub_gemma4_e2b_vision",
+        fileName = "gemma-4-E2B-it-gpu.litertlm",
+        shortLabel = "GEMMA 4 E2B",
+        displayTitle = "Gemma 4 E2B LiteRT [RECOMMENDED]",
+        sizeNote = "2.2 GB • Fastest Vision + Thinking",
+        isRecommended = true
+    ),
+    GEMMA4_E4B(
+        specId = "sub_gemma4_e4b_vision",
+        fileName = "gemma-4-E4B-it-gpu.litertlm",
+        shortLabel = "GEMMA 4 E4B",
+        displayTitle = "Gemma 4 E4B LiteRT [PRO 4B]",
+        sizeNote = "3.1 GB • Higher Accuracy (8GB+ RAM)",
+        isRecommended = false
+    )
+}
+
+enum class MangaPipelineStage(val stepNum: Int, val label: String) {
+    IDLE(0, "IDLE"),
+    EXTRACT_AND_SLICE(1, "1/4 EXTRACT & SLICE"),
+    VISION_SCAN(2, "2/4 GEMMA VISION"),
+    VOICE_FORGE(3, "3/4 VOICE FORGE"),
+    VIDEO_MUX(4, "4/4 VIDEO & AAC MUX")
+}
+
+data class MangaJobTelemetry(
+    val stage: MangaPipelineStage = MangaPipelineStage.IDLE,
+    val detailText: String = "IDLE // IMPORT A .CBZ OR LOAD DEMO CHAPTER",
+    val itemCurrent: Int = 0,
+    val itemTotal: Int = 0,
+    val elapsedMs: Long = 0L,
+    val estimatedRemainingSec: Int? = null,
+    val logTail: List<String> = emptyList()
+)
+
+@Serializable
 data class MangaSeriesProject(
     val id: String,
     val seriesTitle: String,
@@ -172,6 +235,7 @@ data class MangaSeriesProject(
     val burnInSubtitles: Boolean = true,
     val enableAtmosphereFx: Boolean = true,
     val powerUserVisionUrl: String = "",
+    val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.AUTO,
     val storyContextSummary: String = "",
     val characters: List<MangaCharacterProfile> = emptyList(),
     val chapters: List<MangaChapterEntry> = emptyList()
@@ -731,6 +795,357 @@ object MangaVisionResponseParser {
             ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = summary, panels = parsedPanels)
         }.getOrElse {
             ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = emptyList())
+        }
+    }
+}
+
+object MangaNaturalOrderComparator : Comparator<String> {
+    private val chunkRe = Regex("(\\d+|\\D+)")
+    override fun compare(a: String, b: String): Int {
+        val partsA = chunkRe.findAll(a.lowercase(Locale.US)).map { it.value }.toList()
+        val partsB = chunkRe.findAll(b.lowercase(Locale.US)).map { it.value }.toList()
+        val count = minOf(partsA.size, partsB.size)
+        for (i in 0 until count) {
+            val sa = partsA[i]
+            val sb = partsB[i]
+            val na = sa.toLongOrNull()
+            val nb = sb.toLongOrNull()
+            val cmp = if (na != null && nb != null) na.compareTo(nb) else sa.compareTo(sb)
+            if (cmp != 0) return cmp
+        }
+        return partsA.size.compareTo(partsB.size)
+    }
+}
+
+object MangaTelemetryUtils {
+    fun estimateRemainingSec(elapsedMs: Long, fractionDone: Float): Int? {
+        if (elapsedMs < 1500L || fractionDone < 0.03f || fractionDone >= 0.995f) return null
+        val totalEstimatedMs = (elapsedMs.toDouble() / fractionDone.toDouble())
+        val remMs = (totalEstimatedMs - elapsedMs.toDouble()).coerceAtLeast(0.0)
+        return (remMs / 1000.0).toInt().coerceAtLeast(1)
+    }
+
+    fun formatDurationShort(secondsTotal: Int): String {
+        val s = secondsTotal.coerceAtLeast(0)
+        val mins = s / 60
+        val secs = s % 60
+        return if (mins > 0) "%dm %02ds".format(mins, secs) else "${secs}s"
+    }
+}
+
+/**
+ * ✨ HARDENED 4-STRATEGY MANGA ARCHIVE EXTRACTOR (TOOL-11) ✨
+ *
+ * Android's built-in `java.util.zip.ZipInputStream` rejects `.cbz` packs containing:
+ * - `STORED` entries with Data Descriptors (`EXT` flag),
+ * - Non-UTF8 filenames (Shift-JIS / MS932 / CP437 / Latin-1),
+ * - Certain comic-packer central directories or TAR (`.cbt`) containers.
+ *
+ * This extractor reads from a seekable file on disk and cascades across:
+ * 1. Apache Commons Compress `ZipFile` (UTF-8, Shift_JIS, CP437, ISO-8859-1)
+ * 2. Apache Commons Compress `ZipArchiveInputStream` (`allowStoredEntriesWithDataDescriptor = true`)
+ * 3. Android / JVM `java.util.zip.ZipFile`
+ * 4. Apache Commons Compress `TarArchiveInputStream`
+ * with magic-byte sniffing for extensionless images and clear diagnostics for RAR (`.cbr`), 7z, or PDF.
+ */
+object MangaCbzExtractorUtils {
+
+    val ALLOWED_IMAGE_EXT: Set<String> = setOf("jpg", "jpeg", "png", "webp", "bmp", "gif")
+    private val ZIP_CHARSETS: List<String> = listOf("UTF-8", "Shift_JIS", "CP437", "ISO-8859-1")
+
+    fun detectUnsupportedContainerHint(header: ByteArray, length: Int): String? {
+        if (length >= 4 &&
+            header[0] == 'R'.code.toByte() &&
+            header[1] == 'a'.code.toByte() &&
+            header[2] == 'r'.code.toByte() &&
+            header[3] == '!'.code.toByte()
+        ) {
+            return "File is a RAR (.cbr) comic archive. Convert or repack it into standard ZIP (.cbz) to import."
+        }
+        if (length >= 6 &&
+            header[0] == 0x37.toByte() &&
+            header[1] == 0x7A.toByte() &&
+            header[2] == 0xBC.toByte() &&
+            header[3] == 0xAF.toByte() &&
+            header[4] == 0x27.toByte() &&
+            header[5] == 0x1C.toByte()
+        ) {
+            return "File is a 7-Zip (.cb7) archive. Convert or repack it into standard ZIP (.cbz) to import."
+        }
+        if (length >= 5 &&
+            header[0] == '%'.code.toByte() &&
+            header[1] == 'P'.code.toByte() &&
+            header[2] == 'D'.code.toByte() &&
+            header[3] == 'F'.code.toByte() &&
+            header[4] == '-'.code.toByte()
+        ) {
+            return "File is a .pdf document, not a .cbz image archive."
+        }
+        return null
+    }
+
+    fun detectImageExtensionByMagic(header: ByteArray, length: Int): String? {
+        if (length >= 3 &&
+            header[0] == 0xFF.toByte() &&
+            header[1] == 0xD8.toByte() &&
+            header[2] == 0xFF.toByte()
+        ) {
+            return "jpg"
+        }
+        if (length >= 8 &&
+            header[0] == 0x89.toByte() &&
+            header[1] == 0x50.toByte() &&
+            header[2] == 0x4E.toByte() &&
+            header[3] == 0x47.toByte() &&
+            header[4] == 0x0D.toByte() &&
+            header[5] == 0x0A.toByte() &&
+            header[6] == 0x1A.toByte() &&
+            header[7] == 0x0A.toByte()
+        ) {
+            return "png"
+        }
+        if (length >= 12 &&
+            header[0] == 'R'.code.toByte() &&
+            header[1] == 'I'.code.toByte() &&
+            header[2] == 'F'.code.toByte() &&
+            header[3] == 'F'.code.toByte() &&
+            header[8] == 'W'.code.toByte() &&
+            header[9] == 'E'.code.toByte() &&
+            header[10] == 'B'.code.toByte() &&
+            header[11] == 'P'.code.toByte()
+        ) {
+            return "webp"
+        }
+        if (length >= 6 &&
+            header[0] == 'G'.code.toByte() &&
+            header[1] == 'I'.code.toByte() &&
+            header[2] == 'F'.code.toByte() &&
+            header[3] == '8'.code.toByte()
+        ) {
+            return "gif"
+        }
+        if (length >= 2 &&
+            header[0] == 'B'.code.toByte() &&
+            header[1] == 'M'.code.toByte()
+        ) {
+            return "bmp"
+        }
+        return null
+    }
+
+    fun extractArchiveFromFile(
+        archiveFile: File,
+        destDir: File,
+        displayName: String = archiveFile.name
+    ): List<File> {
+        if (!archiveFile.isFile || archiveFile.length() == 0L) {
+            throw IllegalStateException("Archive file '$displayName' is empty or unreadable (0 bytes).")
+        }
+        destDir.mkdirs()
+
+        val header = ByteArray(16)
+        val headerRead = archiveFile.inputStream().use { it.read(header) }
+        detectUnsupportedContainerHint(header, headerRead)?.let { hint ->
+            throw IllegalStateException(hint)
+        }
+
+        val failures = mutableListOf<String>()
+
+        // Strategy 1: Commons Compress random-access ZipFile across UTF-8 / Shift_JIS / CP437 / Latin-1
+        for (cs in ZIP_CHARSETS) {
+            clearTempExtracts(destDir)
+            val hit = runCatching { extractWithCommonsZipFile(archiveFile, destDir, cs) }
+            val list = hit.getOrNull().orEmpty()
+            if (list.isNotEmpty()) return normalizeSortedPages(list, destDir)
+            hit.exceptionOrNull()?.message?.let { failures += "ZipFile($cs): $it" }
+        }
+
+        // Strategy 2: Commons Compress streaming ZipArchiveInputStream with Data Descriptor support
+        for (cs in listOf("UTF-8", "Shift_JIS", "CP437")) {
+            clearTempExtracts(destDir)
+            val hit = runCatching { extractWithCommonsZipStream(archiveFile, destDir, cs) }
+            val list = hit.getOrNull().orEmpty()
+            if (list.isNotEmpty()) return normalizeSortedPages(list, destDir)
+            hit.exceptionOrNull()?.message?.let { failures += "ZipStream($cs): $it" }
+        }
+
+        // Strategy 3: JDK/Android native java.util.zip.ZipFile
+        clearTempExtracts(destDir)
+        val jdkHit = runCatching { extractWithJavaZipFile(archiveFile, destDir) }
+        val jdkList = jdkHit.getOrNull().orEmpty()
+        if (jdkList.isNotEmpty()) return normalizeSortedPages(jdkList, destDir)
+        jdkHit.exceptionOrNull()?.message?.let { failures += "JdkZipFile: $it" }
+
+        // Strategy 4: TAR (.cbt / mislabeled tarballs)
+        clearTempExtracts(destDir)
+        val tarHit = runCatching { extractWithTarStream(archiveFile, destDir) }
+        val tarList = tarHit.getOrNull().orEmpty()
+        if (tarList.isNotEmpty()) return normalizeSortedPages(tarList, destDir)
+        tarHit.exceptionOrNull()?.message?.let { failures += "Tar: $it" }
+
+        clearTempExtracts(destDir)
+        val reason = failures.firstOrNull()?.take(140) ?: "0 image entries"
+        throw IllegalStateException("Could not extract comic pages from '$displayName' ($reason).")
+    }
+
+    private fun clearTempExtracts(destDir: File) {
+        destDir.listFiles()
+            ?.filter { it.isFile && it.name.startsWith("tmp_") }
+            ?.forEach { runCatching { it.delete() } }
+    }
+
+    private fun extractWithCommonsZipFile(
+        archiveFile: File,
+        destDir: File,
+        charsetName: String
+    ): List<Pair<String, File>> {
+        val out = mutableListOf<Pair<String, File>>()
+        val zip = CommonsZipFile.builder()
+            .setFile(archiveFile)
+            .setCharset(Charset.forName(charsetName))
+            .get()
+        zip.use { zf ->
+            val entries = zf.entries
+            var idx = 0
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                if (entry.isDirectory) continue
+                val norm = normalizeEntryName(entry.name)
+                if (shouldSkipEntry(norm)) continue
+                zf.getInputStream(entry).use { entryStream ->
+                    copyImageEntryIfSupported(norm, entryStream, destDir, idx++)?.let { pair ->
+                        out += pair
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private fun extractWithCommonsZipStream(
+        archiveFile: File,
+        destDir: File,
+        charsetName: String
+    ): List<Pair<String, File>> {
+        val out = mutableListOf<Pair<String, File>>()
+        ZipArchiveInputStream(
+            BufferedInputStream(archiveFile.inputStream(), 65536),
+            charsetName,
+            true,
+            true
+        ).use { zis ->
+            var idx = 0
+            while (true) {
+                val entry = zis.nextEntry ?: break
+                if (entry.isDirectory) continue
+                val norm = normalizeEntryName(entry.name)
+                if (shouldSkipEntry(norm)) continue
+                copyImageEntryIfSupported(norm, zis, destDir, idx++)?.let { pair ->
+                    out += pair
+                }
+            }
+        }
+        return out
+    }
+
+    private fun extractWithJavaZipFile(archiveFile: File, destDir: File): List<Pair<String, File>> {
+        val out = mutableListOf<Pair<String, File>>()
+        JavaZipFile(archiveFile).use { zf ->
+            val entries = zf.entries()
+            var idx = 0
+            while (entries.hasMoreElements()) {
+                val entry = entries.nextElement()
+                if (entry.isDirectory) continue
+                val norm = normalizeEntryName(entry.name)
+                if (shouldSkipEntry(norm)) continue
+                zf.getInputStream(entry).use { entryStream ->
+                    copyImageEntryIfSupported(norm, entryStream, destDir, idx++)?.let { pair ->
+                        out += pair
+                    }
+                }
+            }
+        }
+        return out
+    }
+
+    private fun extractWithTarStream(archiveFile: File, destDir: File): List<Pair<String, File>> {
+        val out = mutableListOf<Pair<String, File>>()
+        TarArchiveInputStream(BufferedInputStream(archiveFile.inputStream(), 65536)).use { tis ->
+            var idx = 0
+            while (true) {
+                val entry = tis.nextEntry ?: break
+                if (entry.isDirectory) continue
+                val norm = normalizeEntryName(entry.name)
+                if (shouldSkipEntry(norm)) continue
+                copyImageEntryIfSupported(norm, tis, destDir, idx++)?.let { pair ->
+                    out += pair
+                }
+            }
+        }
+        return out
+    }
+
+    private fun normalizeEntryName(rawName: String): String =
+        rawName.replace('\\', '/').trimStart('/')
+
+    private fun shouldSkipEntry(normName: String): Boolean {
+        if (normName.isEmpty()) return true
+        val base = normName.substringAfterLast('/')
+        return normName.contains("__MACOSX", ignoreCase = true) ||
+            base.startsWith("._") ||
+            base.equals("Thumbs.db", ignoreCase = true) ||
+            base.equals(".DS_Store", ignoreCase = true)
+    }
+
+    private fun copyImageEntryIfSupported(
+        normName: String,
+        stream: InputStream,
+        destDir: File,
+        tempIdx: Int
+    ): Pair<String, File>? {
+        val declaredExt = normName.substringAfterLast('/', normName)
+            .substringAfterLast('.', "")
+            .lowercase(Locale.US)
+            .takeIf { it in ALLOWED_IMAGE_EXT }
+
+        val peek = ByteArray(16)
+        var peekLen = 0
+        while (peekLen < peek.size) {
+            val r = stream.read(peek, peekLen, peek.size - peekLen)
+            if (r <= 0) break
+            peekLen += r
+        }
+        if (peekLen <= 0) return null
+
+        val resolvedExt = declaredExt ?: detectImageExtensionByMagic(peek, peekLen) ?: return null
+        val outFile = File(destDir, "tmp_%05d.%s".format(tempIdx, resolvedExt))
+        FileOutputStream(outFile).use { fos ->
+            fos.write(peek, 0, peekLen)
+            val buf = ByteArray(16384)
+            while (true) {
+                val r = stream.read(buf)
+                if (r < 0) break
+                if (r > 0) fos.write(buf, 0, r)
+            }
+        }
+        if (outFile.length() < 32L) {
+            outFile.delete()
+            return null
+        }
+        return normName to outFile
+    }
+
+    private fun normalizeSortedPages(items: List<Pair<String, File>>, destDir: File): List<File> {
+        val sorted = items.sortedWith(compareBy(MangaNaturalOrderComparator) { it.first })
+        return sorted.mapIndexed { pageIdx, (_, tmpFile) ->
+            val ext = tmpFile.extension.lowercase(Locale.US).ifBlank { "jpg" }
+            val cleanFile = File(destDir, "page_%05d.%s".format(pageIdx, ext))
+            if (cleanFile.exists() && cleanFile != tmpFile) cleanFile.delete()
+            if (tmpFile == cleanFile || tmpFile.renameTo(cleanFile)) {
+                cleanFile
+            } else {
+                tmpFile
+            }
         }
     }
 }

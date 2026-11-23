@@ -1,3 +1,32 @@
+# 🌌 PURR-TTS v1.9.0 // Hardened Manga Dub Studio, Keep-Awake & Gemma 4 E4B
+
+### ✨ What's New since v1.8.9
+
+Major reliability, UX telemetry, and AI vision upgrade for **`TOOL-11` Manga Dub Studio** & long-running audio/video jobs! 🎬📖🔥
+
+* **📦 Hardened 4-Strategy `.CBZ` Extractor (`MangaCbzExtractorUtils`)**:
+  * Replaces Android's `ZipInputStream`-only reader with a disk-backed 4-strategy extractor (**Apache Commons Compress `ZipFile` -> streaming `ZipArchiveInputStream` with `STORED` + Data Descriptor support -> JDK `ZipFile` -> `TarArchiveInputStream`**).
+  * Handles `Shift_JIS` / `CP437` / `ISO-8859-1` comic entry names, extensionless image files via magic-byte header detection (`JPEG/PNG/WEBP/BMP/GIF`), and surfaces explicit error guidance if a `.cbr` (RAR), `.cb7` (7-Zip), or `.pdf` file is opened as `.cbz`.
+* **🎬 Fixed `.MP4` Export Freeze on `ENCODING AAC VOICEOVER TRACK...` (`MangaMotionVideoMuxer`)**:
+  * Fixed the `MediaCodec` EOS input-buffer starvation deadlock in `encodeAacTrack` (now actively drains AAC output buffers while waiting for free EOS input slots and enforces bounded EOS timeouts across both video & audio codecs), plus live frame-by-frame and AAC progress reporting.
+* **💡 Global Screen Wake-Lock (`FLAG_KEEP_SCREEN_ON` + `view.keepScreenOn`)**:
+  * Keeps the screen awake automatically across heavy Manga Dub Studio renders, Audiobook builds/combines, Script/Benchmark/SRT batches, audio playback/cloning, and large model downloads/extracts.
+* **⏱️ Live 4-Stage Pipeline Telemetry, Elapsed Timer, Dynamic ETA & Rolling Logs**:
+  * Displays active pipeline stage (**`1 SLICE` -> `2 VISION` -> `3 VOICE` -> `4 MP4 MUX`**), live progress bar & item counts, per-second **Elapsed Time** & **ETA**, `"SCREEN AWAKE LOCK ACTIVE"` status, and timestamped rolling logs.
+* **🗑️ Safe Project & Chapter Management**:
+  * Added **Delete Project**, **Delete Chapter**, and **Clear All Projects** controls with confirmation dialogs so accidental taps never wipe work.
+* **🧠 Optional Gemma 4 E4B LiteRT Vision Model (`SUB-11X`, 3.1 GB)**:
+  * Added **`SUB-11X` Gemma 4 E4B LiteRT** alongside **`SUB-11V` Gemma 4 E2B LiteRT** (marked **`[RECOMMENDED]`**) inside Manga Dub Studio (`AUTO / E2B / E4B` selector + per-model install cards).
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `26`).
+2. **`PURR-TTS_V1.9.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.8.9 // Manga Dub Studio & Gemma 4 E2B LiteRT Vision
 
 ### ✨ What's New since v1.8.8

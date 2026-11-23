@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAtUtc": "2026-11-23T05:05:22Z",
+  "generatedAtUtc": "2026-11-23T06:13:51Z",
   "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
   "assets": {
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
@@ -146,6 +146,10 @@
     "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it-gpu.litertlm": {
       "sha256": "d3cfec6ae2e027a994e51366d44dbf522ec7531a4a35fbbfcd3e9cc9b927afc1",
       "sizeBytes": 2340870772
+    },
+    "https://huggingface.co/litert-community/gemma-4-E4B-it-litert-lm/resolve/main/gemma-4-E4B-it-gpu.litertlm": {
+      "sha256": "ea168f5a601b543e02712f9381f26b06ddc7d4cbe2406410387c82d69b995a60",
+      "sizeBytes": 3310938740
     }
   }
 }

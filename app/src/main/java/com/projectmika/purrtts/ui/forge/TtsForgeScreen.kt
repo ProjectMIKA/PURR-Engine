@@ -33,9 +33,13 @@ import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import android.app.Activity
+import android.view.WindowManager
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
@@ -44,6 +48,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -118,6 +123,41 @@ fun TtsForgeScreen(
     val recordingProgress by viewModel.recordingProgress.collectAsState()
     val lastRecordedWav by viewModel.lastRecordedWavPath.collectAsState()
     val updateCheckInFlight by viewModel.updateCheckInFlight.collectAsState()
+    val isMangaBusy by viewModel.isMangaBusy.collectAsState()
+    val isBuildingAudiobook by viewModel.isBuildingAudiobook.collectAsState()
+    val isCombiningAudiobook by viewModel.isCombiningAudiobook.collectAsState()
+    val isExportingAudio by viewModel.isExportingAudio.collectAsState()
+    val isRunningScriptStudio by viewModel.isRunningScriptStudio.collectAsState()
+    val isRunningBenchmark by viewModel.isRunningBenchmark.collectAsState()
+    val isRunningSrtBatch by viewModel.isRunningSrtBatch.collectAsState()
+    val isAnyDownloadBusy = forgeState.modelStates.values.any {
+        it.state == DownloadState.DOWNLOADING ||
+            it.state == DownloadState.EXTRACTING ||
+            it.state == DownloadState.VERIFYING
+    }
+    val keepScreenAwake = isMangaBusy ||
+        isBuildingAudiobook ||
+        isCombiningAudiobook ||
+        isExportingAudio ||
+        isRunningScriptStudio ||
+        isRunningBenchmark ||
+        isRunningSrtBatch ||
+        isPlaying ||
+        isRecordingClone ||
+        isAnyDownloadBusy
+
+    val view = LocalView.current
+    val hostActivity = LocalContext.current as? Activity
+    DisposableEffect(keepScreenAwake, view, hostActivity) {
+        if (keepScreenAwake) {
+            view.keepScreenOn = true
+            hostActivity?.window?.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+        onDispose {
+            view.keepScreenOn = false
+            hostActivity?.window?.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        }
+    }
 
     val activeProfile = forgeState.profiles.firstOrNull { it.id == forgeState.activeProfileId }
         ?: forgeState.profiles.first()

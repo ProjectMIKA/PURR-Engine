@@ -41,7 +41,7 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `tools category hosts TOOL-01 through TOOL-11 plus Gemma 4 E2B Vision sub-cartridge`() {
+    fun `tools category hosts TOOL-01 through TOOL-11 plus Gemma 4 E2B Recommended and E4B Vision sub-cartridges`() {
         assertEquals(11, toolsModules.size)
         assertEquals(
             (1..11).map { idx -> "TOOL-%02d".format(idx) },
@@ -65,11 +65,20 @@ class PurrPremiumCatalogTest {
             assertTrue(id in PurrForgeState().slottedCartridges)
         }
 
-        val gemmaSub = catalog.first { it.id == "sub_gemma4_e2b_vision" }
-        assertTrue(gemmaSub.isSubCartridge)
-        assertEquals("tool_manga_dub_studio", gemmaSub.parentCartridgeId)
-        assertEquals(BackendType.LITERT_NPU_GPU, gemmaSub.backend)
-        assertTrue(gemmaSub.downloadUrl.contains("gemma-4-E2B-it-gpu.litertlm"))
+        val gemmaE2b = catalog.first { it.id == "sub_gemma4_e2b_vision" }
+        assertTrue(gemmaE2b.isSubCartridge)
+        assertEquals("tool_manga_dub_studio", gemmaE2b.parentCartridgeId)
+        assertEquals("RECOMMENDED", gemmaE2b.badge)
+        assertEquals(BackendType.LITERT_NPU_GPU, gemmaE2b.backend)
+        assertTrue(gemmaE2b.downloadUrl.contains("gemma-4-E2B-it-gpu.litertlm"))
+
+        val gemmaE4b = catalog.first { it.id == "sub_gemma4_e4b_vision" }
+        assertTrue(gemmaE4b.isSubCartridge)
+        assertEquals("SUB-11X", gemmaE4b.romCode)
+        assertEquals("tool_manga_dub_studio", gemmaE4b.parentCartridgeId)
+        assertEquals(3158, gemmaE4b.approximateSizeMb)
+        assertEquals(BackendType.LITERT_NPU_GPU, gemmaE4b.backend)
+        assertTrue(gemmaE4b.downloadUrl.contains("gemma-4-E4B-it-gpu.litertlm"))
     }
 
     @Test

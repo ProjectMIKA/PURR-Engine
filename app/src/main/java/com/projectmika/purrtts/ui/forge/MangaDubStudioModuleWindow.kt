@@ -22,12 +22,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -38,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
@@ -47,13 +50,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
+import com.projectmika.purrtts.core.manga.MangaChapterEntry
 import com.projectmika.purrtts.core.manga.MangaChapterStatus
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
+import com.projectmika.purrtts.core.manga.MangaJobTelemetry
+import com.projectmika.purrtts.core.manga.MangaPipelineStage
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSeriesProject
+import com.projectmika.purrtts.core.manga.MangaTelemetryUtils
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
+import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.purr.DownloadState
+import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
@@ -80,7 +89,7 @@ private enum class MangaPreProdTab(val label: String) {
 /**
  * ✨ TOOL-11: MANGA DUB & MOTION-COMIC STUDIO MODULE WINDOW ✨
  *
- * Auto-Pilot CBZ Importer -> BFS Panel Slicer -> Gemma 4 E2B LiteRT Vision Pre-Production ->
+ * Auto-Pilot CBZ Importer -> BFS Panel Slicer -> Gemma 4 E2B [Recommended] / E4B LiteRT Vision Pre-Production ->
  * 1-Tap Clone Studio Round-Trip (e.g. craft Vegeta voice and return straight to Roster) ->
  * Hardware MediaCodec .MP4 Motion-Comic Renderer with GachaSwipe Emotion Pacing & Atmosphere FX.
  */
@@ -98,26 +107,41 @@ fun MangaDubStudioModuleWindowBody(
     val isBusy by viewModel.isMangaBusy.collectAsState()
     val statusLabel by viewModel.mangaStatusLabel.collectAsState()
     val overallProgress by viewModel.mangaProgress.collectAsState()
+    val mangaTelemetry by viewModel.mangaTelemetry.collectAsState()
 
     val activeProject = remember(projects, activeProjectId) {
         projects.firstOrNull { it.id == activeProjectId } ?: projects.firstOrNull()
     }
-    val activeChapter = activeProject?.chapters?.lastOrNull()
+    var selectedChapterId by remember(activeProject?.id) {
+        mutableStateOf(activeProject?.chapters?.lastOrNull()?.id)
+    }
+    val activeChapter = activeProject?.chapters?.firstOrNull { it.id == selectedChapterId }
+        ?: activeProject?.chapters?.lastOrNull()
 
     var seriesTitleInput by remember { mutableStateOf("") }
     var importIntoCurrentSeries by remember { mutableStateOf(true) }
     var selectedReadingOrder by remember(activeProject?.id) {
         mutableStateOf(activeProject?.readingOrder ?: MangaReadingOrder.RTL_MANGA)
     }
+    var selectedVisionTier by remember(activeProject?.id, activeProject?.preferredVisionModel) {
+        mutableStateOf(activeProject?.preferredVisionModel ?: MangaVisionModelTier.AUTO)
+    }
     var preProdTab by remember { mutableStateOf(MangaPreProdTab.DECISIONS) }
     var selectedPageIdx by remember(activeChapter?.id) { mutableIntStateOf(0) }
     var expandPowerUser by remember { mutableStateOf(false) }
 
-    val gemmaSpec = remember(viewModel.modelCatalog) {
-        viewModel.modelCatalog.firstOrNull { it.id == LiteRtGemmaVisionEngine.GEMMA_VISION_SPEC_ID }
+    var pendingDeleteProject by remember { mutableStateOf<MangaSeriesProject?>(null) }
+    var pendingDeleteChapter by remember { mutableStateOf<Pair<String, MangaChapterEntry>?>(null) }
+    var pendingClearAllProjects by remember { mutableStateOf(false) }
+
+    val gemmaE2bSpec = remember(viewModel.modelCatalog) {
+        viewModel.modelCatalog.firstOrNull { it.id == LiteRtGemmaVisionEngine.GEMMA_E2B_SPEC_ID }
     }
-    val gemmaState = forgeState.modelStates[LiteRtGemmaVisionEngine.GEMMA_VISION_SPEC_ID]
-    val gemmaInstalled = gemmaState?.state == DownloadState.INSTALLED
+    val gemmaE4bSpec = remember(viewModel.modelCatalog) {
+        viewModel.modelCatalog.firstOrNull { it.id == LiteRtGemmaVisionEngine.GEMMA_E4B_SPEC_ID }
+    }
+    val gemmaE2bState = forgeState.modelStates[LiteRtGemmaVisionEngine.GEMMA_E2B_SPEC_ID]
+    val gemmaE4bState = forgeState.modelStates[LiteRtGemmaVisionEngine.GEMMA_E4B_SPEC_ID]
 
     val cbzPicker = rememberLauncherForActivityResult(
         ActivityResultContracts.OpenDocument()
@@ -133,7 +157,125 @@ fun MangaDubStudioModuleWindowBody(
         }
     }
 
-    // 1. Header, Gemma 4 E2B Vision Cartridge Bar & CBZ Project Importer
+    // Confirmation dialogs for Project / Chapter deletion & Clear All
+    pendingDeleteProject?.let { targetProj ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteProject = null },
+            containerColor = MikaColors.PanelBg,
+            titleContentColor = MikaColors.DangerRed,
+            textContentColor = MikaColors.PrimaryText,
+            title = {
+                Text(
+                    text = "DELETE MANGA PROJECT?",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Permanently remove \"${targetProj.seriesTitle}\" (${targetProj.chapters.size} chapter(s), voice caches & exported videos)?",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteMangaProject(targetProj.id)
+                        pendingDeleteProject = null
+                    }
+                ) {
+                    Text("DELETE", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteProject = null }) {
+                    Text("CANCEL", color = MikaColors.NeonCyan, fontFamily = FontFamily.Monospace)
+                }
+            }
+        )
+    }
+
+    pendingDeleteChapter?.let { (projId, targetCh) ->
+        AlertDialog(
+            onDismissRequest = { pendingDeleteChapter = null },
+            containerColor = MikaColors.PanelBg,
+            titleContentColor = MikaColors.DangerRed,
+            textContentColor = MikaColors.PrimaryText,
+            title = {
+                Text(
+                    text = "DELETE CHAPTER?",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "Remove chapter \"${targetCh.title}\" and its extracted pages/audio?",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteMangaChapter(projId, targetCh.id)
+                        pendingDeleteChapter = null
+                    }
+                ) {
+                    Text("DELETE", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeleteChapter = null }) {
+                    Text("CANCEL", color = MikaColors.NeonCyan, fontFamily = FontFamily.Monospace)
+                }
+            }
+        )
+    }
+
+    if (pendingClearAllProjects) {
+        AlertDialog(
+            onDismissRequest = { pendingClearAllProjects = false },
+            containerColor = MikaColors.PanelBg,
+            titleContentColor = MikaColors.DangerRed,
+            textContentColor = MikaColors.PrimaryText,
+            title = {
+                Text(
+                    text = "CLEAR ALL MANGA PROJECTS?",
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 13.sp
+                )
+            },
+            text = {
+                Text(
+                    text = "This permanently deletes all ${projects.size} saved manga projects and local files.",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteAllMangaProjects()
+                        pendingClearAllProjects = false
+                    }
+                ) {
+                    Text("CLEAR ALL", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingClearAllProjects = false }) {
+                    Text("CANCEL", color = MikaColors.NeonCyan, fontFamily = FontFamily.Monospace)
+                }
+            }
+        )
+    }
+
+    // 1. Header, Gemma 4 Vision Selector & Installer, CBZ Project Importer
     MikaGlowPanel(accent = MikaColors.NeonPink) {
         Text(
             text = "> MANGA_DUB_STUDIO // CBZ -> PRE-PROD -> .MP4",
@@ -144,7 +286,7 @@ fun MangaDubStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Drop in a manga .CBZ archive. PURR slices panels automatically via BFS, scans dialogue & characters with Gemma 4 E2B LiteRT Vision + Thinking, lets you resolve flagged bubbles or forge custom clones in Pre-Production, and exports a dubbed motion-comic .MP4.",
+            text = "Drop in a manga .CBZ archive. PURR slices panels automatically via BFS, scans dialogue & characters with Gemma 4 LiteRT Vision + Thinking (E2B Recommended or optional E4B), lets you resolve flagged bubbles or forge custom clones in Pre-Production, and exports a dubbed motion-comic .MP4.",
             color = MikaColors.CyanWhite.copy(alpha = 0.78f),
             fontFamily = FontFamily.Monospace,
             fontSize = 9.5.sp,
@@ -152,78 +294,66 @@ fun MangaDubStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Gemma 4 E2B LiteRT Vision Engine Cartridge Strip
-        if (gemmaSpec != null) {
-            val visionAccent = if (gemmaInstalled) MikaColors.TerminalGreen else MikaColors.NeonCyan
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MikaColors.DeepWellBg)
-                    .border(1.dp, visionAccent.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
-                    .padding(10.dp),
+        // Gemma 4 LiteRT Vision Engine Selector + Dual Install Cards (E2B Recommended + E4B Option)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.DeepWellBg)
+                .border(1.dp, MikaColors.NeonCyan.copy(alpha = 0.55f), RoundedCornerShape(6.dp))
+                .padding(10.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(
+                text = "> AI_VISION_DIRECTOR // LITERT MODEL SELECTION",
+                color = MikaColors.NeonCyan,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.5.sp
+            )
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = if (gemmaInstalled) {
-                                "[READY] GEMMA 4 E2B LITERT VISION + THINKING"
-                            } else {
-                                "SUB-11V // GEMMA 4 E2B LITERT VISION (+2.2 GB)"
-                            },
-                            color = visionAccent,
-                            fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Black,
-                            fontSize = 9.5.sp
-                        )
-                        Text(
-                            text = if (gemmaInstalled) {
-                                "Offline OCR, character discovery & Qwen VoiceDesign direction active (unloads cleanly before TTS)."
-                            } else {
-                                "Optional offline AI Vision engine. BFS panel slicing & Pre-Production still work without it!"
-                            },
-                            color = MikaColors.DimText,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 8.5.sp
-                        )
+                MangaVisionModelTier.entries.forEach { tier ->
+                    val pillLabel = if (tier == MangaVisionModelTier.GEMMA4_E2B) {
+                        "GEMMA 4 E2B [RECOMMENDED]"
+                    } else {
+                        tier.shortLabel
                     }
-                    if (!gemmaInstalled) {
-                        val isDownloading = gemmaState?.state == DownloadState.DOWNLOADING ||
-                            gemmaState?.state == DownloadState.VERIFYING
-                        MikaTagPill(
-                            label = if (isDownloading) "PAUSE" else "INSTALL GEMMA4",
-                            selected = true,
-                            activeColor = if (isDownloading) MikaColors.MikaAmber else MikaColors.NeonCyan,
-                            leadingIcon = if (isDownloading) CyberIconType.PAUSE else CyberIconType.DOWNLOAD,
-                            onClick = {
-                                if (isDownloading) viewModel.pauseModelDownload(gemmaSpec.id)
-                                else viewModel.startModelDownload(gemmaSpec)
-                            }
-                        )
-                    }
-                }
-                if (gemmaState?.state == DownloadState.DOWNLOADING || gemmaState?.state == DownloadState.VERIFYING) {
-                    LinearProgressIndicator(
-                        progress = { gemmaState.progressFraction },
-                        color = MikaColors.NeonCyan,
-                        trackColor = MikaColors.NeonCyan.copy(alpha = 0.16f),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                    Text(
-                        text = "${(gemmaState.progressFraction * 100).toInt()}% (${gemmaState.downloadedBytes / (1024 * 1024)} / ${gemmaSpec.approximateSizeMb} MB)",
-                        color = MikaColors.NeonCyan,
-                        fontFamily = FontFamily.Monospace,
-                        fontSize = 8.5.sp
+                    MikaTagPill(
+                        label = pillLabel,
+                        selected = selectedVisionTier == tier,
+                        activeColor = if (tier.isRecommended) MikaColors.SsrGold else MikaColors.NeonPurple,
+                        onClick = {
+                            selectedVisionTier = tier
+                            activeProject?.let { viewModel.updateMangaProjectConfig(it.id, preferredVisionModel = tier) }
+                        }
                     )
                 }
             }
-            Spacer(modifier = Modifier.height(8.dp))
+            if (gemmaE2bSpec != null) {
+                MangaVisionModelInstallRow(
+                    spec = gemmaE2bSpec,
+                    bundleState = gemmaE2bState,
+                    isRecommended = true,
+                    accent = MikaColors.NeonCyan,
+                    onDownload = { viewModel.startModelDownload(gemmaE2bSpec) },
+                    onPause = { viewModel.pauseModelDownload(gemmaE2bSpec.id) }
+                )
+            }
+            if (gemmaE4bSpec != null) {
+                MangaVisionModelInstallRow(
+                    spec = gemmaE4bSpec,
+                    bundleState = gemmaE4bState,
+                    isRecommended = false,
+                    accent = MikaColors.NeonPurple,
+                    onDownload = { viewModel.startModelDownload(gemmaE4bSpec) },
+                    onPause = { viewModel.pauseModelDownload(gemmaE4bSpec.id) }
+                )
+            }
         }
+        Spacer(modifier = Modifier.height(8.dp))
 
         if (projects.isNotEmpty() && activeProject != null) {
             CyberDropdown(
@@ -237,6 +367,26 @@ fun MangaDubStudioModuleWindowBody(
                 onSelect = { viewModel.selectMangaProject(it.id) },
                 accent = MikaColors.NeonPink
             )
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                MikaTagPill(
+                    label = "DELETE PROJECT",
+                    selected = true,
+                    activeColor = MikaColors.DangerRed,
+                    onClick = { pendingDeleteProject = activeProject }
+                )
+                if (projects.size > 1) {
+                    MikaTagPill(
+                        label = "CLEAR ALL (${projects.size})",
+                        selected = false,
+                        activeColor = MikaColors.DangerRed,
+                        onClick = { pendingClearAllProjects = true }
+                    )
+                }
+            }
             Spacer(modifier = Modifier.height(6.dp))
         }
 
@@ -342,6 +492,17 @@ fun MangaDubStudioModuleWindowBody(
                 )
             }
         }
+
+        if (isBusy || mangaTelemetry.logTail.isNotEmpty() || mangaTelemetry.stage != MangaPipelineStage.IDLE) {
+            Spacer(modifier = Modifier.height(8.dp))
+            MangaTelemetryBanner(
+                telemetry = mangaTelemetry,
+                statusFallback = statusLabel,
+                progress = overallProgress,
+                isBusy = isBusy,
+                onCancel = { viewModel.cancelMangaWork() }
+            )
+        }
     }
 
     // 2. Active Project Pre-Production Desk
@@ -371,12 +532,36 @@ fun MangaDubStudioModuleWindowBody(
                         fontSize = 8.5.sp
                     )
                 }
-                MikaTagPill(
-                    label = "DEL",
-                    selected = true,
-                    activeColor = MikaColors.DangerRed,
-                    onClick = { viewModel.deleteMangaProject(activeProject.id) }
-                )
+                Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    MikaTagPill(
+                        label = "DEL CH",
+                        selected = false,
+                        activeColor = MikaColors.DangerRed,
+                        onClick = { pendingDeleteChapter = activeProject.id to activeChapter }
+                    )
+                    MikaTagPill(
+                        label = "DEL PROJ",
+                        selected = true,
+                        activeColor = MikaColors.DangerRed,
+                        onClick = { pendingDeleteProject = activeProject }
+                    )
+                }
+            }
+            if (activeProject.chapters.size > 1) {
+                Spacer(modifier = Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    activeProject.chapters.forEachIndexed { chIdx, chEntry ->
+                        MikaTagPill(
+                            label = "CH ${chIdx + 1}: ${chEntry.title.take(14)}",
+                            selected = chEntry.id == activeChapter.id,
+                            activeColor = MikaColors.NeonCyan,
+                            onClick = { selectedChapterId = chEntry.id }
+                        )
+                    }
+                }
             }
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -861,18 +1046,12 @@ fun MangaDubStudioModuleWindowBody(
             }
 
             Spacer(modifier = Modifier.height(8.dp))
-            LinearProgressIndicator(
-                progress = { overallProgress.coerceIn(0f, 1f) },
-                color = if (isBusy) MikaColors.TerminalGreen else MikaColors.NeonCyan,
-                trackColor = MikaColors.DeepWellBg,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            Text(
-                text = statusLabel,
-                color = MikaColors.CyanWhite,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.sp
+            MangaTelemetryBanner(
+                telemetry = mangaTelemetry,
+                statusFallback = statusLabel,
+                progress = overallProgress,
+                isBusy = isBusy,
+                onCancel = { viewModel.cancelMangaWork() }
             )
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -940,6 +1119,255 @@ fun MangaDubStudioModuleWindowBody(
                             fontSize = 8.5.sp
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MangaVisionModelInstallRow(
+    spec: ModelBundleSpec,
+    bundleState: com.projectmika.purrtts.core.purr.ModelBundleState?,
+    isRecommended: Boolean,
+    accent: Color,
+    onDownload: () -> Unit,
+    onPause: () -> Unit
+) {
+    val installed = bundleState?.state == DownloadState.INSTALLED
+    val isDownloading = bundleState?.state == DownloadState.DOWNLOADING ||
+        bundleState?.state == DownloadState.VERIFYING
+    val rowAccent = if (installed) MikaColors.TerminalGreen else accent
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(5.dp))
+            .background(MikaColors.PanelBg.copy(alpha = 0.72f))
+            .border(1.dp, rowAccent.copy(alpha = 0.55f), RoundedCornerShape(5.dp))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                    verticalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text(
+                        text = "${spec.romCode} // ${spec.name.replace("_LITERT", "")}",
+                        color = rowAccent,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 9.sp
+                    )
+                    Text(
+                        text = if (isRecommended) "[RECOMMENDED]" else "[PRO 4B • 8GB+]",
+                        color = if (isRecommended) MikaColors.SsrGold else MikaColors.NeonPurple,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 8.5.sp
+                    )
+                    if (installed) {
+                        Text(
+                            text = "[READY]",
+                            color = MikaColors.TerminalGreen,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 8.5.sp
+                        )
+                    }
+                }
+                Text(
+                    text = if (isRecommended) {
+                        "Fast on-device Vision + Thinking (+${spec.approximateSizeMb} MB)"
+                    } else {
+                        "Larger 4B model for denser spreads (+${spec.approximateSizeMb} MB)"
+                    },
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 8.sp
+                )
+            }
+            if (!installed) {
+                MikaTagPill(
+                    label = if (isDownloading) "PAUSE" else "INSTALL",
+                    selected = true,
+                    activeColor = if (isDownloading) MikaColors.MikaAmber else rowAccent,
+                    leadingIcon = if (isDownloading) CyberIconType.PAUSE else CyberIconType.DOWNLOAD,
+                    onClick = { if (isDownloading) onPause() else onDownload() }
+                )
+            }
+        }
+        if (isDownloading && bundleState != null) {
+            LinearProgressIndicator(
+                progress = { bundleState.progressFraction.coerceIn(0f, 1f) },
+                color = rowAccent,
+                trackColor = rowAccent.copy(alpha = 0.16f),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Text(
+                text = "${(bundleState.progressFraction * 100).toInt()}% (${bundleState.downloadedBytes / (1024 * 1024)} / ${spec.approximateSizeMb} MB)",
+                color = rowAccent,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.sp
+            )
+        }
+    }
+}
+
+@Composable
+private fun MangaTelemetryBanner(
+    telemetry: MangaJobTelemetry,
+    statusFallback: String,
+    progress: Float,
+    isBusy: Boolean,
+    onCancel: () -> Unit
+) {
+    val pct = (progress.coerceIn(0f, 1f) * 100f).toInt()
+    val elapsedSec = (telemetry.elapsedMs / 1000L).toInt().coerceAtLeast(0)
+    val elapsedText = MangaTelemetryUtils.formatDurationShort(elapsedSec)
+    val etaText = telemetry.estimatedRemainingSec?.let { "~${MangaTelemetryUtils.formatDurationShort(it)}" }
+        ?: if (isBusy) "ESTIMATING..." else "--"
+    val borderAccent = when {
+        statusFallback.contains("ERROR", ignoreCase = true) -> MikaColors.DangerRed
+        isBusy -> MikaColors.TerminalGreen
+        else -> MikaColors.NeonCyan
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(6.dp))
+            .background(MikaColors.DeepWellBg)
+            .border(1.dp, borderAccent.copy(alpha = 0.65f), RoundedCornerShape(6.dp))
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        // 4-Stage Pipeline Indicator Strip
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            listOf(
+                MangaPipelineStage.EXTRACT_AND_SLICE to "1 SLICE",
+                MangaPipelineStage.VISION_SCAN to "2 VISION",
+                MangaPipelineStage.VOICE_FORGE to "3 VOICE",
+                MangaPipelineStage.VIDEO_MUX to "4 MP4 MUX"
+            ).forEach { (st, title) ->
+                val isCurrent = telemetry.stage == st
+                val isPast = telemetry.stage.stepNum > st.stepNum
+                val c = when {
+                    isCurrent -> MikaColors.TerminalGreen
+                    isPast -> MikaColors.NeonCyan
+                    else -> MikaColors.DimText.copy(alpha = 0.55f)
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(if (isCurrent) c.copy(alpha = 0.22f) else MikaColors.PanelBg.copy(alpha = 0.6f))
+                        .border(1.dp, c.copy(alpha = if (isCurrent) 0.9f else 0.35f), RoundedCornerShape(4.dp))
+                        .padding(vertical = 4.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = title,
+                        color = c,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = if (isCurrent) FontWeight.Black else FontWeight.Bold,
+                        fontSize = 7.5.sp,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+
+        // Percent, Item Counter, Elapsed, Dynamic ETA & Screen-Awake Notice
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            val counterSuffix = if (telemetry.itemTotal > 0) " (${telemetry.itemCurrent}/${telemetry.itemTotal})" else ""
+            Text(
+                text = "$pct%$counterSuffix",
+                color = borderAccent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.5.sp
+            )
+            Text(
+                text = "ELAPSED $elapsedText • ETA $etaText",
+                color = MikaColors.SsrGold,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 8.5.sp
+            )
+        }
+
+        LinearProgressIndicator(
+            progress = { progress.coerceIn(0f, 1f) },
+            color = borderAccent,
+            trackColor = MikaColors.PanelBg,
+            modifier = Modifier.fillMaxWidth()
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = telemetry.detailText.ifBlank { statusFallback },
+                color = MikaColors.CyanWhite,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.sp,
+                modifier = Modifier.weight(1f)
+            )
+            if (isBusy) {
+                MikaTagPill(
+                    label = "STOP",
+                    selected = true,
+                    activeColor = MikaColors.DangerRed,
+                    onClick = onCancel
+                )
+            }
+        }
+
+        if (isBusy) {
+            Text(
+                text = "SCREEN AWAKE LOCK ACTIVE • STAY IN APP FOR BEST GPU/CODEC SPEED",
+                color = MikaColors.TerminalGreen.copy(alpha = 0.85f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 7.5.sp
+            )
+        }
+
+        if (telemetry.logTail.isNotEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(4.dp))
+                    .background(Color(0xFF07060D))
+                    .border(1.dp, MikaColors.SubtleBorder, RoundedCornerShape(4.dp))
+                    .padding(6.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                telemetry.logTail.forEach { entry ->
+                    Text(
+                        text = entry,
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 7.8.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
         }

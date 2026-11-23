@@ -22,9 +22,11 @@ import com.projectmika.purrtts.core.audiobook.AudiobookProject
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaCloneHandoffTarget
+import com.projectmika.purrtts.core.manga.MangaJobTelemetry
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSeriesProject
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
+import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.CartridgeFilterMode
@@ -108,6 +110,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val isMangaBusy: StateFlow<Boolean> = mangaDubManager.isBusy
     val mangaStatusLabel: StateFlow<String> = mangaDubManager.statusLabel
     val mangaProgress: StateFlow<Float> = mangaDubManager.overallProgress
+    val mangaTelemetry: StateFlow<MangaJobTelemetry> = mangaDubManager.telemetry
 
     private val _pendingMangaCloneTarget = MutableStateFlow<MangaCloneHandoffTarget?>(null)
     val pendingMangaCloneTarget: StateFlow<MangaCloneHandoffTarget?> = _pendingMangaCloneTarget.asStateFlow()
@@ -1793,6 +1796,16 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         showToast("Deleted manga project")
     }
 
+    fun deleteMangaChapter(projectId: String, chapterId: String) {
+        mangaDubManager.deleteChapter(projectId, chapterId)
+        showToast("Deleted manga chapter")
+    }
+
+    fun deleteAllMangaProjects() {
+        mangaDubManager.deleteAllProjects()
+        showToast("Cleared all manga projects")
+    }
+
     fun importMangaCbz(
         uri: Uri,
         targetProjectId: String?,
@@ -1877,14 +1890,16 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         enableAtmosphereFx: Boolean? = null,
-        powerUserVisionUrl: String? = null
+        powerUserVisionUrl: String? = null,
+        preferredVisionModel: MangaVisionModelTier? = null
     ) = mangaDubManager.updateProjectConfig(
         projectId = projectId,
         readingOrder = readingOrder,
         videoAspect = videoAspect,
         burnInSubtitles = burnInSubtitles,
         enableAtmosphereFx = enableAtmosphereFx,
-        powerUserVisionUrl = powerUserVisionUrl
+        powerUserVisionUrl = powerUserVisionUrl,
+        preferredVisionModel = preferredVisionModel
     )
 
     fun reanalyzeMangaChapter(projectId: String, chapterId: String) {
