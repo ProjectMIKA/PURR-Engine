@@ -453,8 +453,9 @@ object MangaTextBender {
      * Literal example strings from our own VLM prompt schemas. A small vision model that fails
      * the panel OCR task may echo one of these back as if it were transcribed dialogue; such
      * lines are dropped at parse time so the panel falls to review instead of dubbing garbage.
+     * Public: `MangaVisionResponseParser.parseLineSpecArray` gates against this set.
      */
-    private val PLACEHOLDER_DIALOGUE_TEXTS = setOf(
+    val PLACEHOLDER_DIALOGUE_TEXTS = setOf(
         "dialogue", "dialog", "dialogue text", "dialog text",
         "exact transcribed dialogue inside bubble 1",
         "exact transcribed dialogue inside bubble",
@@ -1868,7 +1869,7 @@ object MangaVisionResponseParser {
             // instead of transcribing the panel — parroted placeholder lines must NEVER reach
             // the voice forge; the panel falls through to review instead of dubbing garbage.
             val normalizedText = rawText.lowercase(Locale.ROOT).trim().trimEnd('.', '!', '?', '…', ' ')
-            if (normalizedText.isEmpty() || normalizedText in PLACEHOLDER_DIALOGUE_TEXTS) {
+            if (normalizedText.isEmpty() || normalizedText in MangaTextBender.PLACEHOLDER_DIALOGUE_TEXTS) {
                 return@mapIndexedNotNull null
             }
             val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)

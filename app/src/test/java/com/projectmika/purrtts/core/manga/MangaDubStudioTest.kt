@@ -1241,7 +1241,7 @@ class MangaDubStudioTest {
         assertNull(MangaTextBender.subtitleLabelFor("MIKA"))
         assertNull(MangaTextBender.subtitleLabelFor(""))
         assertEquals("MIKA (Narrator)", MangaTextBender.subtitleLabelFor("NARRATOR"))
-        assertEquals("narrator", MangaTextBender.subtitleLabelFor("narrator"))
+        assertEquals("MIKA (Narrator)", MangaTextBender.subtitleLabelFor("narrator"))
         assertEquals("SEBASTIAN", MangaTextBender.subtitleLabelFor("sebastian"))
     }
 
