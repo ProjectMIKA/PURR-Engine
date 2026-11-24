@@ -1253,4 +1253,53 @@ class MangaDubStudioTest {
         assertTrue(prompt.contains("playful", ignoreCase = true))
         assertTrue(prompt.length in 80..400)
     }
+
+    @Test
+    fun `xy-cut slicer keeps all eight verified panels in a 2x4 grid under AUTO ceiling`() {
+        // v1.9.8: cap 6 amputated verified panels on 8-panel grids (capToMaxPanels merged two
+        // adjacent pairs into double-width crops). AUTO (8) = the recursion's natural maxDepth-3
+        // ceiling, so every evidence-verified panel survives.
+        val w = 132
+        val h = 152
+        val lum = IntArray(w * h) { 252 }
+
+        fun drawFramedPanel(x0: Int, y0: Int, x1: Int, y1: Int) {
+            for (y in y0..y1) {
+                for (x in x0..x1) {
+                    val onBorder = (x == x0 || x == x1 || y == y0 || y == y1)
+                    lum[y * w + x] = if (onBorder) 20 else 210
+                }
+            }
+        }
+
+        // 2 rows x 4 columns of framed panels with clean white gutters
+        val cols = listOf(4 to 31, 36 to 63, 68 to 95, 100 to 127)
+        val rows = listOf(4 to 72, 80 to 147)
+        for ((y0, y1) in rows) {
+            for ((x0, x1) in cols) {
+                drawFramedPanel(x0, y0, x1, y1)
+            }
+        }
+
+        val autoPanels = MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(
+            luminance = lum,
+            width = w,
+            height = h,
+            readingOrder = MangaReadingOrder.RTL_MANGA
+        )
+        assertEquals(8, autoPanels.size)
+        // RTL: first panel is top-right, last is bottom-left
+        assertTrue(autoPanels[0].centerX > 0.5f && autoPanels[0].centerY < 0.5f)
+        assertTrue(autoPanels[7].centerX < 0.5f && autoPanels[7].centerY > 0.5f)
+
+        // Explicit cap 6 still merges the smallest adjacent unions (user override honored)
+        val cappedPanels = MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(
+            luminance = lum,
+            width = w,
+            height = h,
+            readingOrder = MangaReadingOrder.RTL_MANGA,
+            maxPanels = 6
+        )
+        assertEquals(6, cappedPanels.size)
+    }
 }

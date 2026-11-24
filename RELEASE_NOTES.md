@@ -14,8 +14,9 @@ Field-feedback patch for Manga Dub Studio: KV-cache scanning becomes opt-in afte
   * UNKNOWN speakers and invented placeholder names (**"THE_MALE"**, "THE_FEMALE", or a persona-contaminated "MIKA") get **no subtitle name prefix at all** — the spoken text is subtitled alone, with the speaker row collapsed in the HUD. The subtitle pills stop lying about who is talking.
 * **🧠 Prompt De-Contamination & Page Isolation (`LiteRtGemmaVisionEngine`)**:
   * Every vision prompt now explicitly forbids inventing placeholder names (MIKA, THE_MALE, THE_FEMALE, GIRL, BOY...) — unnamed speakers must stay "UNKNOWN" — and restricts transcription to text visible inside the current panel/page crop, fixing cross-page speaker bleed.
-* **✂️ Panel Slicer Headroom (`MangaBfsPanelSlicer`)**:
-  * `MAX_PANELS_PER_PAGE` raised **5 → 6** — dense pages whose scanlation credit bar sits between the last two panels were losing their final panel at the old cap.
+* **✂️ Dynamic Panel Slicing Ceiling & User Override (`MangaBfsPanelSlicer` / `MangaDubStudioManager`)**:
+  * The border-verified XY-cut slicer is **evidence-gated** — it only cuts on gutters with ≥90% coverage across both halves plus border/peak verification, and stops when no verified gutter remains. The old hard cap never prevented over-cutting; it **merged away verified panels** (`capToMaxPanels` fused the smallest adjacent union pairs) — an 8-panel 2×4 grid could never fully materialize because chained cuts need recursion depth R+C−2, and depth 3 only reaches 2×3!
+  * **`PANELS:` selector in the CUSTOMIZE drawer**: **`AUTO (8)`** (default — trusts verified gutters, no merge-away, depth tiers 4/5/6 auto-derived for 8/12/16-panel layouts) or explicit **4 / 6 / 8 / 12** caps for art styles that fool the gutter detector (snow/sky bands) or to trade scan time for fewer, larger panels. Higher depth never *forces* cuts — every split still passes full gutter verification.
 
 ---
 

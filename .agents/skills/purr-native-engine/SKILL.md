@@ -321,5 +321,12 @@ voices went flat:
   invented placeholder speakers (incl. a contaminated "MIKA") get NO subtitle name prefix —
   spoken text only; NARRATOR lines render "MIKA (Narrator)". The muxer collapses the speaker
   row when the label is null.
-- `MAX_PANELS_PER_PAGE` raised 5 → 6 (border-verified slicer is conservative; dense pages with
-  a scanlation bar between panels were losing their last panel at the cap).
+- **Dynamic panel ceiling + chained-cut depth law** (`MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(…, maxPanels)`,
+  manager pref `manga_max_panels_per_page`, 0 = AUTO): the XY-cut recursion is evidence-gated
+  (≥90% gutter across both halves + border/peak validity) — a max cap never prevents
+  over-cutting, it only MERGES verified panels away. The REAL limiter is recursion depth:
+  chained cuts land at depth R+C−2 for an RxC grid (depth 3 only reaches 2×3 = 6 panels;
+  2×4/4×2 need depth 4). Depth tiers derive from the cap: ≤6→3, ≤8→4, ≤12→5, else 6.
+  UI: `PANELS:` pill row (AUTO(8)/4/6/8/12) in the CUSTOMIZE drawer. Validated with a
+  faithful Python port against the 2×4 grid (8 panels AUTO / 6 merged), the tall-right
+  4-panel layout, and webtoon bands before shipping.

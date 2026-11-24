@@ -189,6 +189,27 @@ class MangaDubStudioManager(
         )
     }
 
+    // ✨ v1.9.8: max panels per page — 0 = AUTO (trust the border-verified gutter evidence up to
+    // the recursion's natural 8-leaf ceiling, no merge-away); 4/6/8/12 are explicit overrides
+    // for art styles that fool the gutter detector or to trade scan time for fewer, larger panels.
+    private val _mangaMaxPanelsPerPage = MutableStateFlow(
+        prefs.getInt("manga_max_panels_per_page", 0)
+    )
+    val mangaMaxPanelsPerPage: StateFlow<Int> = _mangaMaxPanelsPerPage.asStateFlow()
+
+    fun setMangaMaxPanelsPerPage(maxPanels: Int) {
+        prefs.edit().putInt("manga_max_panels_per_page", maxPanels).apply()
+        _mangaMaxPanelsPerPage.value = maxPanels
+        appendLog(
+            if (maxPanels == 0) "✂️ Panel slicer: AUTO (evidence-gated, ceiling ${MangaBfsPanelSlicer.AUTO_MAX_PANELS_PER_PAGE})"
+            else "✂️ Panel slicer: max $maxPanels panels/page (re-scan chapter to apply)"
+        )
+    }
+
+    fun resolveMangaMaxPanelsPerPage(): Int =
+        _mangaMaxPanelsPerPage.value.takeIf { it in 4..MangaBfsPanelSlicer.HARD_MAX_PANELS_PER_PAGE }
+            ?: MangaBfsPanelSlicer.AUTO_MAX_PANELS_PER_PAGE
+
     private fun appendLog(entry: String) {
         val elapsedSec = if (activeJobStartMs > 0L) {
             ((System.currentTimeMillis() - activeJobStartMs) / 1000L).toInt().coerceAtLeast(0)
@@ -492,7 +513,7 @@ class MangaDubStudioManager(
                         itemCurrent = pageIdx + 1,
                         itemTotal = extractedFiles.size
                     )
-                    sliceSinglePageFromDisk(pageIdx, imgFile, readingOrder)
+                    sliceSinglePageFromDisk(pageIdx, imgFile, readingOrder, resolveMangaMaxPanelsPerPage())
                 }
                 if (rawPages.isEmpty()) {
                     throw IllegalStateException("Failed to decode extracted manga images")
@@ -603,8 +624,8 @@ class MangaDubStudioManager(
                 renderSyntheticMangaPage(page1File, pageNum = 1)
                 renderSyntheticMangaPage(page2File, pageNum = 2)
 
-                val p1 = sliceSinglePageFromDisk(0, page1File, MangaReadingOrder.RTL_MANGA)!!
-                val p2 = sliceSinglePageFromDisk(1, page2File, MangaReadingOrder.RTL_MANGA)!!
+                val p1 = sliceSinglePageFromDisk(0, page1File, MangaReadingOrder.RTL_MANGA, resolveMangaMaxPanelsPerPage())!!
+                val p2 = sliceSinglePageFromDisk(1, page2File, MangaReadingOrder.RTL_MANGA, resolveMangaMaxPanelsPerPage())!!
 
                 // Crop real character portraits directly from the generated pages
                 val vegetaCrop = File(charsDir, "char_vegeta_x.jpg")
@@ -2000,7 +2021,8 @@ class MangaDubStudioManager(
     private fun sliceSinglePageFromDisk(
         pageIdx: Int,
         imgFile: File,
-        readingOrder: MangaReadingOrder
+        readingOrder: MangaReadingOrder,
+        maxPanels: Int = MangaBfsPanelSlicer.AUTO_MAX_PANELS_PER_PAGE
     ): MangaPageEntry? {
         val boundsOpts = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(imgFile.absolutePath, boundsOpts)
@@ -2029,7 +2051,7 @@ class MangaDubStudioManager(
             (r * 299 + g * 587 + b * 114) / 1000
         }
 
-        val rects = MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(luminance, gridW, gridH, readingOrder)
+        val rects = MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(luminance, gridW, gridH, readingOrder, maxPanels)
         val panelNodes = rects.mapIndexed { panelIdx, rect ->
             val (camStart, camEnd) = MangaBfsPanelSlicer.computeKenBurnsPair(rect, readingOrder)
             MangaPanelNode(

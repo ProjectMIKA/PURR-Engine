@@ -150,6 +150,7 @@ fun MangaDubStudioModuleWindowBody(
     val includeNonBubbleText = activeProject?.includeNonBubbleText ?: globalIncludeNonBubbleText
     val globalLockVoicesViaCloning by viewModel.lockMangaVoicesViaCloning.collectAsState()
     val globalMangaKvCacheEnabled by viewModel.mangaKvCacheEnabled.collectAsState()
+    val globalMangaMaxPanelsPerPage by viewModel.mangaMaxPanelsPerPage.collectAsState()
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     var autoCookFullMp4 by remember(activeProject?.id) {
         mutableStateOf(activeProject?.autoCookFullMp4 ?: true)
@@ -1025,6 +1026,41 @@ fun MangaDubStudioModuleWindowBody(
                     onToggle = { checked ->
                         viewModel.setMangaKvCacheEnabled(checked)
                     }
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "PANELS:",
+                        color = MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 8.sp,
+                        modifier = Modifier.width(62.dp)
+                    )
+                    FlowRow(
+                        modifier = Modifier.weight(1f),
+                        horizontalArrangement = Arrangement.spacedBy(5.dp),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        listOf(0 to "AUTO (8)", 4 to "4", 6 to "6", 8 to "8", 12 to "12").forEach { (value, label) ->
+                            MikaTagPill(
+                                label = label,
+                                selected = globalMangaMaxPanelsPerPage == value,
+                                activeColor = MikaColors.NeonCyan,
+                                onClick = { viewModel.setMangaMaxPanelsPerPage(value) }
+                            )
+                        }
+                    }
+                }
+                Text(
+                    text = "ℹ️ AUTO trusts verified gutters up to 8 panels/page (no merge-away). Higher caps keep more panels but scan slower; re-scan chapter to apply.",
+                    color = MikaColors.CyanWhite.copy(alpha = 0.85f),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 7.8.sp,
+                    lineHeight = 11.sp
                 )
 
                 // 3 Pre-Production Tabs

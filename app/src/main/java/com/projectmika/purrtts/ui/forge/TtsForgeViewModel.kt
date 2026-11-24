@@ -1843,6 +1843,13 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         mangaDubManager.setMangaKvCacheEnabled(enabled)
     }
 
+    val mangaMaxPanelsPerPage: StateFlow<Int>
+        get() = mangaDubManager.mangaMaxPanelsPerPage
+
+    fun setMangaMaxPanelsPerPage(maxPanels: Int) {
+        mangaDubManager.setMangaMaxPanelsPerPage(maxPanels)
+    }
+
     fun importMangaCbz(
         uri: Uri,
         targetProjectId: String?,

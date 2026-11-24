@@ -962,7 +962,26 @@ object MangaDeterministicEffectsEngine {
  */
 object MangaBfsPanelSlicer {
 
-    const val MAX_PANELS_PER_PAGE = 6
+    /**
+     * ✨ v1.9.8 DYNAMIC PANEL CEILING ✨
+     * The XY-cut recursion is already EVIDENCE-GATED — `findBestGutterCut` requires >=90%
+     * gutter coverage across BOTH halves plus border/peak verification before any split is
+     * allowed, and recursion stops when no verified gutter remains. A max-panel cap therefore
+     * never prevents over-cutting; it only MERGES AWAY verified panels (`capToMaxPanels` fuses
+     * the smallest adjacent union pairs). AUTO trusts the evidence with a depth tier that can
+     * actually REACH the requested panel count: chained cuts land at depth R+C-2 for an RxC
+     * grid (depth 3 only ever reaches 2x3!), so 8-panel 2x4/4x2 grids need depth 4, 12-panel
+     * 3x4 needs 5, 16-panel 4x4 needs 6. Higher depth never FORCES cuts — every split still
+     * passes full gutter verification. Explicit user overrides (4/6/8/12) exist for art styles
+     * that fool the gutter detector (snow/sky bands) or to trade scan time for fewer panels.
+     */
+    const val AUTO_MAX_PANELS_PER_PAGE = 8
+
+    /** Absolute hard ceiling for explicit overrides (binary recursion at maxDepth 4). */
+    const val HARD_MAX_PANELS_PER_PAGE = 16
+
+    /** Default ceiling = AUTO (kept as [MAX_PANELS_PER_PAGE] for existing callers/tests). */
+    const val MAX_PANELS_PER_PAGE = AUTO_MAX_PANELS_PER_PAGE
 
     private data class GutterCut(val start: Int, val len: Int, val score: Float)
 
@@ -970,7 +989,8 @@ object MangaBfsPanelSlicer {
         luminance: IntArray,
         width: Int,
         height: Int,
-        readingOrder: MangaReadingOrder
+        readingOrder: MangaReadingOrder,
+        maxPanels: Int = AUTO_MAX_PANELS_PER_PAGE
     ): List<MangaNormalizedRect> {
         if (width < 8 || height < 8 || luminance.size < width * height) {
             return listOf(MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f))
@@ -1005,6 +1025,18 @@ object MangaBfsPanelSlicer {
         while (rx0 < rx1 - 6 && countColGutter(luminance, width, rx0, ry0, ry1, ::isOuterGutter) >= ((ry1 - ry0) * 0.98f).toInt()) rx0++
         while (rx1 > rx0 + 6 && countColGutter(luminance, width, rx1 - 1, ry0, ry1, ::isOuterGutter) >= ((ry1 - ry0) * 0.98f).toInt()) rx1--
 
+        val safeMaxPanels = maxPanels.coerceIn(2, HARD_MAX_PANELS_PER_PAGE)
+        // Chained-cut depth law: an R x C grid needs (R-1) chained row cuts + (C-1) chained
+        // column cuts, so leaves land at depth R+C-2. 6 panels (2x3) fits depth 3; 8-panel
+        // 2x4/4x2 grids need depth 4; 12-panel 3x4 needs 5; 16-panel 4x4 needs 6. Higher depth
+        // does NOT force cuts — every split still has to pass full gutter verification.
+        val effectiveMaxDepth = when {
+            safeMaxPanels <= 6 -> 3
+            safeMaxPanels <= 8 -> 4
+            safeMaxPanels <= 12 -> 5
+            else -> 6
+        }
+
         val rawLeaves = sliceRegionRecursive(
             luminance = luminance,
             width = width,
@@ -1016,14 +1048,14 @@ object MangaBfsPanelSlicer {
             x1 = rx1,
             y1 = ry1,
             depth = 0,
-            maxDepth = 3,
+            maxDepth = effectiveMaxDepth,
             rtl = readingOrder == MangaReadingOrder.RTL_MANGA,
             webtoon = readingOrder == MangaReadingOrder.WEBTOON_VERTICAL
         )
 
         if (rawLeaves.isEmpty()) {
             return if (readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
-                val bands = max(2, min(MAX_PANELS_PER_PAGE, height / max(1, width)))
+                val bands = max(2, min(safeMaxPanels, height / max(1, width)))
                 (0 until bands).map { idx ->
                     val t0 = idx.toFloat() / bands.toFloat()
                     val t1 = ((idx + 1).toFloat() / bands.toFloat()).coerceAtMost(1f)
@@ -1035,7 +1067,7 @@ object MangaBfsPanelSlicer {
         }
 
         if (rawLeaves.size == 1 && readingOrder == MangaReadingOrder.WEBTOON_VERTICAL && height > width * 2) {
-            val bands = max(2, min(MAX_PANELS_PER_PAGE, height / max(1, width)))
+            val bands = max(2, min(safeMaxPanels, height / max(1, width)))
             return (0 until bands).map { idx ->
                 val t0 = idx.toFloat() / bands.toFloat()
                 val t1 = ((idx + 1).toFloat() / bands.toFloat()).coerceAtMost(1f)
@@ -1043,19 +1075,26 @@ object MangaBfsPanelSlicer {
             }
         }
 
-        val capped = capToMaxPanels(rawLeaves, MAX_PANELS_PER_PAGE)
+        val capped = capToMaxPanels(rawLeaves, safeMaxPanels)
         return orderPanelsForReadingDirection(capped, readingOrder)
     }
-
     fun splitCompositePanelBoxes(
         boxes: List<MangaNormalizedRect>,
         luminance: IntArray,
         gutterMed: Int,
         tolerance: Int,
         width: Int,
-        height: Int
+        height: Int,
+        maxPanels: Int = AUTO_MAX_PANELS_PER_PAGE
     ): List<MangaNormalizedRect> {
         if (width < 8 || height < 8 || luminance.size < width * height) return boxes
+        val safeMaxPanels = maxPanels.coerceIn(2, HARD_MAX_PANELS_PER_PAGE)
+        val effectiveMaxDepth = when {
+            safeMaxPanels <= 6 -> 3
+            safeMaxPanels <= 8 -> 4
+            safeMaxPanels <= 12 -> 5
+            else -> 6
+        }
         val split = boxes.flatMap { box ->
             val x0 = (box.left * width).toInt().coerceIn(0, width - 1)
             val y0 = (box.top * height).toInt().coerceIn(0, height - 1)
@@ -1072,12 +1111,12 @@ object MangaBfsPanelSlicer {
                 x1 = x1,
                 y1 = y1,
                 depth = 0,
-                maxDepth = 3,
+                maxDepth = effectiveMaxDepth,
                 rtl = false,
                 webtoon = false
             )
         }
-        return capToMaxPanels(split, MAX_PANELS_PER_PAGE)
+        return capToMaxPanels(split, safeMaxPanels)
     }
 
     private inline fun countRowGutter(
