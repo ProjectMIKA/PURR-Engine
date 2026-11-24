@@ -419,7 +419,7 @@ $knownBlock
 TASK:
 Look across ALL pages on this contact sheet as one continuous story:
 1. Identify the recurring characters across scene changes & outfit switches (for example: if an unnamed character in a bath towel on PAGE 1 turns out to be named OJOU-SAMA or SEBASTIAN on PAGE 2, unify them under ONE canonical uppercase name!).
-   - NEVER use placeholder names (MIKA, THE_MALE, THE_FEMALE, THE_WOMAN, THE_MAN, THE_GIRL, THE_BOY, GIRL, BOY). Only list characters whose name is visually confirmed somewhere on the sheet.
+   - NEVER use placeholder names (MIKA, THE_WOMAN, THE_MALE, GIRL, BOY) and never output UNKNOWN. Recurring characters without a confirmable name get a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL), reused consistently across pages.
 2. Summarize the overall chapter premise in 1-2 sentences.
 3. Give a brief 1-sentence beat summary for each labeled PAGE.
 
@@ -893,11 +893,11 @@ TASK:
 $bubbleScopeRule
 SPEAKER & BUBBLE-TAIL ATTRIBUTION RULES:
 - For every bubble, inspect its pointed tail direction, tiny inline chibi speaker icon, or jagged scream burst pointing toward a character (or follow split `--` sentence continuations belonging to the previous bubble's speaker). Record who the tail points to in `"tail_target"`.
-- If a bubble has NO clear tail and NO chibi head icon (e.g. off-panel interruption among multiple present characters), set `"speaker": "UNKNOWN"`, `"tail_target": "unclear"`, `"confidence": 0.45`, and list likely `"candidate_speakers"`.
+- If a bubble has NO clear tail and NO chibi head icon (e.g. off-panel interruption among multiple present characters), assign a descriptive ALL-CAPS role label from the speaker's appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL, SUIT_MAN), set `"tail_target": "unclear"`, `"confidence": 0.45`, and list likely `"candidate_speakers"`.
 - Order lines strictly by ${readingOrder.label} and provide normalized bubble center coordinates `"x_pos"` (0.0=left..1.0=right) and `"y_pos"` (0.0=top..1.0=bottom).
 
 NAMING & SCOPE RULES:
-- NEVER invent placeholder names (MIKA, THE_MALE, THE_FEMALE, THE_WOMAN, THE_MAN, THE_GIRL, THE_BOY, GIRL, BOY, MAN, WOMAN, CHARACTER, SPEAKER). If a speaker's name is not confirmed inside THIS panel (spoken aloud, written, or unmistakable from context), use "UNKNOWN" — unnamed characters stay UNKNOWN.
+- NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE, THE_FEMALE, GIRL, BOY). If a speaker's name is not confirmed inside THIS panel (spoken aloud, written, or unmistakable from context), assign a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL, SUIT_MAN, BLOND_RIVAL) and REUSE the exact same label for that character on every page — every bubble belongs to a voiced cast role.
 - Transcribe ONLY text visible inside THIS panel crop. Never carry over or invent bubbles from other pages or panels.
 - Boxed narration captions use speaker "NARRATOR" (MIKA voices the narration).
 
@@ -912,7 +912,7 @@ Output ONLY valid JSON matching this schema:
       "y_pos": 0.22,
       "container_type": "speech_bubble | thought_bubble | scream_burst | narration_box | floating_sfx | credit_or_signature",
       "tail_target": "pointed tail character or narrator_box or unclear",
-      "speaker": "CANONICAL_CHARACTER_NAME or NARRATOR or UNKNOWN",
+      "speaker": "CANONICAL_CHARACTER_NAME, descriptive ROLE_LABEL, or NARRATOR",
       "is_new_character": false,
       "gender": "male | female | androgynous",
       "visual_description": "concise appearance if new character",
@@ -996,7 +996,7 @@ $contextLines
 TASK:
 1. First think carefully inside `<thought>...</thought>` about each panel P1..P$panelCount:
    - $bubbleRule
-   - Inspect every edge bubble, pointed bubble tail, miniature inline speaker icon, and `--` sentence continuation to identify each speaker accurately (or set UNKNOWN / confidence 0.45 with candidate_speakers if unclear).
+   - Inspect every edge bubble, pointed bubble tail, miniature inline speaker icon, and `--` sentence continuation to identify each speaker accurately — when a name is unconfirmed, assign a descriptive ALL-CAPS role label from their appearance instead (never UNKNOWN).
 2. Immediately output ONLY a valid JSON object matching this schema:
 {
   "story_summary": "1-sentence running summary update",
@@ -1012,7 +1012,7 @@ TASK:
           "y_pos": 0.22,
           "container_type": "speech_bubble | thought_bubble | scream_burst | narration_box",
           "tail_target": "pointed tail character or narrator_box or unclear",
-          "speaker": "CHARACTER_NAME or NARRATOR or UNKNOWN",
+          "speaker": "CHARACTER_NAME, descriptive ROLE_LABEL, or NARRATOR",
           "is_new_character": true,
           "gender": "male | female | androgynous",
           "visual_description": "concise appearance traits if new character (age, vibe, armor/uniform)",
@@ -1029,8 +1029,8 @@ TASK:
 Rules:
 - Use 0-based panel_index (0 to ${maxOf(0, panelCount - 1)}).
 - Skip empty/SFX-only panels with `"lines": []`.
-- Only set `"speaker": "UNKNOWN"` and `"confidence": 0.45` if the tail leaves speaker identity genuinely ambiguous.
-- NEVER invent placeholder names (MIKA, THE_MALE, THE_FEMALE, THE_WOMAN, THE_MAN, THE_GIRL, THE_BOY, GIRL, BOY, MAN, WOMAN, CHARACTER). Unnamed speakers stay "UNKNOWN"; boxed narration captions use "NARRATOR".
+- Only set `"confidence": 0.45` when speaker identity is genuinely ambiguous — the speaker STILL gets a descriptive ALL-CAPS role label from their appearance (never UNKNOWN).
+- NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE, THE_FEMALE, GIRL, BOY). When a speaker's name is unconfirmed, assign a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL, SUIT_MAN) and reuse the SAME label for that character across pages; boxed narration captions use "NARRATOR".
 - Transcribe ONLY text visible on THIS page image — never carry bubbles over from other pages.
 """.trim()
     }
@@ -1489,8 +1489,8 @@ Story Bible: ${storySummary.ifBlank { "Keep cast identity consistent across outf
 ${if (pageSynopsis.isNotBlank()) "Page Beat: $pageSynopsis" else ""}
 Known Cast: $roster
 Rules: $scope
-Trace pointed bubble tails, chibi speaker icons, and `--` continuations into `"tail_target"`; use speaker `"UNKNOWN"` + confidence `0.45` only if genuinely ambiguous.
-NEVER invent placeholder names (MIKA, THE_MALE, THE_FEMALE, THE_WOMAN, THE_MAN, THE_GIRL, THE_BOY, GIRL, BOY) — unnamed speakers stay "UNKNOWN"; narration boxes use "NARRATOR". Transcribe ONLY text visible in each cropped panel, never from other pages.
+Trace pointed bubble tails, chibi speaker icons, and `--` continuations into `"tail_target"`; set `"confidence": 0.45` only when genuinely ambiguous — the speaker still gets a descriptive ALL-CAPS role label (never UNKNOWN).
+NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE) — unconfirmed speakers get a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL), reused across pages; narration boxes use "NARRATOR". Transcribe ONLY text visible in each cropped panel, never from other pages.
 Respond with JSON ONLY matching:
 {"mood":"action","thought":"bubble count + tails","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.22,"container_type":"speech_bubble","tail_target":"CHAR","speaker":"CHAR","is_new_character":false,"gender":"female","visual_description":"","voice_design_prompt":"","emotion":"neutral","confidence":0.90,"candidate_speakers":[],"text":"..."}]}
 Output {"mood":"silent_panel","lines":[]} if a panel has no valid spoken lines.

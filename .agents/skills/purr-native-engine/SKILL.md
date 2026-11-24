@@ -330,6 +330,15 @@ voices went flat:
   cast (everything fell back to the default system voice). Placeholder names are REAL cast
   members that merely get no subtitle label. Narrator voice is strictly on-demand: nothing
   narrator-related seeds or mounts unless a chapter contains narration lines.
+- **Universal cast coverage (v2.0.0)**: no spoken line ever falls back to the user's default
+  system-TTS voice. Two layers: (1) every vision prompt instructs the VLM to NEVER output
+  "UNKNOWN" — unconfirmed speakers get a descriptive ALL-CAPS **role label** from their
+  appearance (`BUNNY_BUTLER`, `TOWEL_GIRL`) reused across pages, which flows through seeding →
+  discovery → casting → clone lock like a real cast member; (2) `MangaSpeechLine.genderHint`
+  persists the VLM's per-line gender, and `resolveSynthesisProfileForCharacter(character=null)`
+  synthesizes through Qwen3 1.7B VoiceDesign with `MangaTextBender.genericRoleVoicePrompt(gender)`
+  (distinct Male/Female/Androgynous expressive prompts). Branch 3 also ifBlanks blank prompts
+  to the gendered role voice — QWEN-first, smart-matcher-last.
 - **Cast cards show the EFFECTIVE dub voice** (v1.9.9): the `ASSIGNED VOICE (OR CLONE)`
   dropdown fell back to `activeProfile.primaryVoiceId` — the user's system-TTS pick — which
   mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen". The fallback chain is now

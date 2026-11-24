@@ -1247,6 +1247,22 @@ class MangaDubStudioTest {
     }
 
     @Test
+    fun `generic role voices cover every gender for universal cast coverage`() {
+        val male = MangaTextBender.genericRoleVoicePrompt(VoiceGender.MALE)
+        val female = MangaTextBender.genericRoleVoicePrompt(VoiceGender.FEMALE)
+        val andro = MangaTextBender.genericRoleVoicePrompt(VoiceGender.ANDROGYNOUS)
+        assertTrue(male.contains("male", ignoreCase = true))
+        assertTrue(female.contains("female", ignoreCase = true))
+        assertTrue(andro.contains("androgynous", ignoreCase = true))
+        assertTrue(male != female && female != andro && male != andro)
+        // No default-voice escape hatch: all role prompts are Qwen VoiceDesign-grade descriptions
+        listOf(male, female, andro).forEach { p ->
+            assertTrue(p.contains("close-mic studio", ignoreCase = true))
+            assertTrue(p.length in 80..300)
+        }
+    }
+
+    @Test
     fun `narrator names are barred from the roster but placeholder characters still get voiced`() {
         // v1.9.9 field scar: the roster law wrongly included placeholder names, so THE_WOMAN
         // (a real unnamed cast member who merely gets no subtitle LABEL) was excluded from the

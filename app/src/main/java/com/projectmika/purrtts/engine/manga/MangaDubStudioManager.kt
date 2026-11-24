@@ -1025,7 +1025,8 @@ class MangaDubStudioManager(
                                     needsUserDecision = ls.needsUserDecision,
                                     decisionReason = ls.decisionReason,
                                     candidateSpeakers = ls.candidateSpeakers,
-                                    postPauseMs = MangaEmotionalPacer.computePostLinePauseMs(cleanText, ls.emotion)
+                                    postPauseMs = MangaEmotionalPacer.computePostLinePauseMs(cleanText, ls.emotion),
+                                    genderHint = ls.gender
                                 )
                             }
                             existingPanel.copy(
@@ -1622,7 +1623,8 @@ class MangaDubStudioManager(
                         character = charProfile,
                         availableVoices = voices,
                         lockVoicesViaCloning = proj.lockVoicesViaCloning,
-                        isNarrator = isNarratorLine
+                        isNarrator = isNarratorLine,
+                        genderHint = line.genderHint
                     )
                     val outcome = backendRouter.synthesizeSpeechChunk(
                         chunk = PurrChunk.Speech(
@@ -1911,7 +1913,8 @@ class MangaDubStudioManager(
         character: MangaCharacterProfile?,
         availableVoices: List<VoiceDescriptor>,
         lockVoicesViaCloning: Boolean = true,
-        isNarrator: Boolean = false
+        isNarrator: Boolean = false,
+        genderHint: VoiceGender = VoiceGender.ANDROGYNOUS
     ): PurrProfile {
         // 0. ✨ MIKA IS THE MANGA DUB NARRATOR (v1.9.8): narration lines resolve to M.I.K.A.'s
         // hardcoded Qwen3 1.7B VoiceDesign voice directly — no roster entry, no casting-pass
@@ -1930,7 +1933,24 @@ class MangaDubStudioManager(
                 )
             }
         }
-        if (character == null) return baseProfile
+        // 0.5 ✨ UNIVERSAL CAST COVERAGE (v2.0.0): no spoken line EVER falls back to the user's
+        // default system-TTS voice. Lines whose speaker the VLM could not attribute to a cast
+        // member synthesize through Qwen3 1.7B VoiceDesign with a deterministic expressive role
+        // voice keyed by the line's gender hint (Master's law: always a custom QWEN voice).
+        if (character == null) {
+            val roleDesignInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+            if (roleDesignInstalled) {
+                return baseProfile.copy(
+                    primaryVoiceId = "qwen3_design_custom",
+                    preferredBackend = BackendType.QWEN3_NATIVE,
+                    selectedCartridgeId = "rom_qwen3_custom_06b",
+                    voiceDesignPrompt = MangaTextBender.genericRoleVoicePrompt(genderHint),
+                    baseSpeed = baseProfile.baseSpeed.coerceIn(0.6f, 1.8f),
+                    basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
+                )
+            }
+            return baseProfile
+        }
 
         // 1. Explicit assigned voice (including manual Clone Studio voices)
         if (character.assignedVoiceId.isNotBlank()) {
@@ -1966,14 +1986,18 @@ class MangaDubStudioManager(
             }
         }
 
-        // 3. Direct Qwen3 1.7B VoiceDesign fallback (when clone lock is OFF or no cloner cartridge is installed)
+        // 3. Direct Qwen3 1.7B VoiceDesign fallback (when clone lock is OFF or no cloner cartridge
+        // is installed). Blank prompts resolve to the deterministic gendered role voice — a cast
+        // member is NEVER left on the user's default system voice (Universal Cast Coverage).
         val designInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
-        if (designInstalled && character.voiceDesignPrompt.isNotBlank()) {
+        if (designInstalled) {
             return baseProfile.copy(
                 primaryVoiceId = "qwen3_design_custom",
                 preferredBackend = BackendType.QWEN3_NATIVE,
                 selectedCartridgeId = "rom_qwen3_custom_06b",
-                voiceDesignPrompt = character.voiceDesignPrompt,
+                voiceDesignPrompt = character.voiceDesignPrompt.ifBlank {
+                    MangaTextBender.genericRoleVoicePrompt(character.gender)
+                },
                 baseSpeed = (baseProfile.baseSpeed * character.speedScale).coerceIn(0.6f, 1.8f),
                 basePitch = (baseProfile.basePitch * character.pitchScale).coerceIn(0.88f, 1.12f)
             )

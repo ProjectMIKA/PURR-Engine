@@ -172,7 +172,11 @@ data class MangaSpeechLine(
     val bubbleRect: MangaNormalizedRect? = null,
     val renderedWavPath: String = "",
     val durationMs: Long = 0L,
-    val postPauseMs: Int = 450
+    val postPauseMs: Int = 450,
+    // ✨ UNIVERSAL CAST COVERAGE (v2.0.0): the VLM's per-line gender hint, persisted so
+    // speakerless (UNKNOWN) lines can resolve a deterministic gendered Qwen role voice
+    // instead of the user's default system-TTS voice.
+    val genderHint: VoiceGender = VoiceGender.ANDROGYNOUS
 )
 
 @Serializable
@@ -562,6 +566,26 @@ object MangaTextBender {
         "THE_BOY", "THE_GUY", "THE_LADY", "MALE", "FEMALE", "GIRL", "BOY",
         "MAN", "WOMAN", "PERSON", "CHARACTER", "SPEAKER", "NARRATION", "MIKA", "??", "?"
     )
+
+    /**
+     * ✨ UNIVERSAL CAST COVERAGE (v2.0.0) ✨
+     * Deterministic expressive role voices for speakers the VLM could not attribute to a named
+     * cast member. No spoken line EVER falls back to the user's default system-TTS voice —
+     * speakerless lines synthesize through Qwen3 1.7B VoiceDesign with one of these prompts,
+     * keyed by the line's persisted gender hint (Master's law: always a custom QWEN voice,
+     * even when the LLM needs a nudge).
+     */
+    fun genericRoleVoicePrompt(gender: VoiceGender): String = when (gender) {
+        VoiceGender.MALE ->
+            "A confident youthful anime male voice, warm energetic mid-range pitch, crisp articulate " +
+                "delivery, natural conversational pacing, expressive close-mic studio sound"
+        VoiceGender.FEMALE ->
+            "A bright expressive young anime female voice, warm agile upper-mid pitch, natural " +
+                "conversational pacing, playful energetic delivery, close-mic studio sound"
+        VoiceGender.ANDROGYNOUS ->
+            "A balanced androgynous anime character voice, clear neutral mid-range pitch, calm " +
+                "measured pacing, clean articulate delivery, close-mic studio sound"
+    }
 
     /**
      * ✨ NARRATOR IDENTITY LAW (v1.9.9, split in v1.9.10) ✨

@@ -1,3 +1,26 @@
+# 🌌 PURR-TTS v2.0.0 // Universal Cast Coverage — Every Bubble Gets A QWEN Voice
+
+### ✨ What's New since v1.9.10
+
+The Manga Dub Studio milestone release: no spoken line can EVER fall back to the default system voice, and the vision model is nudged to give every cast member a role. 🎬📖🎙️
+
+* **🎭 Role Labels Instead Of UNKNOWN (Every Vision Prompt)**:
+  * The vision LLM is now explicitly instructed to **never output "UNKNOWN"** — when a speaker's name can't be confirmed, it assigns a **descriptive ALL-CAPS role label from their appearance** (`BUNNY_BUTLER`, `TOWEL_GIRL`, `SUIT_MAN`, `BLOND_RIVAL`) and reuses the exact same label for that character across pages. Lazy placeholders (THE_WOMAN-style) stay banned; the speaker-schema fields now accept `CANONICAL_CHARACTER_NAME, descriptive ROLE_LABEL, or NARRATOR`.
+  * Role labels flow through the full pipeline like real cast members: cast seeding → per-panel discovery → casting-pass VoiceDesign prompts → voice-clone lock → subtitles show the role label.
+* **🧬 Universal Cast Coverage — Deterministic Gendered QWEN Fallback (`MangaSpeechLine.genderHint` / `resolveSynthesisProfileForCharacter`)**:
+  * Belt-and-suspenders for any speakerless line that still slips through: each line now persists the VLM's **gender hint**, and speakerless lines synthesize through **Qwen3 1.7B VoiceDesign** with a deterministic expressive role voice — distinct Male / Female / Androgynous prompts (youthful anime energy, close-mic studio). **The user's default system-TTS voice is unreachable for dub lines.**
+* **🎚️ Blank-Prompt Cast Members Covered Too**:
+  * A cast member with an empty VoiceDesign prompt (e.g. a manual roster add) no longer falls through to the smart matcher — it resolves to the deterministic gendered role voice on Qwen3 1.7B VoiceDesign. QWEN-first, matcher-last.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.0.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `37`).
+2. **`PURR-TTS_V2.0.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.10 // Clone Lock Restoration & Narrator/Placeholder Law Split
 
 ### ✨ What's New since v1.9.9
