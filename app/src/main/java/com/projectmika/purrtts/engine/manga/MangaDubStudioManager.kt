@@ -30,9 +30,11 @@ import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
 import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
+import com.projectmika.purrtts.core.purr.AcousticEffectPreset
 import com.projectmika.purrtts.core.purr.BackendType
 import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.DownloadState
+import com.projectmika.purrtts.core.purr.DspConfig
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
@@ -919,6 +921,15 @@ class MangaDubStudioManager(
                         val spec = panelByIdx[pIdx]
                         if (spec == null) {
                             existingPanel
+                        } else if (spec.lines.isEmpty() && existingPanel.lines.isNotEmpty()) {
+                            // ✨ NO-WIPE LAW (v1.9.7): a failed/empty vision spec must never erase
+                            // lines a previous pass already transcribed — an empty response means
+                            // "no data", not "this panel is silent".
+                            appendLog(
+                                "⚠️ P${pageIdx + 1}.${pIdx + 1} vision returned 0 bubbles; " +
+                                    "keeping ${existingPanel.lines.size} existing line(s)"
+                            )
+                            existingPanel
                         } else {
                             val builtLines = spec.lines.mapIndexed { lIdx, ls ->
                                 val speakerKey = ls.speakerName.trim().ifEmpty { "UNKNOWN" }
@@ -1525,7 +1536,13 @@ class MangaDubStudioManager(
                         renderedLines += line
                         continue
                     }
-                    if (!proj.includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(line.speakerName, textToSpeak)) {
+                    if (!proj.includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(
+                            line.speakerName,
+                            textToSpeak,
+                            trustedSpeaker = proj.characters.any { it.name.equals(line.speakerName.trim(), ignoreCase = true) } ||
+                                line.speakerName.equals("NARRATOR", ignoreCase = true)
+                        )
+                    ) {
                         continue
                     }
 
@@ -1687,13 +1704,24 @@ class MangaDubStudioManager(
         val seedDir = File(projectDir(proj.id), "voice_seeds").apply { mkdirs() }
         val availableNow = repository.allAvailableVoices()
         val updatedCharacters = proj.characters.toMutableList()
-        val seedTranscript = "Actually, let us take a steady breath and look carefully at what is happening here right now."
         val designBase = repository.currentProfile.copy(
             selectedCartridgeId = "rom_qwen3_custom_06b",
             preferredBackend = BackendType.QWEN3_NATIVE,
             primaryVoiceId = "qwen3_design_custom",
             baseSpeed = 1.0f,
-            basePitch = 1.0f
+            basePitch = 1.0f,
+            // ✨ DRY SEED LAW (v1.9.7): the clone reference must be clean studio audio — the
+            // active profile's EQ/reverb would otherwise be baked into every cloned line's anchor.
+            enableDsp = false,
+            dspConfig = DspConfig(
+                warmthEqDb = 0f,
+                presenceEqDb = 0f,
+                reverbWetMix = 0f,
+                effectPreset = AcousticEffectPreset.NONE,
+                enableSentenceTaper = false,
+                antiPopFadeInMs = 0,
+                normalizePeak = false
+            )
         )
         var synthesizedAnySeed = false
 
@@ -1707,6 +1735,18 @@ class MangaDubStudioManager(
                 File(ch.autoCloneSeedWavPath).let { it.isFile && it.length() > 2048L } &&
                 availableNow.any { it.id == ch.autoCloneVoiceId }
             if (existingCloneValid) continue
+
+            // ✨ EXPRESSIVE SEED LAW (v1.9.7): anchor the clone on the character's OWN transcribed
+            // lines (register & excitement variety) instead of one generic neutral sentence — the
+            // 0.6B cloner inherits the seed's prosody, so a flat seed meant flat dubbed voices.
+            val seedTranscript = MangaTextBender.composeVoiceSeedTranscript(
+                chapter.pages.asSequence()
+                    .flatMap { it.panels.asSequence() }
+                    .flatMap { it.lines.asSequence() }
+                    .filter { line -> line.speakerName.trim().equals(ch.name.trim(), ignoreCase = true) }
+                    .mapNotNull { line -> line.sanitizedText.ifBlank { line.rawText }.trim().takeIf(String::isNotEmpty) }
+                    .toList()
+            )
 
             reportTelemetry(
                 stage = MangaPipelineStage.VOICE_FORGE,
@@ -1741,6 +1781,10 @@ class MangaDubStudioManager(
             val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
             writePcm16MonoWav(seedFile, pcm16, pcm16.size, PurrDspProcessor.SAMPLE_RATE_HZ)
 
+            // NOTE: `family` is only consumed by the Sherpa clone lanes (Pocket/ZipVoice asset
+            // checks & engine labels). Qwen3 Base clones route via `resolvedCloneEngineId` ->
+            // QWEN3_NATIVE, so the ZIPVOICE stamp below is inert bookkeeping for the Qwen3 lane;
+            // do NOT route Qwen3 clones through Sherpa based on this family.
             val family = if (targetCloneEngineId.contains("zipvoice") || targetCloneEngineId == Qwen3TtsEngine.SPEC_BASE_CLONE_06B) {
                 SherpaModelFamily.ZIPVOICE
             } else {
@@ -1764,7 +1808,10 @@ class MangaDubStudioManager(
                 autoCloneSeedWavPath = seedFile.absolutePath,
                 autoClonePromptHash = promptHash
             )
-            appendLog("🔒 Locked [${ch.name}] seed -> $targetCloneEngineId (${pcmFloat.size / PurrDspProcessor.SAMPLE_RATE_HZ}s)")
+            appendLog(
+                "🔒 Locked [${ch.name}] seed -> $targetCloneEngineId " +
+                    "(${pcmFloat.size / PurrDspProcessor.SAMPLE_RATE_HZ}s) seed=\"${seedTranscript.take(44)}…\""
+            )
         }
 
         if (synthesizedAnySeed) {
@@ -1782,6 +1829,19 @@ class MangaDubStudioManager(
         return updatedProj
     }
 
+    /**
+     * ✨ CARTRIDGE GUARD (v1.9.7) ✨
+     * Clone descriptors live in persisted state regardless of cartridge installation, and the
+     * router deliberately never hijacks clone requests with CORE_OS speech — so routing to an
+     * uninstalled clone yields EMPTY audio (silent subtitle ghosts). Detect it here and fall
+     * through to the direct VoiceDesign / matcher fallbacks instead.
+     */
+    private fun cloneDescriptorUnavailable(descriptor: VoiceDescriptor): Boolean {
+        if (!descriptor.isCloned) return false
+        val requiredSpecId = descriptor.requiredSubCartridgeId ?: descriptor.cartridgeId
+        return repository.state.value.modelStates[requiredSpecId]?.state != DownloadState.INSTALLED
+    }
+
     fun resolveSynthesisProfileForCharacter(
         baseProfile: PurrProfile,
         character: MangaCharacterProfile?,
@@ -1793,7 +1853,7 @@ class MangaDubStudioManager(
         // 1. Explicit assigned voice (including manual Clone Studio voices)
         if (character.assignedVoiceId.isNotBlank()) {
             val matched = availableVoices.firstOrNull { it.id == character.assignedVoiceId }
-            if (matched != null) {
+            if (matched != null && !cloneDescriptorUnavailable(matched)) {
                 return baseProfile.copy(
                     primaryVoiceId = matched.id,
                     preferredBackend = matched.engine,
@@ -1808,14 +1868,18 @@ class MangaDubStudioManager(
         // 2. Background VoiceDesign -> Qwen Voice Clone lock (prevents vocal drift across emotions/panels)
         if (lockVoicesViaCloning && character.autoCloneVoiceId.isNotBlank()) {
             val autoCloneMatched = availableVoices.firstOrNull { it.id == character.autoCloneVoiceId }
-            if (autoCloneMatched != null) {
+            if (autoCloneMatched != null && !cloneDescriptorUnavailable(autoCloneMatched)) {
                 return baseProfile.copy(
                     primaryVoiceId = autoCloneMatched.id,
                     preferredBackend = autoCloneMatched.engine,
                     selectedCartridgeId = autoCloneMatched.cartridgeId,
                     sherpaFamily = autoCloneMatched.sherpaFamily ?: baseProfile.sherpaFamily,
                     baseSpeed = (baseProfile.baseSpeed * character.speedScale).coerceIn(0.6f, 1.8f),
-                    basePitch = (baseProfile.basePitch * character.pitchScale).coerceIn(0.88f, 1.12f)
+                    // ✨ NO PITCH RE-SHIFT (v1.9.7): the seed clip already carries the designed
+                    // register from its VoiceDesign prompt; re-shifting by pitchScale here
+                    // double-applies the design and adds cubic-interpolation artifacts on top
+                    // of the cloned timbre. Speed stays (WSOLA is far gentler than pitch shifting).
+                    basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
                 )
             }
         }

@@ -247,3 +247,53 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   `scripts/refresh_model_manifest.py`, audit via `--check`), a mismatch force-refreshes the
   manifest ONCE before failing closed, and a leftover complete `.part` must be 416-verified and
   promoted — never resumed into an eternal "HTTP 416" retry trap.
+- **v1.9.6 manga-dub regression**: KV panel-turn token ceiling (768 output − 384 thinking)
+  truncated busy-panel JSON → 0-line specs wiped panels; the expanded SFX lexicon + a NEW
+  synthesis-time re-filter dropped 1-2 word real dialogue; the clone lock's single neutral seed
+  flattened every dubbed voice. All three fixed in v1.9.7 — see the laws below.
+
+## Manga Dub Studio — vision & voice-lock laws (`engine/manga/`)
+
+The `TOOL-11` Manga Dub Studio pipeline (vision OCR → casting → voice forge → mux) has its own
+failure classes; these laws came out of the v1.9.6 regression where bubbles went silent and
+voices went flat:
+
+- **Storyboard pass is context-only** (`runChapterStoryboardPass`, v1.9.4): contact-sheet cast
+  bible + page synopses. It fails soft (`null` → empty synopses) and can NEVER drop bubbles —
+  when bubbles vanish, suspect the per-panel path, not the storyboard.
+- **KV-cache panel turns have a token ceiling** (`analyzeMangaPage` `usePageKvCache`):
+  `maxOutputToken` must exceed the JSON needed by the busiest panel (~80 tokens/bubble).
+  v1.9.6 shipped 768 output − 384 thinking = truncation mid-JSON → parse → 0 lines → panel wiped.
+  v1.9.7 law: ≥1024 output / ≤256 thinking, AND `MangaVisionResponseParser.repairTruncatedJson`
+  deterministically balances truncated strings/brackets (shortened value-tails survive, dangling
+  partial keys drop), AND the candidate builder accepts opener-without-closer payloads. The
+  `{"lines"` repair prompt only fires for brace-free prose — it cannot save truncation; the
+  balancer does.
+- **No-wipe law**: a vision spec with zero lines NEVER replaces a panel's existing lines
+  (`runVisionPhaseOnChapter`). An empty response = "no data", not "panel is silent" (silence is
+  the VLM explicitly returning `{"mood":"silent_panel","lines":[]}` on a first pass).
+- **Trusted-speaker rescue** (`MangaTextBender.isNonBubbleOrCreditNoise(speaker, rawText, trustedSpeaker)`):
+  the SFX lexicon (`PURE_SFX_TOKENS`) grew so large in v1.9.6 that 1-2 word REAL dialogue
+  ("Sob...", "Hiss!") from known cast members got dropped — twice (parse-time AND the
+  synthesis-time re-check in `executeProduceDubbedChapterMp4`). v1.9.7: roster speakers bypass
+  the ≤2-word token rule (elongated onomatopoeia "Shaaa", credits, SFX prefixes still drop), a
+  KNOWN speaker + SFX-labelled container is rescued only when the text passes the UNTRUSTED
+  check, and the synthesis re-check mirrors the parse semantics. Keep both layers consistent.
+- **Expressive seed law** (`ensureCharacterVoiceClonesLocked` + `composeVoiceSeedTranscript`):
+  the Qwen3 0.6B Base Cloner anchors timbre AND prosody to the reference clip — a single neutral
+  anchor sentence (v1.9.6) flattened every line. Seeds are now composed from the character's OWN
+  transcribed lines (≤3 lines / ≤180 chars, verbatim — the ICL `referenceTranscript` must match
+  the spoken audio exactly), fallback `FALLBACK_VOICE_SEED` (3 emotional beats). Seeds are
+  synthesized DRY (`enableDsp = false` + neutral `DspConfig`) — profile EQ/reverb must never
+  bake into a clone reference.
+- **No pitch re-shift on clones** (`resolveSynthesisProfileForCharacter` clone branch): the seed
+  already embodies the designed register from its VoiceDesign prompt; multiplying `pitchScale`
+  in again double-applies the design and adds cubic-interpolation artifacts. Speed (WSOLA) may
+  stay.
+- **Cartridge guard**: clone descriptors persist even when their cartridge is uninstalled, and
+  the router never hijacks clones with CORE_OS → uninstalled clone = EMPTY audio (silent
+  subtitle ghosts). `cloneDescriptorUnavailable()` checks
+  `modelStates[requiredSubCartridgeId ?: cartridgeId]` before returning a clone profile; fall
+  through to the VoiceDesign / matcher fallbacks instead.
+- The `family` (`SherpaModelFamily`) stamped on Qwen3 Base auto-clones is inert bookkeeping —
+  routing goes through `resolvedCloneEngineId` → `QWEN3_NATIVE`. Don't "fix" it into Sherpa.

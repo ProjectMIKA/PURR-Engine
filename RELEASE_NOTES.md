@@ -1,3 +1,35 @@
+# 🌌 PURR-TTS v1.9.7 // Bubble Salvage, Expressive Clone Seeds & KV Budget Fix
+
+### ✨ What's New since v1.9.6
+
+Focus patch for Manga Dub Studio: ends the v1.9.6 bubble-skipping regression, restores expressive anti-drift cloned voices, and hardens the KV-cache vision path. 🎬📖🎙️
+
+* **🫧 Truncated-JSON Bubble Salvage (`MangaVisionResponseParser` / `LiteRtGemmaVisionEngine`)**:
+  * KV-cache panel turns now run `maxOutputToken = 1024` (was 768) with a slimmer `thinkingTokenBudget = 256` (was 384), so busy multi-bubble panels no longer truncate mid-JSON.
+  * New deterministic `repairTruncatedJson` bracket/string balancer plus a truncation-tolerant JSON candidate builder (opener-without-closer payloads no longer discarded): shortened tail lines survive instead of whole panels silently parsing to zero bubbles.
+* **🛡️ No-Wipe Law & Vision Failure Isolation (`MangaDubStudioManager`)**:
+  * A vision spec returning zero lines NEVER replaces a panel's already-transcribed lines anymore — an empty response means "no data", not "this panel is silent", with a `⚠️ keeping N existing line(s)` log for transparency.
+* **🗣️ Trusted-Speaker & Mislabel Rescue (`MangaTextBender` / `MangaDubModels`)**:
+  * The expanded SFX lexicon no longer swallows 1-2 word REAL dialogue from known cast members ("Sob...", "Hiss!", "Ring!") — roster speakers bypass the ≤2-word token rule while elongated onomatopoeia ("Shaaa"), credits, and SFX prefixes still drop.
+  * A KNOWN speaker mislabeled into an SFX `container_type` is rescued when the text passes the untrusted noise check; UNKNOWN speakers keep the exact v1.9.6 filtering behavior.
+  * The synthesis-time re-check in `executeProduceDubbedChapterMp4` now mirrors the parse-time semantics (same trusted-speaker rescue) instead of double-filtering.
+* **🎙️ Expressive Clone Seeds (`MangaDubStudioManager` / `QwenVoiceDesignBuilder`)**:
+  * The anti-drift voice-clone lock now anchors each character on their OWN transcribed lines (≤3 lines / ≤180 chars, verbatim for ICL alignment) via the new `composeVoiceSeedTranscript` — the Qwen3 0.6B Base Cloner inherits the seed's prosody, so battle shouts no longer come out sedated. Fallback seed carries 3 emotional beats.
+  * Seed clips are synthesized DRY (`enableDsp = false` + neutral DSP chain) — profile EQ/reverb can no longer bake into the clone reference — and the live cooking console now previews each seed transcript.
+* **🎚️ No Pitch Re-Shift on Clone-Locked Lines (`resolveSynthesisProfileForCharacter`)**:
+  * The seed already embodies the designed register from its VoiceDesign prompt; multiplying `pitch_scale` in again double-applied the design and added cubic-interpolation artifacts on top of the cloned timbre. Speed (WSOLA) is unchanged.
+* **🧯 Cartridge Guard for Clone Voices (`resolveSynthesisProfileForCharacter`)**:
+  * Clone voice descriptors persist even when their cartridge is uninstalled (and the router never hijacks clones with system speech), which produced silent subtitle ghosts — unavailable clones now fall through to direct Qwen3 1.7B VoiceDesign / smart matcher instead of empty audio.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.7_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `33`).
+2. **`PURR-TTS_V1.9.7.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.6 // Manga Z-Order, Voice-Clone Lock, Phonon 31M, Icefall Mount Fix & LiteRT KV Cache
 
 ### ✨ What's New since v1.9.5

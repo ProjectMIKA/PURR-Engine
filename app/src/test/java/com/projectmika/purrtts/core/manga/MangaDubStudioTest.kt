@@ -742,6 +742,13 @@ class MangaDubStudioTest {
         assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("OJOU-SAMA", "A week?!"))
         assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "So you did drink them all. You're crazy."))
 
+        // ✨ v1.9.7 TRUSTED-SPEAKER RESCUE: roster characters keep short emotional dialogue
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "Sob...", trustedSpeaker = true))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("OJOU-SAMA", "Hiss!", trustedSpeaker = true))
+        // Elongated onomatopoeia and UNKNOWN speakers still drop exactly as before
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "Shaaa", trustedSpeaker = true))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "Sob..."))
+
         val mixedPayload = """
             {
               "mood": "comedy panic",
@@ -1122,5 +1129,82 @@ class MangaDubStudioTest {
         assertTrue(updated[0].voiceDesignPrompt.contains("low-pitched chest register", ignoreCase = true))
         assertTrue(updated[0].voiceDesignPrompt.contains("Rabbit scientist in lab coat", ignoreCase = true) ||
             updated[0].voiceDesignPrompt.contains("scientist butler", ignoreCase = true))
+    }
+
+    @Test
+    fun `parseSinglePanelAnalysis repairs truncated kv turn json instead of dropping the panel`() {
+        // v1.9.6 KV-cache panel turns emit under a tight output-token budget; a busy panel cut off
+        // mid-string used to parse to ZERO lines and wipe the panel. The v1.9.7 bracket-balancing
+        // rescue keeps the line (with a shortened tail) instead of dropping the whole panel.
+        val truncatedValue = """{"mood":"action","lines":[{"bubble":1,"x_pos":0.8,"y_pos":0.2,"container_type":"speech_bubble","speaker":"SEBASTIAN","text":"Where did the teacups"""
+        val repairedValue = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = truncatedValue,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false
+        )
+        assertEquals(1, repairedValue.lines.size)
+        assertEquals("SEBASTIAN", repairedValue.lines[0].speakerName)
+        assertTrue(repairedValue.lines[0].rawText.startsWith("Where did the teacups"))
+
+        // Truncation right after a completed line object keeps the earlier line via the normal
+        // lastIndexOf('}') slice — the dangling partial member is simply outside the candidate.
+        val truncatedKey = """{"mood":"action","lines":[{"bubble":1,"text":"Hi there."},{"speak"""
+        val repairedKey = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = truncatedKey,
+            panelIndex = 1,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false
+        )
+        assertEquals(1, repairedKey.lines.size)
+        assertEquals("Hi there.", repairedKey.lines[0].rawText)
+    }
+
+    @Test
+    fun `known speaker rescues mislabeled sfx container and short emotional dialogue`() {
+        val raw = """
+            {
+              "mood": "action",
+              "lines": [
+                {"bubble": 1, "x_pos": 0.9, "y_pos": 0.2, "container_type": "floating_sfx", "speaker": "OJOU", "text": "Get back here!"},
+                {"bubble": 2, "x_pos": 0.3, "y_pos": 0.5, "container_type": "speech_bubble", "speaker": "OJOU", "text": "Sob..."},
+                {"bubble": 3, "x_pos": 0.5, "y_pos": 0.7, "container_type": "floating_sfx", "speaker": "UNKNOWN", "text": "Get back here!"},
+                {"bubble": 4, "x_pos": 0.6, "y_pos": 0.8, "container_type": "speech_bubble", "speaker": "UNKNOWN", "text": "Sob..."}
+              ]
+            }
+        """.trimIndent()
+        val roster = listOf(
+            MangaCharacterProfile(id = "c1", name = "OJOU", gender = VoiceGender.FEMALE)
+        )
+        val filtered = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = raw,
+            panelIndex = 0,
+            existingCharacters = roster,
+            includeNonBubbleText = false
+        )
+        // Known speaker: mislabeled SFX container with real dialogue rescued (mislabel rescue);
+        // short emotional line rescued via the trusted-speaker bypass. UNKNOWN speaker: the same
+        // texts still drop exactly as in v1.9.6.
+        assertEquals(listOf("Get back here!", "Sob..."), filtered.lines.map { it.rawText })
+    }
+
+    @Test
+    fun `voice seed composer builds expressive transcript from character lines with fallback`() {
+        val composed = MangaTextBender.composeVoiceSeedTranscript(
+            listOf("You're late again, Sebastian!", "H-how could you eat them all?!", "", "   ")
+        )
+        assertTrue(composed.contains("You're late again, Sebastian!"))
+        assertTrue(composed.contains("eat them all"))
+        assertTrue(composed.endsWith("!"))
+        assertTrue(composed.length <= 190)
+
+        // A single over-long line is word-boundary capped instead of dropped
+        val capped = MangaTextBender.composeVoiceSeedTranscript(listOf("word ".repeat(150)))
+        assertTrue(capped.length <= 180)
+        assertTrue(capped.startsWith("word"))
+
+        // No usable lines -> deterministic multi-emotion fallback anchor
+        assertEquals(MangaTextBender.FALLBACK_VOICE_SEED, MangaTextBender.composeVoiceSeedTranscript(emptyList()))
+        assertEquals(MangaTextBender.FALLBACK_VOICE_SEED, MangaTextBender.composeVoiceSeedTranscript(listOf("", "  ")))
     }
 }

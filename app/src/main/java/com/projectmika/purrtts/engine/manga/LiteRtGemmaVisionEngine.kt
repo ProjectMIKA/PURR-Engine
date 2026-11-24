@@ -556,15 +556,18 @@ Output ONLY valid JSON:
                                         systemInstruction = Contents.of(sharedPreface),
                                         samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.2, seed = 42),
                                         prefillPrefaceOnInit = true,
-                                        maxOutputToken = 768,
-                                        thinkingConfig = ThinkingConfig(enableThinking = true, thinkingTokenBudget = 384)
+                                        // ✨ v1.9.7: busy multi-bubble panels truncated mid-JSON at 768
+                                        // output tokens (thinking ate 384 of them) — widened the JSON
+                                        // budget and slimmed the thinking budget so panels parse.
+                                        maxOutputToken = 1024,
+                                        thinkingConfig = ThinkingConfig(enableThinking = true, thinkingTokenBudget = 256)
                                     )
                                 } else {
                                     ConversationConfig(
                                         systemInstruction = Contents.of(sharedPreface),
                                         samplerConfig = SamplerConfig(topK = 40, topP = 0.92, temperature = 0.2, seed = 42),
                                         prefillPrefaceOnInit = true,
-                                        maxOutputToken = 768
+                                        maxOutputToken = 1024
                                     )
                                 }
                                 pageKvConv = runCatching { engine.createConversation(convCfg) }.getOrNull()

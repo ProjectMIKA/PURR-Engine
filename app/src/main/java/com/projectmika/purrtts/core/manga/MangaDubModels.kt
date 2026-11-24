@@ -471,7 +471,11 @@ object MangaTextBender {
      * Returns true when a raw OCR candidate is clearly a floating SFX, scanlation credit bar,
      * URL watermark, page counter, or handwritten artist signature rather than spoken bubble dialogue.
      */
-    fun isNonBubbleOrCreditNoise(speaker: String, rawText: String): Boolean {
+    fun isNonBubbleOrCreditNoise(
+        speaker: String,
+        rawText: String,
+        trustedSpeaker: Boolean = false
+    ): Boolean {
         val spNorm = speaker.trim().uppercase(Locale.ROOT)
         if (spNorm in NON_DIALOGUE_SPEAKERS) return true
         val t = rawText.trim()
@@ -510,8 +514,47 @@ object MangaTextBender {
         val isElongatedSfx = Regex("""^(?:sh+a+|f+w+o+s+h+|b+w+o+(?:\s+d+o+)?|k+r+a+k+|z+a+p+|g+r+r+|s+h+h+|oh+(?:\s+ho+){2,}|ha+(?:\s+ha+){3,})$""")
             .matches(stripped)
         if (isElongatedSfx) return true
-        if (words.size <= 2 && words.all { it in PURE_SFX_TOKENS }) return true
+        // ✨ TRUSTED-SPEAKER RESCUE (v1.9.7): a 1-2 word line from a KNOWN cast member is real
+        // dialogue ("Sob...", "Hiss!", "Ring!") even when it lands in the SFX lexicon; elongated
+        // onomatopoeia ("Shaaa") and UNKNOWN speakers still drop exactly as before.
+        if (!trustedSpeaker && words.size <= 2 && words.all { it in PURE_SFX_TOKENS }) return true
         return false
+    }
+
+    /**
+     * Fallback anchor transcript when a character has no usable transcribed lines in the chapter.
+     * Three emotional beats (energetic -> soft -> warm/smug) so the Qwen3 0.6B Base Cloner anchors
+     * a representative prosody range instead of a single flat neutral read.
+     */
+    const val FALLBACK_VOICE_SEED = "Hey, over here! Don't just stand there staring... " +
+        "I thought you'd never make it back. Heh... come closer, then, and let me hear you say it properly."
+
+    /**
+     * ✨ EXPRESSIVE CLONE-SEED COMPOSER (v1.9.7) ✨
+     * The Qwen3 0.6B Base Cloner anchors timbre AND prosody to the reference clip, so v1.9.6's
+     * single neutral anchor sentence flattened every dubbed line into the same calm delivery.
+     * Compose the seed from the character's OWN transcribed lines (register/excitement variety
+     * baked in), capped to a short studio-grade reference clip (~3-11s @ 24kHz). The reference
+     * transcript must match the spoken audio exactly (ICL alignment), so lines are joined
+     * verbatim with no text-processor mangling.
+     */
+    fun composeVoiceSeedTranscript(sampleLines: List<String>): String {
+        val picked = ArrayList<String>()
+        var total = 0
+        for (raw in sampleLines) {
+            if (picked.size >= 3 || total >= 180) break
+            var line = raw.trim().trimEnd(',', ';', ':', '…', '-', '—', '.')
+            if (line.length < 2) continue
+            if (picked.isEmpty() && line.length > 180) {
+                line = line.take(180).trimEnd().substringBeforeLast(' ', line.take(180).trimEnd())
+            }
+            if (picked.isNotEmpty() && total + line.length + 1 > 180) break
+            picked += line
+            total += line.length + 1
+        }
+        if (picked.isEmpty()) return FALLBACK_VOICE_SEED
+        val joined = picked.joinToString(" ")
+        return if (joined.lastOrNull() in setOf('.', '!', '?', '…')) joined else "$joined."
     }
 }
 
@@ -1684,6 +1727,17 @@ object MangaVisionResponseParser {
                 cleaned.substring(objStart, objEnd + 1)
             arrStart >= 0 && arrEnd > arrStart ->
                 cleaned.substring(arrStart, arrEnd + 1)
+            // ✨ v1.9.7 TRUNCATION: an opener with NO closer anywhere means the model ran out of
+            // tokens mid-object — hand the partial body to repairTruncatedJson instead of
+            // discarding it outright (previously jsonCandidate was null → zero lines).
+            objStart >= 0 || arrStart >= 0 -> {
+                val start = when {
+                    objStart < 0 -> arrStart
+                    arrStart in 0 until objStart -> arrStart
+                    else -> objStart
+                }
+                cleaned.substring(start)
+            }
             else -> null
         }
 
@@ -1693,53 +1747,31 @@ object MangaVisionResponseParser {
 
         if (jsonCandidate != null) {
             val sanitized = cleanupTrailingCommas(jsonCandidate)
-            runCatching {
-                when (val elem = lenientJson.parseToJsonElement(sanitized)) {
-                    is JsonObject -> {
-                        parsedMood = ((elem["scene_mood"] ?: elem["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                        parsedThought = (elem["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                        val directLines = (elem["lines"] ?: elem["dialogue"]) as? JsonArray
-                        if (directLines != null) {
-                            parsedLines = parseLineSpecArray(directLines, panelIndex, knownNames, includeNonBubbleText, readingOrder)
-                        } else {
-                            val panelsArr = elem["panels"] as? JsonArray
-                            if (panelsArr != null) {
-                                val combined = ArrayList<DiscoveredLineSpec>()
-                                for (pElem in panelsArr) {
-                                    val pObj = pElem as? JsonObject ?: continue
-                                    if (parsedMood.isEmpty()) {
-                                        parsedMood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                                    }
-                                    if (parsedThought.isEmpty()) {
-                                        parsedThought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                                    }
-                                    val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
-                                    combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText, readingOrder)
-                                }
-                                parsedLines = combined
-                            }
-                        }
+            parsePanelJsonBody(sanitized, panelIndex, knownNames, includeNonBubbleText, readingOrder)
+                ?.let { parsed ->
+                    parsedMood = parsed.mood
+                    parsedThought = parsed.thought
+                    parsedLines = parsed.lines
+                }
+            // ✨ TRUNCATED-JSON RESCUE (v1.9.7): KV-cache panel turns emit under a tight
+            // maxOutputToken budget, so busy multi-bubble panels can cut off mid-object and
+            // previously parsed to ZERO lines. Balance the brackets deterministically and retry
+            // before the text fallback — a shortened tail line beats a silently dropped panel.
+            if (parsedLines.isEmpty()) {
+                val repairedCandidate = repairTruncatedJson(jsonCandidate)
+                if (repairedCandidate != null) {
+                    val repaired = parsePanelJsonBody(
+                        cleanupTrailingCommas(repairedCandidate),
+                        panelIndex,
+                        knownNames,
+                        includeNonBubbleText,
+                        readingOrder
+                    )
+                    if (repaired != null && repaired.lines.isNotEmpty()) {
+                        parsedMood = repaired.mood
+                        parsedThought = repaired.thought
+                        parsedLines = repaired.lines
                     }
-                    is JsonArray -> {
-                        val firstObj = elem.firstOrNull() as? JsonObject
-                        if (firstObj != null && (firstObj.containsKey("lines") || firstObj.containsKey("dialogue")) &&
-                            !firstObj.containsKey("text") && !firstObj.containsKey("speech")
-                        ) {
-                            val combined = ArrayList<DiscoveredLineSpec>()
-                            for (pElem in elem) {
-                                val pObj = pElem as? JsonObject ?: continue
-                                if (parsedMood.isEmpty()) {
-                                    parsedMood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                                }
-                                val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
-                                combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText, readingOrder)
-                            }
-                            parsedLines = combined
-                        } else {
-                            parsedLines = parseLineSpecArray(elem, panelIndex, knownNames, includeNonBubbleText, readingOrder)
-                        }
-                    }
-                    else -> Unit
                 }
             }
         }
@@ -1787,9 +1819,20 @@ object MangaVisionResponseParser {
                 "credit", "credits", "credit_or_signature", "signature",
                 "watermark", "margin", "margin_note", "sign", "onomatopoeia", "page_number"
             )
+            // ✨ TRUSTED-SPEAKER RESCUE (v1.9.7): a speaker that already exists in the cast roster
+            // (or NARRATOR) is far likelier to be real dialogue than floating lettering.
+            val trustedSpeaker = knownNames.any { it.equals(speakerRaw, ignoreCase = true) } ||
+                speakerRaw.equals("NARRATOR", ignoreCase = true)
+            // ✨ MISLABEL RESCUE (v1.9.7): a KNOWN speaker attributed to an SFX-labelled container
+            // still speaks real sentences ("Get back here!" mislabeled as floating_sfx by a small
+            // VLM) — rescue it only when the text passes the UNTRUSTED noise check, so pure
+            // onomatopoeia ("GULP") and elongated SFX ("Shaaa") stay excluded.
             val isSpeechBubble = ((lObj["is_speech_bubble"] as? JsonPrimitive)?.booleanOrNull ?: true) &&
-                !isExplicitNonBubble
-            if (!includeNonBubbleText && (!isSpeechBubble || MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText))) {
+                (!isExplicitNonBubble ||
+                    (trustedSpeaker && !MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText)))
+            if (!includeNonBubbleText && (!isSpeechBubble ||
+                    MangaTextBender.isNonBubbleOrCreditNoise(speakerRaw, rawText, trustedSpeaker))
+            ) {
                 return@mapIndexedNotNull null
             }
             val xPos = ((lObj["x_pos"] ?: lObj["x"] ?: lObj["cx"]) as? JsonPrimitive)?.floatOrNull?.let { v ->
@@ -2085,7 +2128,9 @@ object MangaVisionResponseParser {
             val speaker = m.groupValues[2].trim().uppercase()
             val text = m.groupValues[3].trim()
             if (text.length < 2 || speaker in setOf("THOUGHT", "MOOD", "SCENE", "SUMMARY")) return@forEach
-            if (!includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(speaker, text)) return@forEach
+            val trustedSpeaker = knownNames.any { it.equals(speaker, ignoreCase = true) } ||
+                speaker.equals("NARRATOR", ignoreCase = true)
+            if (!includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(speaker, text, trustedSpeaker)) return@forEach
             val list = grouped.getOrPut(pIdx) { mutableListOf() }
             list += DiscoveredLineSpec(
                 bubbleIndex = list.size + 1,
@@ -2107,6 +2152,124 @@ object MangaVisionResponseParser {
             DiscoveredPanelSpec(panelIndex = pIdx, sceneMood = "action", thoughtTrace = thoughtTrace, lines = lines)
         }
         return ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = "", panels = panels)
+    }
+
+    private class PanelJsonBodyParse(
+        val mood: String,
+        val thought: String,
+        val lines: List<DiscoveredLineSpec>
+    )
+
+    private fun parsePanelJsonBody(
+        sanitized: String,
+        panelIndex: Int,
+        knownNames: List<String>,
+        includeNonBubbleText: Boolean,
+        readingOrder: MangaReadingOrder
+    ): PanelJsonBodyParse? {
+        return runCatching {
+            var mood = ""
+            var thought = ""
+            var lines: List<DiscoveredLineSpec> = emptyList()
+            when (val elem = lenientJson.parseToJsonElement(sanitized)) {
+                is JsonObject -> {
+                    mood = ((elem["scene_mood"] ?: elem["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    thought = (elem["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                    val directLines = (elem["lines"] ?: elem["dialogue"]) as? JsonArray
+                    if (directLines != null) {
+                        lines = parseLineSpecArray(directLines, panelIndex, knownNames, includeNonBubbleText, readingOrder)
+                    } else {
+                        val panelsArr = elem["panels"] as? JsonArray
+                        if (panelsArr != null) {
+                            val combined = ArrayList<DiscoveredLineSpec>()
+                            for (pElem in panelsArr) {
+                                val pObj = pElem as? JsonObject ?: continue
+                                if (mood.isEmpty()) {
+                                    mood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                                }
+                                if (thought.isEmpty()) {
+                                    thought = (pObj["thought"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                                }
+                                val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
+                                combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText, readingOrder)
+                            }
+                            lines = combined
+                        }
+                    }
+                }
+                is JsonArray -> {
+                    val firstObj = elem.firstOrNull() as? JsonObject
+                    if (firstObj != null && (firstObj.containsKey("lines") || firstObj.containsKey("dialogue")) &&
+                        !firstObj.containsKey("text") && !firstObj.containsKey("speech")
+                    ) {
+                        val combined = ArrayList<DiscoveredLineSpec>()
+                        for (pElem in elem) {
+                            val pObj = pElem as? JsonObject ?: continue
+                            if (mood.isEmpty()) {
+                                mood = ((pObj["scene_mood"] ?: pObj["mood"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                            }
+                            val arr = (pObj["lines"] ?: pObj["dialogue"]) as? JsonArray ?: continue
+                            combined += parseLineSpecArray(arr, panelIndex, knownNames, includeNonBubbleText, readingOrder)
+                        }
+                        lines = combined
+                    } else {
+                        lines = parseLineSpecArray(elem, panelIndex, knownNames, includeNonBubbleText, readingOrder)
+                    }
+                }
+                else -> Unit
+            }
+            PanelJsonBodyParse(mood, thought, lines)
+        }.getOrNull()
+    }
+
+    /**
+     * ✨ TRUNCATED-JSON REPAIR (v1.9.7) ✨
+     * Local VLM panel turns emit under a tight maxOutputToken budget; a busy multi-bubble panel
+     * can cut off mid-object. Deterministically closes unbalanced strings/brackets so a shortened
+     * final line survives instead of the whole panel silently dropping to zero bubbles.
+     * Returns null when the payload is NOT a simple truncation (mismatched brackets, or complete
+     * JSON that failed to parse for another reason) — those fall through to the text fallback.
+     */
+    private fun repairTruncatedJson(raw: String): String? {
+        val trimmed = raw.trim()
+        if (trimmed.isEmpty()) return null
+        var inString = false
+        var escaped = false
+        val stack = ArrayDeque<Char>()
+        for (ch in trimmed) {
+            when {
+                escaped -> escaped = false
+                ch == '\\' && inString -> escaped = true
+                ch == '"' -> inString = !inString
+                !inString && (ch == '{' || ch == '[') -> stack.addLast(if (ch == '{') '}' else ']')
+                !inString && (ch == '}' || ch == ']') -> {
+                    if (stack.isEmpty() || stack.removeLastOrNull() != ch) return null
+                }
+            }
+        }
+        if (stack.isEmpty() && !inString && !escaped) return null // not a truncation
+
+        var repaired = trimmed
+        if (escaped) repaired = repaired.dropLast(1) // dangling escape backslash before the close
+        if (inString) {
+            repaired += '"'
+            // A final string that is NOT preceded by ':' is a partial KEY — drop the dangling
+            // member; when it IS a value (…"text":"cut off sente), keep the shortened value.
+            val closeIdx = repaired.length - 1
+            val openIdx = repaired.lastIndexOf('"', closeIdx - 1)
+            if (openIdx > 0) {
+                val before = repaired.substring(0, openIdx).trimEnd()
+                if (!before.endsWith(':')) repaired = before
+            }
+        }
+        // Strip dangling member fragments left by the truncation, then close the bracket stack.
+        repaired = repaired
+            .replace(Regex(",\\s*[^,:\\[\\]{}\"\\s][^,:\\[\\]{}]*$"), "")
+            .replace(Regex(",\\s*\"[^\"]*\"\\s*:\\s*$"), "")
+            .replace(Regex(":\\s*$"), "")
+            .replace(Regex(",\\s*$"), "")
+        for (closer in stack.reversed()) repaired += closer
+        return repaired
     }
 }
 
