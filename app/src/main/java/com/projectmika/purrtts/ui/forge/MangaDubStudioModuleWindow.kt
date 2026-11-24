@@ -149,6 +149,7 @@ fun MangaDubStudioModuleWindowBody(
     val globalIncludeNonBubbleText by viewModel.includeMangaNonBubbleText.collectAsState()
     val includeNonBubbleText = activeProject?.includeNonBubbleText ?: globalIncludeNonBubbleText
     val globalLockVoicesViaCloning by viewModel.lockMangaVoicesViaCloning.collectAsState()
+    val globalMangaKvCacheEnabled by viewModel.mangaKvCacheEnabled.collectAsState()
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     var autoCookFullMp4 by remember(activeProject?.id) {
         mutableStateOf(activeProject?.autoCookFullMp4 ?: true)
@@ -1013,6 +1014,16 @@ fun MangaDubStudioModuleWindowBody(
                     onToggle = { checked ->
                         viewModel.setMangaIncludeNonBubbleText(checked)
                         viewModel.updateMangaProjectConfig(activeProject.id, includeNonBubbleText = checked)
+                    }
+                )
+                SimplePurrToggle(
+                    title = "EXPERIMENTAL: KV-CACHE PANEL SCANNING",
+                    subtitle = "OFF by default — v1.9.7 showed small VLMs (Gemma E2B) hallucinating with it. May speed up multi-panel pages but can cause more hallucinations.",
+                    checked = globalMangaKvCacheEnabled,
+                    accent = MikaColors.MikaAmber,
+                    icon = CyberIconType.BOLT_ACCEL,
+                    onToggle = { checked ->
+                        viewModel.setMangaKvCacheEnabled(checked)
                     }
                 )
 

@@ -1820,6 +1820,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val lockMangaVoicesViaCloning: StateFlow<Boolean>
         get() = mangaDubManager.lockVoicesViaCloning
 
+    val mangaKvCacheEnabled: StateFlow<Boolean>
+        get() = mangaDubManager.mangaKvCacheEnabled
+
     fun selectMangaVisionModel(tier: MangaVisionModelTier) {
         mangaDubManager.setSelectedVisionModel(tier)
     }
@@ -1834,6 +1837,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun setMangaLockVoicesViaCloning(lock: Boolean) {
         mangaDubManager.setLockVoicesViaCloning(lock)
+    }
+
+    fun setMangaKvCacheEnabled(enabled: Boolean) {
+        mangaDubManager.setMangaKvCacheEnabled(enabled)
     }
 
     fun importMangaCbz(

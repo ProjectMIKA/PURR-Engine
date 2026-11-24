@@ -1,3 +1,31 @@
+# 🌌 PURR-TTS v1.9.8 // E2B Parrot Guard, MIKA Narrator & No-Name Subtitles
+
+### ✨ What's New since v1.9.7
+
+Field-feedback patch for Manga Dub Studio: KV-cache scanning becomes opt-in after it broke Gemma E2B, placeholder-parrot hallucinations can no longer be dubbed, MIKA herself narrates, and unknown speakers subtitle cleanly without fake names. 🎬📖🎙️
+
+* **⚡ KV-Cache Panel Scanning Is Now OPT-IN (`MangaDubStudioManager` / `LiteRtGemmaVisionEngine`)**:
+  * Default **OFF** — the field confirmed the compact KV turn prompts made small VLMs (**Gemma E2B**) fail the panel OCR task entirely and parrot the schema example (users heard *"Dialogue text"* in a male voice). Default OFF restores the proven full single-panel prompt for every tier; **E4B users can re-enable it** under `CUSTOMIZE › EXPERIMENTAL: KV-CACHE PANEL SCANNING` with an honest warning: may speed up multi-panel pages, may cause more hallucinations.
+* **🦜 Placeholder-Parrot Guard (`MangaTextBender` / `MangaVisionResponseParser`)**:
+  * Literal schema-example strings ("Dialogue text", "Exact transcribed dialogue inside bubble 1", ...) are dropped at parse time — a vision model that echoes its own prompt instead of transcribing can no longer voice garbage; the panel falls through to Pre-Production review instead.
+* **🎙️ MIKA Is The Manga Dub Narrator (`MangaTextBender.MIKA_NARRATOR_VOICE_PROMPT` / `MangaDubStudioManager`)**:
+  * NARRATOR / narration-box lines now resolve to **M.I.K.A.'s hardcoded voice** — a condensed Qwen3 1.7B VoiceDesign prompt (warm velvety bright mid-20s catgirl companion, agile upper-mid pitch, light-novel heroine inflection, playful teasing delivery, close-mic studio) — with no roster entry and no casting-pass override. Subtitles render **`MIKA (Narrator):`** for her lines.
+* **🔇 No-Name Subtitle Law (`MangaTextBender.subtitleLabelFor` / `MangaMotionVideoMuxer`)**:
+  * UNKNOWN speakers and invented placeholder names (**"THE_MALE"**, "THE_FEMALE", or a persona-contaminated "MIKA") get **no subtitle name prefix at all** — the spoken text is subtitled alone, with the speaker row collapsed in the HUD. The subtitle pills stop lying about who is talking.
+* **🧠 Prompt De-Contamination & Page Isolation (`LiteRtGemmaVisionEngine`)**:
+  * Every vision prompt now explicitly forbids inventing placeholder names (MIKA, THE_MALE, THE_FEMALE, GIRL, BOY...) — unnamed speakers must stay "UNKNOWN" — and restricts transcription to text visible inside the current panel/page crop, fixing cross-page speaker bleed.
+* **✂️ Panel Slicer Headroom (`MangaBfsPanelSlicer`)**:
+  * `MAX_PANELS_PER_PAGE` raised **5 → 6** — dense pages whose scanlation credit bar sits between the last two panels were losing their final panel at the old cap.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.8_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `34`).
+2. **`PURR-TTS_V1.9.8.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.7 // Bubble Salvage, Expressive Clone Seeds & KV Budget Fix
 
 ### ✨ What's New since v1.9.6

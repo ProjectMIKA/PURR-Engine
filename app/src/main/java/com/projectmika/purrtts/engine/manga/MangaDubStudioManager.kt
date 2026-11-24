@@ -113,6 +113,14 @@ class MangaDubStudioManager(
     )
     val lockVoicesViaCloning: StateFlow<Boolean> = _lockVoicesViaCloning.asStateFlow()
 
+    // ✨ v1.9.8: KV-cache panel scanning is OPT-IN — default OFF because the compact KV turn
+    // prompts made small VLMs (Gemma E2B) fail the panel OCR task and parrot the schema example
+    // ("Dialogue text"). Advanced-settings toggle warns about the speed/hallucination tradeoff.
+    private val _mangaKvCacheEnabled = MutableStateFlow(
+        prefs.getBoolean("manga_kv_cache_enabled", false)
+    )
+    val mangaKvCacheEnabled: StateFlow<Boolean> = _mangaKvCacheEnabled.asStateFlow()
+
     private val _projects = MutableStateFlow<List<MangaSeriesProject>>(emptyList())
     val projects: StateFlow<List<MangaSeriesProject>> = _projects.asStateFlow()
 
@@ -170,6 +178,15 @@ class MangaDubStudioManager(
         _activeProjectId.value?.let { pid ->
             updateProjectConfig(pid, lockVoicesViaCloning = lock)
         }
+    }
+
+    fun setMangaKvCacheEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("manga_kv_cache_enabled", enabled).apply()
+        _mangaKvCacheEnabled.value = enabled
+        appendLog(
+            if (enabled) "⚡ KV-cache panel scanning ON (experimental — may hallucinate on small VLMs)"
+            else "🛡️ KV-cache panel scanning OFF (default — full per-panel prompts)"
+        )
     }
 
     private fun appendLog(entry: String) {
@@ -897,6 +914,7 @@ class MangaDubStudioManager(
                         storySummary = proj.storyContextSummary,
                         pageSynopsis = pageSynopses[pageIdx].orEmpty(),
                         includeNonBubbleText = effectiveIncludeNonBubble,
+                        kvCacheEnabled = _mangaKvCacheEnabled.value,
                         onLog = { msg -> appendLog(msg) },
                         onPanelProgress = { panDone, panTotal, bubbleNote ->
                             val panFrac = (pageIdx.toFloat() + (panDone.toFloat() / panTotal.coerceAtLeast(1).toFloat())) / ch.pages.size.coerceAtLeast(1).toFloat()
@@ -1562,7 +1580,8 @@ class MangaDubStudioManager(
                         baseProfile = baseProfile,
                         character = charProfile,
                         availableVoices = voices,
-                        lockVoicesViaCloning = proj.lockVoicesViaCloning
+                        lockVoicesViaCloning = proj.lockVoicesViaCloning,
+                        isNarrator = line.speakerName.equals("NARRATOR", ignoreCase = true)
                     )
                     val outcome = backendRouter.synthesizeSpeechChunk(
                         chunk = PurrChunk.Speech(
@@ -1846,8 +1865,26 @@ class MangaDubStudioManager(
         baseProfile: PurrProfile,
         character: MangaCharacterProfile?,
         availableVoices: List<VoiceDescriptor>,
-        lockVoicesViaCloning: Boolean = true
+        lockVoicesViaCloning: Boolean = true,
+        isNarrator: Boolean = false
     ): PurrProfile {
+        // 0. ✨ MIKA IS THE MANGA DUB NARRATOR (v1.9.8): narration lines resolve to M.I.K.A.'s
+        // hardcoded Qwen3 1.7B VoiceDesign voice directly — no roster entry, no casting-pass
+        // override, no clone lock. Falls through to the smart matcher only if the 1.7B
+        // VoiceDesign cartridge isn't installed.
+        if (isNarrator) {
+            val narratorDesignInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+            if (narratorDesignInstalled) {
+                return baseProfile.copy(
+                    primaryVoiceId = "qwen3_design_custom",
+                    preferredBackend = BackendType.QWEN3_NATIVE,
+                    selectedCartridgeId = "rom_qwen3_custom_06b",
+                    voiceDesignPrompt = MangaTextBender.MIKA_NARRATOR_VOICE_PROMPT,
+                    baseSpeed = baseProfile.baseSpeed.coerceIn(0.6f, 1.8f),
+                    basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
+                )
+            }
+        }
         if (character == null) return baseProfile
 
         // 1. Explicit assigned voice (including manual Clone Studio voices)

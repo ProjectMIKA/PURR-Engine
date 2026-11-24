@@ -297,3 +297,29 @@ voices went flat:
   through to the VoiceDesign / matcher fallbacks instead.
 - The `family` (`SherpaModelFamily`) stamped on Qwen3 Base auto-clones is inert bookkeeping —
   routing goes through `resolvedCloneEngineId` → `QWEN3_NATIVE`. Don't "fix" it into Sherpa.
+
+## v1.9.8 field-feedback laws (E2B parrots, narrator MIKA, subtitle labels)
+
+- **KV-cache panel scanning is OPT-IN** (`manga_kv_cache_enabled` pref, default OFF, advanced
+  toggle in the CUSTOMIZE drawer): the field confirmed small VLMs (Gemma **E2B**) fail the
+  compact KV turn prompts and parrot the schema example — users heard `"Dialogue text"` in a
+  male voice (the repair-prompt example object). E4B handled it fine. Default OFF restores the
+  proven full single-panel prompt for every tier; the toggle warns speed↑/hallucinations↑.
+- **Placeholder-parrot guard** (`MangaTextBender.PLACEHOLDER_DIALOGUE_TEXTS` +
+  `parseLineSpecArray`): literal schema-example strings ("Dialogue text", "Exact transcribed
+  dialogue inside bubble 1", ...) are dropped at parse time so a parroting model falls to
+  review/heuristic instead of dubbing its own prompt. Extend the set when schemas change.
+- **Prompt persona-contamination law**: the VLM prompts mention "MIKA" (the studio persona) and
+  small models WILL name unnamed characters "MIKA"/"THE_MALE"/"THE_FEMALE". Every prompt now
+  carries an explicit NEVER-invent-placeholder-names rule (use "UNKNOWN") + a page-boundary
+  rule (transcribe only text visible in THIS crop — fixes cross-page speaker bleed).
+- **MIKA is the Manga Dub narrator** (`MangaTextBender.MIKA_NARRATOR_VOICE_PROMPT` +
+  `resolveSynthesisProfileForCharacter(isNarrator = true)` branch 0): NARRATOR lines resolve to
+  M.I.K.A.'s hardcoded condensed VoiceDesign voice directly — no roster entry, no casting
+  override, no clone lock; falls through to the matcher only if the 1.7B isn't installed.
+- **Subtitle label law** (`MangaTextBender.subtitleLabelFor` + `drawSubtitleHud`): UNKNOWN and
+  invented placeholder speakers (incl. a contaminated "MIKA") get NO subtitle name prefix —
+  spoken text only; NARRATOR lines render "MIKA (Narrator)". The muxer collapses the speaker
+  row when the label is null.
+- `MAX_PANELS_PER_PAGE` raised 5 → 6 (border-verified slicer is conservative; dense pages with
+  a scanlation bar between panels were losing their last panel at the cap).

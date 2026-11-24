@@ -1207,4 +1207,50 @@ class MangaDubStudioTest {
         assertEquals(MangaTextBender.FALLBACK_VOICE_SEED, MangaTextBender.composeVoiceSeedTranscript(emptyList()))
         assertEquals(MangaTextBender.FALLBACK_VOICE_SEED, MangaTextBender.composeVoiceSeedTranscript(listOf("", "  ")))
     }
+
+    @Test
+    fun `placeholder parrot responses are dropped instead of dubbed`() {
+        // Field scar (v1.9.7): Gemma E2B answered the repair-prompt schema EXAMPLE verbatim —
+        // "Dialogue text" in a male voice got dubbed as a real line. The parrot guard drops it
+        // so the panel falls through to review instead of voicing garbage.
+        val parrot = """{"mood":"action","lines":[{"bubble":1,"x_pos":0.5,"y_pos":0.3,"container_type":"speech_bubble","speaker":"NARRATOR","is_new_character":false,"gender":"male","emotion":"neutral","confidence":0.85,"text":"Dialogue text"}]}"""
+        val parsed = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = parrot,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false
+        )
+        assertEquals(0, parsed.lines.size)
+
+        // Real dialogue with similar shape survives untouched
+        val real = """{"mood":"action","lines":[{"bubble":1,"container_type":"speech_bubble","speaker":"NARRATOR","text":"Dialog text was never here. Look at this mess!"}]}"""
+        val parsedReal = MangaVisionResponseParser.parseSinglePanelAnalysis(
+            rawResponse = real,
+            panelIndex = 0,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false
+        )
+        assertEquals(1, parsedReal.lines.size)
+    }
+
+    @Test
+    fun `subtitle labels hide placeholder speakers and name mika as narrator`() {
+        assertNull(MangaTextBender.subtitleLabelFor("UNKNOWN"))
+        assertNull(MangaTextBender.subtitleLabelFor("THE_MALE"))
+        assertNull(MangaTextBender.subtitleLabelFor("THE_FEMALE"))
+        assertNull(MangaTextBender.subtitleLabelFor("MIKA"))
+        assertNull(MangaTextBender.subtitleLabelFor(""))
+        assertEquals("MIKA (Narrator)", MangaTextBender.subtitleLabelFor("NARRATOR"))
+        assertEquals("narrator", MangaTextBender.subtitleLabelFor("narrator"))
+        assertEquals("SEBASTIAN", MangaTextBender.subtitleLabelFor("sebastian"))
+    }
+
+    @Test
+    fun `mika narrator voice prompt is hardcoded and expressive`() {
+        val prompt = MangaTextBender.MIKA_NARRATOR_VOICE_PROMPT
+        assertTrue(prompt.contains("catgirl companion", ignoreCase = true))
+        assertTrue(prompt.contains("close-mic studio", ignoreCase = true))
+        assertTrue(prompt.contains("playful", ignoreCase = true))
+        assertTrue(prompt.length in 80..400)
+    }
 }

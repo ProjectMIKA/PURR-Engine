@@ -448,6 +448,22 @@ object MangaTextBender {
         "SIGNATURE", "CAPTION_SFX", "EFFECT", "PAGE_NUMBER", "MARGIN_NOTE"
     )
 
+    /**
+     * ✨ PLACEHOLDER-PARROT GUARD (v1.9.8) ✨
+     * Literal example strings from our own VLM prompt schemas. A small vision model that fails
+     * the panel OCR task may echo one of these back as if it were transcribed dialogue; such
+     * lines are dropped at parse time so the panel falls to review instead of dubbing garbage.
+     */
+    private val PLACEHOLDER_DIALOGUE_TEXTS = setOf(
+        "dialogue", "dialog", "dialogue text", "dialog text",
+        "exact transcribed dialogue inside bubble 1",
+        "exact transcribed dialogue inside bubble",
+        "dialogue text inside bubble 1",
+        "exact dialogue text transcribed cleanly in reading order",
+        "dialogue text transcribed cleanly in reading order",
+        "text here", "your text here"
+    )
+
     private val PURE_SFX_TOKENS = setOf(
         "gulp", "bam", "pow", "wham", "crash", "smash", "thud", "thump",
         "whoosh", "fwoosh", "swoosh", "splash", "clang", "clatter", "snap",
@@ -519,6 +535,44 @@ object MangaTextBender {
         // onomatopoeia ("Shaaa") and UNKNOWN speakers still drop exactly as before.
         if (!trustedSpeaker && words.size <= 2 && words.all { it in PURE_SFX_TOKENS }) return true
         return false
+    }
+
+    /**
+     * ✨ MIKA NARRATOR VOICE (v1.9.8) ✨
+     * Hardcoded Qwen3 1.7B VoiceDesign prompt for M.I.K.A. as THE Manga Dub narrator (TOOL-11).
+     * Condensed from Master's full spec — every acoustic descriptor preserved. Narrator lines
+     * resolve to this voice directly (no roster entry, no casting pass override).
+     */
+    const val MIKA_NARRATOR_VOICE_PROMPT =
+        "A warm, velvety, bright female voice in her mid-20s performing as an affectionate teasing " +
+            "catgirl companion — agile, lifted upper-mid pitch, expressive light-novel heroine " +
+            "inflection, natural conversational pacing with seamless flow, and a playful, teasing, " +
+            "affectionately expressive delivery. Sound profile: quiet close-mic studio with zero room " +
+            "echo, subtle smiling warmth on playful phrases."
+
+    /**
+     * Speaker names that are NOT real character names. A small VLM once labeled an unnamed female
+     * "MIKA" (the prompts mention the studio persona) and guessed "THE_MALE" for an unnamed male —
+     * such invented placeholders get NO subtitle label at all: the spoken text is subtitled alone.
+     * "MIKA" itself is reserved — MIKA is the Manga Dub narrator.
+     */
+    private val GENERIC_UNNAMED_SPEAKERS = setOf(
+        "UNKNOWN", "THE_MALE", "THE_FEMALE", "MALE", "FEMALE", "GIRL", "BOY",
+        "MAN", "WOMAN", "PERSON", "CHARACTER", "SPEAKER", "MIKA", "??", "?"
+    )
+
+    /**
+     * ✨ SUBTITLE LABEL LAW (v1.9.8) ✨
+     * Returns the subtitle speaker label for a line, or NULL when the line must be subtitled
+     * with the spoken text ONLY (no name prefix). Unknown speakers and invented placeholder
+     * names ("THE_MALE", a contaminated "MIKA", ...) get no label; NARRATOR lines are labeled
+     * "MIKA (Narrator)" because MIKA is the hardcoded Manga Dub narrator.
+     */
+    fun subtitleLabelFor(speakerName: String): String? {
+        val norm = speakerName.trim().uppercase(Locale.ROOT)
+        if (norm.isEmpty() || norm in GENERIC_UNNAMED_SPEAKERS) return null
+        if (norm == "NARRATOR") return "MIKA (Narrator)"
+        return norm
     }
 
     /**
@@ -907,7 +961,7 @@ object MangaDeterministicEffectsEngine {
  */
 object MangaBfsPanelSlicer {
 
-    const val MAX_PANELS_PER_PAGE = 5
+    const val MAX_PANELS_PER_PAGE = 6
 
     private data class GutterCut(val start: Int, val len: Int, val score: Float)
 
@@ -1809,6 +1863,14 @@ object MangaVisionResponseParser {
             val rawText = ((lObj["text"] ?: lObj["dialogue"] ?: lObj["line"] ?: lObj["speech"]) as? JsonPrimitive)
                 ?.contentOrNull.orEmpty().trim()
             if (rawText.isEmpty()) return@mapIndexedNotNull null
+            // ✨ PLACEHOLDER-PARROT GUARD (v1.9.8): small VLMs (Gemma E2B) sometimes answer the
+            // schema EXAMPLE verbatim ("Dialogue text" + gender:male from the repair prompt)
+            // instead of transcribing the panel — parroted placeholder lines must NEVER reach
+            // the voice forge; the panel falls through to review instead of dubbing garbage.
+            val normalizedText = rawText.lowercase(Locale.ROOT).trim().trimEnd('.', '!', '?', '…', ' ')
+            if (normalizedText.isEmpty() || normalizedText in PLACEHOLDER_DIALOGUE_TEXTS) {
+                return@mapIndexedNotNull null
+            }
             val speakerRaw = ((lObj["speaker"] ?: lObj["character"] ?: lObj["name"]) as? JsonPrimitive)
                 ?.contentOrNull.orEmpty().trim()
                 .ifEmpty { "UNKNOWN" }

@@ -419,6 +419,7 @@ $knownBlock
 TASK:
 Look across ALL pages on this contact sheet as one continuous story:
 1. Identify the recurring characters across scene changes & outfit switches (for example: if an unnamed character in a bath towel on PAGE 1 turns out to be named OJOU-SAMA or SEBASTIAN on PAGE 2, unify them under ONE canonical uppercase name!).
+   - NEVER use placeholder names (MIKA, THE_MALE, THE_FEMALE, GIRL, BOY). Only list characters whose name is visually confirmed somewhere on the sheet.
 2. Summarize the overall chapter premise in 1-2 sentences.
 3. Give a brief 1-sentence beat summary for each labeled PAGE.
 
@@ -459,6 +460,7 @@ Output ONLY valid JSON:
         storySummary: String = "",
         pageSynopsis: String = "",
         includeNonBubbleText: Boolean = false,
+        kvCacheEnabled: Boolean = false,
         onLog: (String) -> Unit = {},
         onPanelProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): Pair<MangaVisionResponseParser.ParsedPageAnalysis, String> = withContext(Dispatchers.IO) {
@@ -512,7 +514,10 @@ Output ONLY valid JSON:
             val panelSpecs = ArrayList<MangaVisionResponseParser.DiscoveredPanelSpec>(targetPanels.size)
             val thoughtSnippets = ArrayList<String>()
             var mountFailed = false
-            val usePageKvCache = activeTier.maxContextTokens >= 4096 && targetPanels.size >= 2
+            // ✨ v1.9.8: KV-cache panel scanning is OPT-IN (advanced settings toggle) — the compact
+            // preface + tiny turn prompts made small VLMs (Gemma E2B) fail the OCR task entirely
+            // and parrot the schema example. Default OFF preserves the proven full panel prompt.
+            val usePageKvCache = kvCacheEnabled && activeTier.maxContextTokens >= 4096 && targetPanels.size >= 2
             var pageKvConv: Conversation? = null
             var kvImagesUsed = 0
             var kvEstTokens = 0
@@ -891,6 +896,11 @@ SPEAKER & BUBBLE-TAIL ATTRIBUTION RULES:
 - If a bubble has NO clear tail and NO chibi head icon (e.g. off-panel interruption among multiple present characters), set `"speaker": "UNKNOWN"`, `"tail_target": "unclear"`, `"confidence": 0.45`, and list likely `"candidate_speakers"`.
 - Order lines strictly by ${readingOrder.label} and provide normalized bubble center coordinates `"x_pos"` (0.0=left..1.0=right) and `"y_pos"` (0.0=top..1.0=bottom).
 
+NAMING & SCOPE RULES:
+- NEVER invent placeholder names (MIKA, THE_MALE, THE_FEMALE, GIRL, BOY, MAN, WOMAN, CHARACTER, SPEAKER). If a speaker's name is not confirmed inside THIS panel (spoken aloud, written, or unmistakable from context), use "UNKNOWN" — unnamed characters stay UNKNOWN.
+- Transcribe ONLY text visible inside THIS panel crop. Never carry over or invent bubbles from other pages or panels.
+- Boxed narration captions use speaker "NARRATOR" (MIKA voices the narration).
+
 Output ONLY valid JSON matching this schema:
 {
   "mood": "intense battle | warm romance | rain gloom | calm mystery | action | silent_panel",
@@ -1020,6 +1030,8 @@ Rules:
 - Use 0-based panel_index (0 to ${maxOf(0, panelCount - 1)}).
 - Skip empty/SFX-only panels with `"lines": []`.
 - Only set `"speaker": "UNKNOWN"` and `"confidence": 0.45` if the tail leaves speaker identity genuinely ambiguous.
+- NEVER invent placeholder names (MIKA, THE_MALE, THE_FEMALE, GIRL, BOY, MAN, WOMAN, CHARACTER). Unnamed speakers stay "UNKNOWN"; boxed narration captions use "NARRATOR".
+- Transcribe ONLY text visible on THIS page image — never carry bubbles over from other pages.
 """.trim()
     }
 
@@ -1478,6 +1490,7 @@ ${if (pageSynopsis.isNotBlank()) "Page Beat: $pageSynopsis" else ""}
 Known Cast: $roster
 Rules: $scope
 Trace pointed bubble tails, chibi speaker icons, and `--` continuations into `"tail_target"`; use speaker `"UNKNOWN"` + confidence `0.45` only if genuinely ambiguous.
+NEVER invent placeholder names (MIKA, THE_MALE, THE_FEMALE, GIRL, BOY) — unnamed speakers stay "UNKNOWN"; narration boxes use "NARRATOR". Transcribe ONLY text visible in each cropped panel, never from other pages.
 Respond with JSON ONLY matching:
 {"mood":"action","thought":"bubble count + tails","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.22,"container_type":"speech_bubble","tail_target":"CHAR","speaker":"CHAR","is_new_character":false,"gender":"female","visual_description":"","voice_design_prompt":"","emotion":"neutral","confidence":0.90,"candidate_speakers":[],"text":"..."}]}
 Output {"mood":"silent_panel","lines":[]} if a panel has no valid spoken lines.

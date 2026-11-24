@@ -38,6 +38,7 @@ import com.projectmika.purrtts.core.manga.MangaNormalizedRect
 import com.projectmika.purrtts.core.manga.MangaPageEntry
 import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaPanelNode
+import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSpeechLine
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
@@ -727,8 +728,11 @@ object MangaMotionVideoMuxer {
         val maxTextW = maxBoxW - 36f
         val wrapped = wrapLines(text, paints.subTextPaint, maxTextW).take(3)
         val lineH = paints.subTextPaint.textSize * 1.28f
-        val speakerH = paints.speakerTextPaint.textSize * 1.28f
-        val boxH = speakerH + wrapped.size * lineH + 20f
+        // ✨ SUBTITLE LABEL LAW (v1.9.8): unknown/placeholder speakers get NO name prefix — the
+        // spoken text is subtitled alone; NARRATOR lines are labeled "MIKA (Narrator)".
+        val speakerLabel = MangaTextBender.subtitleLabelFor(line.speakerName)
+        val speakerH = if (speakerLabel != null) paints.speakerTextPaint.textSize * 1.28f else 0f
+        val boxH = speakerH + wrapped.size * lineH + if (speakerLabel != null) 20f else 16f
         val left = (width - maxBoxW) * 0.5f
         val bottom = height - pad.coerceIn(10f, 30f)
         val top = bottom - boxH
@@ -737,10 +741,11 @@ object MangaMotionVideoMuxer {
         canvas.drawRoundRect(boxRect, 12f, 12f, paints.subBgPaint)
         canvas.drawRoundRect(boxRect, 12f, 12f, paints.subBorderPaint)
 
-        val speakerLabel = line.speakerName.ifBlank { "SPEAKER" }.uppercase()
-        canvas.drawText(speakerLabel, left + 18f, top + 10f + paints.speakerTextPaint.textSize, paints.speakerTextPaint)
+        if (speakerLabel != null) {
+            canvas.drawText(speakerLabel, left + 18f, top + 10f + paints.speakerTextPaint.textSize, paints.speakerTextPaint)
+        }
 
-        var textY = top + 14f + speakerH + paints.subTextPaint.textSize * 0.85f
+        var textY = top + (if (speakerLabel != null) 14f else 10f) + speakerH + paints.subTextPaint.textSize * 0.85f
         for (row in wrapped) {
             canvas.drawText(row, left + 18f, textY, paints.subTextPaint)
             textY += lineH
