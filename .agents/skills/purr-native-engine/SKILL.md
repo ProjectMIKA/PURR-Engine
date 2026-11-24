@@ -321,14 +321,15 @@ voices went flat:
   invented placeholder speakers (incl. a contaminated "MIKA") get NO subtitle name prefix —
   spoken text only; NARRATOR lines render "MIKA (Narrator)". The muxer collapses the speaker
   row when the label is null.
-- **Narrator identity law (v1.9.9)** (`MangaTextBender.isPlaceholderOrNarratorName`): narration
-  belongs to MIKA alone — the storyboard cast-seeding loop, `autoResolveDecisionsAndProduce`,
-  and `ensureCharacterVoiceClonesLocked` all filter NARRATOR/UNKNOWN/placeholder names, and
-  narration synthesis resolves MIKA's voice with `character = null` in isolation. Field scar:
-  E4B's storyboard listed NARRATOR as a character → an androgynous NARRATOR cast member with
-  invented traits appeared in the CAST tab. The placeholder family also grew (the VLM emitted
-  "THE_WOMAN" — variants THE_MAN/THE_GIRL/THE_BOY/THE_GUY/THE_LADY/NARRATION are covered in
-  both `GENERIC_UNNAMED_SPEAKERS` and every prompt ban list).
+- **Narrator identity law (v1.9.9, SPLIT in v1.9.10)** (`MangaTextBender.isNarratorName` vs
+  `isPlaceholderSpeakerName`): narration belongs to MIKA alone — ONLY NARRATOR/NARRATION labels
+  are barred from roster seeding, per-panel discovery, auto-resolve, and the voice-clone lock,
+  and narration synthesis resolves MIKA's voice with `character = null` in isolation.
+  **v1.9.10 field scar**: v1.9.9 conflated the roster law with the subtitle-DISPLAY law —
+  placeholder names like THE_WOMAN were excluded from the clone lock, un-voicing the entire
+  cast (everything fell back to the default system voice). Placeholder names are REAL cast
+  members that merely get no subtitle label. Narrator voice is strictly on-demand: nothing
+  narrator-related seeds or mounts unless a chapter contains narration lines.
 - **Cast cards show the EFFECTIVE dub voice** (v1.9.9): the `ASSIGNED VOICE (OR CLONE)`
   dropdown fell back to `activeProfile.primaryVoiceId` — the user's system-TTS pick — which
   mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen". The fallback chain is now

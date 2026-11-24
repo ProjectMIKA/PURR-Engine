@@ -873,12 +873,13 @@ class MangaDubStudioManager(
                     val fallbackPageFile = pageFiles.firstOrNull()
                     bible.characters.forEach { sbChar ->
                         val canonicalName = sbChar.name.trim().uppercase()
-                        // ✨ NARRATOR IDENTITY LAW (v1.9.9): narration belongs to MIKA (the
-                        // hardcoded narrator) — a storyboard "NARRATOR"/UNKNOWN/placeholder entry
-                        // must NEVER become a cast member (E4B once seeded an androgynous
-                        // NARRATOR with invented bunny-butler traits).
+                        // ✨ NARRATOR IDENTITY LAW (v1.9.10): only narrator labels are barred
+                        // from becoming cast members (narration belongs to MIKA). Placeholder
+                        // names like THE_WOMAN are REAL unnamed cast members — they seed fine
+                        // and merely get no subtitle label.
                         if (canonicalName.isNotEmpty() &&
-                            !MangaTextBender.isPlaceholderOrNarratorName(canonicalName) &&
+                            canonicalName != "UNKNOWN" &&
+                            !MangaTextBender.isNarratorName(canonicalName) &&
                             roster.none { it.name.equals(canonicalName, ignoreCase = true) }
                         ) {
                             val newCharId = "char_${sanitizeSlug(canonicalName)}_${roster.size + 1}"
@@ -982,7 +983,10 @@ class MangaDubStudioManager(
                                 var matchedChar = roster.firstOrNull {
                                     it.name.equals(speakerKey, ignoreCase = true)
                                 }
-                                if (matchedChar == null && !speakerKey.equals("UNKNOWN", ignoreCase = true)) {
+                                if (matchedChar == null &&
+                                    !MangaTextBender.isNarratorName(speakerKey) &&
+                                    !speakerKey.equals("UNKNOWN", ignoreCase = true)
+                                ) {
                                     val newCharId = "char_${sanitizeSlug(speakerKey)}_${roster.size + 1}"
                                     val avatarFile = File(charsDir, "$newCharId.jpg")
                                     cropPortraitFromPage(File(page.localImagePath), existingPanel.panelRect, avatarFile)
@@ -1423,11 +1427,11 @@ class MangaDubStudioManager(
         }
         mutateProject(projectId) { proj ->
             val roster = proj.characters.toMutableList()
-            // ✨ NARRATOR IDENTITY LAW (v1.9.9): auto-resolved guesses map unknown speakers to a
-            // REAL cast member — never to a synthesized NARRATOR entry (narration is MIKA's
-            // hardcoded job, and placeholder names are not cast members). If no real character
-            // exists, the UNKNOWN line stays UNKNOWN (no-label subtitle + smart-matcher voice).
-            val fallbackChar = roster.firstOrNull { !MangaTextBender.isPlaceholderOrNarratorName(it.name) }
+            // ✨ NARRATOR IDENTITY LAW (v1.9.10): auto-resolved guesses map unknown speakers to a
+            // REAL cast member (placeholder names like THE_WOMAN count!) — never to a narrator
+            // label. If no real character exists, the UNKNOWN line stays UNKNOWN (no-label
+            // subtitle + smart-matcher voice).
+            val fallbackChar = roster.firstOrNull { !MangaTextBender.isNarratorName(it.name) }
 
             val updatedChapters = proj.chapters.map { ch ->
                 if (ch.id != chapterId) ch
@@ -1443,10 +1447,10 @@ class MangaDubStudioManager(
                                                 .firstNotNullOfOrNull { candName ->
                                                     roster.firstOrNull {
                                                         it.name.equals(candName, ignoreCase = true) &&
-                                                            !MangaTextBender.isPlaceholderOrNarratorName(it.name)
+                                                            !MangaTextBender.isNarratorName(it.name)
                                                     }
                                                 }
-                                                ?: roster.firstOrNull { !MangaTextBender.isPlaceholderOrNarratorName(it.name) }
+                                                ?: roster.firstOrNull { !MangaTextBender.isNarratorName(it.name) }
                                             if (candidate == null) ln
                                             else ln.copy(
                                                 speakerId = candidate.id,
@@ -1751,7 +1755,10 @@ class MangaDubStudioManager(
             .toSet()
 
         val charsToLock = proj.characters.filter { ch ->
-            !MangaTextBender.isPlaceholderOrNarratorName(ch.name) &&
+            // ✨ v1.9.10: only narrator labels are barred from clone-locking — placeholder names
+            // like THE_WOMAN are real cast members and MUST receive their Qwen clone lock
+            // (v1.9.9's over-filter left the whole cast on the default voice).
+            !MangaTextBender.isNarratorName(ch.name) &&
                 ch.assignedVoiceId.isBlank() &&
                 ch.voiceDesignPrompt.isNotBlank() &&
                 (activeSpeakers.isEmpty() || ch.name.trim().uppercase() in activeSpeakers || ch.lineCount > 0)

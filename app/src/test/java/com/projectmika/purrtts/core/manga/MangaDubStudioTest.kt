@@ -1247,17 +1247,29 @@ class MangaDubStudioTest {
     }
 
     @Test
-    fun `narrator and placeholder names can never become cast members`() {
-        // v1.9.9 field scar: the storyboard pass seeded an androgynous "NARRATOR" cast member
-        // with invented bunny-butler traits. Narration belongs to MIKA — placeholders are not cast.
-        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("NARRATOR"))
-        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("narrator"))
-        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("UNKNOWN"))
-        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("THE_WOMAN"))
-        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("MIKA"))
-        assertTrue(MangaTextBender.isPlaceholderOrNarratorName(""))
-        assertFalse(MangaTextBender.isPlaceholderOrNarratorName("SEBASTIAN"))
-        assertFalse(MangaTextBender.isPlaceholderOrNarratorName("OJOU-SAMA"))
+    fun `narrator names are barred from the roster but placeholder characters still get voiced`() {
+        // v1.9.9 field scar: the roster law wrongly included placeholder names, so THE_WOMAN
+        // (a real unnamed cast member who merely gets no subtitle LABEL) was excluded from the
+        // voice-clone lock — nobody got cloned and every line fell back to the default voice.
+        // Law split: only NARRATOR/NARRATION labels are barred from the roster; placeholder
+        // naming stays a subtitle-DISPLAY rule.
+        assertTrue(MangaTextBender.isNarratorName("NARRATOR"))
+        assertTrue(MangaTextBender.isNarratorName("narrator"))
+        assertTrue(MangaTextBender.isNarratorName("NARRATION"))
+        assertTrue(MangaTextBender.isNarratorName(""))
+        assertFalse(MangaTextBender.isNarratorName("THE_WOMAN"))
+        assertFalse(MangaTextBender.isNarratorName("THE_MALE"))
+        assertFalse(MangaTextBender.isNarratorName("MIKA"))
+        assertFalse(MangaTextBender.isNarratorName("UNKNOWN"))
+        assertFalse(MangaTextBender.isNarratorName("SEBASTIAN"))
+        assertFalse(MangaTextBender.isNarratorName("OJOU-SAMA"))
+
+        // Placeholder family stays a subtitle-DISPLAY rule only
+        assertTrue(MangaTextBender.isPlaceholderSpeakerName("THE_WOMAN"))
+        assertTrue(MangaTextBender.isPlaceholderSpeakerName("NARRATOR"))
+        assertTrue(MangaTextBender.isPlaceholderSpeakerName("UNKNOWN"))
+        assertFalse(MangaTextBender.isPlaceholderSpeakerName("SEBASTIAN"))
+        assertNull(MangaTextBender.subtitleLabelFor("THE_WOMAN"))
     }
 
     @Test

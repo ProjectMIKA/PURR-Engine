@@ -1,3 +1,26 @@
+# 🌌 PURR-TTS v1.9.10 // Clone Lock Restoration & Narrator/Placeholder Law Split
+
+### ✨ What's New since v1.9.9
+
+Hotfix for a v1.9.9 regression: placeholder-named cast members (like THE_WOMAN) are voiced again, and the narrator law is properly scoped to narration only. 🎬📖🎙️
+
+* **🧬 Voice-Clone Lock Restored For Placeholder-Named Cast (`MangaTextBender` / `MangaDubStudioManager`)**:
+  * **Field scar**: v1.9.9's narrator law wrongly included placeholder names — so THE_WOMAN (a real unnamed cast member who merely gets no subtitle *label*) was excluded from the voice-clone lock. Result: nobody got cloned and every text bubble fell back to the user's default system-TTS voice.
+  **Law split**: `isNarratorName` (NARRATOR/NARRATION only) is the ROSTER rule — narrator labels never become cast members, never receive clone seeds, never receive auto-resolved lines. `isPlaceholderSpeakerName` (THE_WOMAN family, UNKNOWN, MIKA, ...) is the subtitle-DISPLAY rule only. Placeholder-named characters are seeded, voice-cloned, and voiced like anyone else — their subtitles just stay text-only.
+* **🎙️ Narrator Voice Is Strictly On-Demand**:
+  * Confirmed: nothing narrator-related is created or mounted unless a chapter actually contains narration lines — MIKA's voice resolves per narration line (no seeds, no roster entries, no VRAM mounts otherwise), and new scans can no longer produce narrator cast entries from the storyboard pass, per-panel discovery, or auto-resolve.
+* **🧾 Per-Panel Discovery Also Honors The Narrator Ban**:
+  * The panel-scan cast discovery previously skipped only "UNKNOWN" — it now skips narrator labels too, closing the last path that could materialize a narrator cast entry.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.10_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `36`).
+2. **`PURR-TTS_V1.9.10.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.9 // Narrator Identity Law & True Voice Display
 
 ### ✨ What's New since v1.9.8

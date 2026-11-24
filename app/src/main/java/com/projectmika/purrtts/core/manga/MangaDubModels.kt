@@ -564,15 +564,26 @@ object MangaTextBender {
     )
 
     /**
-     * ✨ NARRATOR IDENTITY LAW (v1.9.9) ✨
-     * True when a "canonical" cast name is actually a narrator or placeholder label that must
-     * NEVER become a roster character: narration belongs to MIKA (the hardcoded narrator —
-     * always a female catgirl with the reserved voice prompt, never a bunny butler), and
-     * invented placeholders are not cast members.
+     * ✨ NARRATOR IDENTITY LAW (v1.9.9, split in v1.9.10) ✨
+     * True ONLY for narrator labels — narration belongs to MIKA (the hardcoded narrator —
+     * always a female catgirl with the reserved voice prompt, never a bunny butler). Narrator
+     * names must NEVER become roster characters, never receive clone seeds, and never receive
+     * auto-resolved lines. PLACEHOLDER names (THE_WOMAN, UNKNOWN, ...) are a DIFFERENT law:
+     * they are legitimate cast members that merely get no subtitle LABEL (display-only rule —
+     * v1.9.9 wrongly conflated the two and un-voiced the entire cast).
      */
-    fun isPlaceholderOrNarratorName(name: String): Boolean {
+    fun isNarratorName(name: String): Boolean {
         val norm = name.trim().uppercase(Locale.ROOT)
-        return norm.isEmpty() || norm == "NARRATOR" || norm in GENERIC_UNNAMED_SPEAKERS
+        return norm.isEmpty() || norm == "NARRATOR" || norm == "NARRATION"
+    }
+
+    /**
+     * Subtitle-DISPLAY law: placeholder + narrator names get no on-screen label (the spoken
+     * text is subtitled alone). NOT a roster rule — see [isNarratorName].
+     */
+    fun isPlaceholderSpeakerName(name: String): Boolean {
+        val norm = name.trim().uppercase(Locale.ROOT)
+        return norm.isEmpty() || norm == "NARRATOR" || norm == "NARRATION" || norm in GENERIC_UNNAMED_SPEAKERS
     }
 
     /**
@@ -584,8 +595,11 @@ object MangaTextBender {
      */
     fun subtitleLabelFor(speakerName: String): String? {
         val norm = speakerName.trim().uppercase(Locale.ROOT)
-        if (norm.isEmpty() || norm in GENERIC_UNNAMED_SPEAKERS) return null
-        if (norm == "NARRATOR") return "MIKA (Narrator)"
+        // Narrator labels resolve BEFORE the placeholder gate — isPlaceholderSpeakerName
+        // includes NARRATOR/NARRATION, so this check must come first or "MIKA (Narrator)"
+        // becomes unreachable (v1.9.10 pre-ship catch).
+        if (norm == "NARRATOR" || norm == "NARRATION") return "MIKA (Narrator)"
+        if (isPlaceholderSpeakerName(speakerName)) return null
         return norm
     }
 
