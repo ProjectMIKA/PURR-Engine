@@ -1238,11 +1238,26 @@ class MangaDubStudioTest {
         assertNull(MangaTextBender.subtitleLabelFor("UNKNOWN"))
         assertNull(MangaTextBender.subtitleLabelFor("THE_MALE"))
         assertNull(MangaTextBender.subtitleLabelFor("THE_FEMALE"))
+        assertNull(MangaTextBender.subtitleLabelFor("THE_WOMAN"))
         assertNull(MangaTextBender.subtitleLabelFor("MIKA"))
         assertNull(MangaTextBender.subtitleLabelFor(""))
         assertEquals("MIKA (Narrator)", MangaTextBender.subtitleLabelFor("NARRATOR"))
         assertEquals("MIKA (Narrator)", MangaTextBender.subtitleLabelFor("narrator"))
         assertEquals("SEBASTIAN", MangaTextBender.subtitleLabelFor("sebastian"))
+    }
+
+    @Test
+    fun `narrator and placeholder names can never become cast members`() {
+        // v1.9.9 field scar: the storyboard pass seeded an androgynous "NARRATOR" cast member
+        // with invented bunny-butler traits. Narration belongs to MIKA — placeholders are not cast.
+        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("NARRATOR"))
+        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("narrator"))
+        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("UNKNOWN"))
+        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("THE_WOMAN"))
+        assertTrue(MangaTextBender.isPlaceholderOrNarratorName("MIKA"))
+        assertTrue(MangaTextBender.isPlaceholderOrNarratorName(""))
+        assertFalse(MangaTextBender.isPlaceholderOrNarratorName("SEBASTIAN"))
+        assertFalse(MangaTextBender.isPlaceholderOrNarratorName("OJOU-SAMA"))
     }
 
     @Test

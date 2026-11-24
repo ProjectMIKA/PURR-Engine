@@ -1,3 +1,26 @@
+# 🌌 PURR-TTS v1.9.9 // Narrator Identity Law & True Voice Display
+
+### ✨ What's New since v1.9.8
+
+Field-feedback patch for Manga Dub Studio: MIKA's narrator identity is now protected by law across the whole pipeline, placeholder name variants are banned everywhere, and cast cards show the character's REAL dub voice. 🎬📖🎙️
+
+* **🎙️ Narrator Identity Law (`MangaTextBender.isPlaceholderOrNarratorName` / `MangaDubStudioManager`)**:
+  * Narration belongs to **MIKA — always a female catgirl with the reserved voice prompt, never a bunny butler**. Field scar: the storyboard pass seeded an **androgynous "NARRATOR" cast member** with invented traits when the VLM listed narration as a character.
+  * The storyboard pass can no longer seed NARRATOR/UNKNOWN/placeholder names as cast members; auto-resolve maps unknown speakers to a REAL cast member instead of synthesizing a NARRATOR entry (UNKNOWN stays UNKNOWN if no real cast exists); the voice-clone lock skips narrator/placeholder entries; and narration synthesis resolves MIKA's voice **in isolation** — a legacy NARRATOR roster entry can never influence it.
+* **🔇 Placeholder Name Variants Banned Everywhere**:
+  * The VLM came back with **"THE_WOMAN"** (a variant our ban list missed) — the generic/placeholder family now covers THE_WOMAN / THE_MAN / THE_GIRL / THE_BOY / THE_GUY / THE_LADY / NARRATION in both the subtitle-label law and every vision prompt's NEVER-invent-names rule. These speakers get text-only subtitles.
+* **🎛️ Cast Cards Show The REAL Dub Voice (`MangaDubStudioModuleWindow`)**:
+  * The `ASSIGNED VOICE (OR CLONE)` card used to fall back to the **user's global system-TTS selection** — silently labeling an active Qwen voice clone as e.g. "Phonon // Snow Queen". It now shows the character's **effective dub voice** (the Qwen voice clone lock when active, e.g. `Clone (Qwen 0.6B Base) // Manga Cast // …`), the header reads **`AUTO (Qwen VoiceClone Lock)`**, and users can still swap voices per character via CHANGE.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V1.9.9_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `35`).
+2. **`PURR-TTS_V1.9.9.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v1.9.8 // E2B Parrot Guard, MIKA Narrator & No-Name Subtitles
 
 ### ✨ What's New since v1.9.7

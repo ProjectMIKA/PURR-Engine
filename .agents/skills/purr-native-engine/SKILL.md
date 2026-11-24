@@ -321,6 +321,19 @@ voices went flat:
   invented placeholder speakers (incl. a contaminated "MIKA") get NO subtitle name prefix —
   spoken text only; NARRATOR lines render "MIKA (Narrator)". The muxer collapses the speaker
   row when the label is null.
+- **Narrator identity law (v1.9.9)** (`MangaTextBender.isPlaceholderOrNarratorName`): narration
+  belongs to MIKA alone — the storyboard cast-seeding loop, `autoResolveDecisionsAndProduce`,
+  and `ensureCharacterVoiceClonesLocked` all filter NARRATOR/UNKNOWN/placeholder names, and
+  narration synthesis resolves MIKA's voice with `character = null` in isolation. Field scar:
+  E4B's storyboard listed NARRATOR as a character → an androgynous NARRATOR cast member with
+  invented traits appeared in the CAST tab. The placeholder family also grew (the VLM emitted
+  "THE_WOMAN" — variants THE_MAN/THE_GIRL/THE_BOY/THE_GUY/THE_LADY/NARRATION are covered in
+  both `GENERIC_UNNAMED_SPEAKERS` and every prompt ban list).
+- **Cast cards show the EFFECTIVE dub voice** (v1.9.9): the `ASSIGNED VOICE (OR CLONE)`
+  dropdown fell back to `activeProfile.primaryVoiceId` — the user's system-TTS pick — which
+  mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen". The fallback chain is now
+  assignedVoiceId → autoCloneVoiceId → activeProfile → first; the header shows
+  "AUTO (Qwen VoiceClone Lock)" when the clone lock is active.
 - **Dynamic panel ceiling + chained-cut depth law** (`MangaBfsPanelSlicer.slicePanelsFromLuminanceGrid(…, maxPanels)`,
   manager pref `manga_max_panels_per_page`, 0 = AUTO): the XY-cut recursion is evidence-gated
   (≥90% gutter across both halves + border/peak validity) — a max cap never prevents

@@ -553,14 +553,27 @@ object MangaTextBender {
 
     /**
      * Speaker names that are NOT real character names. A small VLM once labeled an unnamed female
-     * "MIKA" (the prompts mention the studio persona) and guessed "THE_MALE" for an unnamed male —
-     * such invented placeholders get NO subtitle label at all: the spoken text is subtitled alone.
-     * "MIKA" itself is reserved — MIKA is the Manga Dub narrator.
+     * "MIKA" (the prompts mention the studio persona) and guessed "THE_MALE"/"THE_WOMAN" for
+     * unnamed characters — such invented placeholders get NO subtitle label at all: the spoken
+     * text is subtitled alone. "MIKA" itself is reserved — MIKA is the Manga Dub narrator.
      */
     private val GENERIC_UNNAMED_SPEAKERS = setOf(
-        "UNKNOWN", "THE_MALE", "THE_FEMALE", "MALE", "FEMALE", "GIRL", "BOY",
-        "MAN", "WOMAN", "PERSON", "CHARACTER", "SPEAKER", "MIKA", "??", "?"
+        "UNKNOWN", "THE_MALE", "THE_FEMALE", "THE_WOMAN", "THE_MAN", "THE_GIRL",
+        "THE_BOY", "THE_GUY", "THE_LADY", "MALE", "FEMALE", "GIRL", "BOY",
+        "MAN", "WOMAN", "PERSON", "CHARACTER", "SPEAKER", "NARRATION", "MIKA", "??", "?"
     )
+
+    /**
+     * ✨ NARRATOR IDENTITY LAW (v1.9.9) ✨
+     * True when a "canonical" cast name is actually a narrator or placeholder label that must
+     * NEVER become a roster character: narration belongs to MIKA (the hardcoded narrator —
+     * always a female catgirl with the reserved voice prompt, never a bunny butler), and
+     * invented placeholders are not cast members.
+     */
+    fun isPlaceholderOrNarratorName(name: String): Boolean {
+        val norm = name.trim().uppercase(Locale.ROOT)
+        return norm.isEmpty() || norm == "NARRATOR" || norm in GENERIC_UNNAMED_SPEAKERS
+    }
 
     /**
      * ✨ SUBTITLE LABEL LAW (v1.9.8) ✨

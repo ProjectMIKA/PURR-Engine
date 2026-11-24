@@ -1890,7 +1890,14 @@ private fun MangaCharacterCastCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${character.lineCount} lines • ${character.assignedVoiceLabel}",
+                    // ✨ v1.9.9: show the character's EFFECTIVE dub voice label — the auto clone
+                    // lock when active — instead of a static "AUTO (Qwen VoiceDesign)" that
+                    // hides the locked clone.
+                    text = "${character.lineCount} lines • " + when {
+                        character.assignedVoiceId.isNotBlank() -> character.assignedVoiceLabel
+                        character.autoCloneVoiceId.isNotBlank() -> "AUTO (Qwen VoiceClone Lock)"
+                        else -> character.assignedVoiceLabel
+                    },
                     color = MikaColors.NeonCyan,
                     fontFamily = FontFamily.Monospace,
                     fontSize = 8.5.sp,
@@ -1909,7 +1916,11 @@ private fun MangaCharacterCastCard(
         }
 
         if (availableVoices.isNotEmpty()) {
+            // ✨ v1.9.9: the card shows the character's EFFECTIVE dub voice — the auto clone lock
+            // when active — never the user's global system-TTS selection (which silently
+            // mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen").
             val selectedVoiceDesc = availableVoices.firstOrNull { it.id == character.assignedVoiceId }
+                ?: availableVoices.firstOrNull { it.id == character.autoCloneVoiceId }
                 ?: availableVoices.firstOrNull { it.id == activeProfile.primaryVoiceId }
                 ?: availableVoices.first()
             MikaVoiceDropdownSelector(

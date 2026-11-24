@@ -873,7 +873,14 @@ class MangaDubStudioManager(
                     val fallbackPageFile = pageFiles.firstOrNull()
                     bible.characters.forEach { sbChar ->
                         val canonicalName = sbChar.name.trim().uppercase()
-                        if (canonicalName.isNotEmpty() && roster.none { it.name.equals(canonicalName, ignoreCase = true) }) {
+                        // ✨ NARRATOR IDENTITY LAW (v1.9.9): narration belongs to MIKA (the
+                        // hardcoded narrator) — a storyboard "NARRATOR"/UNKNOWN/placeholder entry
+                        // must NEVER become a cast member (E4B once seeded an androgynous
+                        // NARRATOR with invented bunny-butler traits).
+                        if (canonicalName.isNotEmpty() &&
+                            !MangaTextBender.isPlaceholderOrNarratorName(canonicalName) &&
+                            roster.none { it.name.equals(canonicalName, ignoreCase = true) }
+                        ) {
                             val newCharId = "char_${sanitizeSlug(canonicalName)}_${roster.size + 1}"
                             val avatarFile = File(charsDir, "$newCharId.jpg")
                             if (fallbackPageFile != null) {
@@ -1416,14 +1423,11 @@ class MangaDubStudioManager(
         }
         mutateProject(projectId) { proj ->
             val roster = proj.characters.toMutableList()
-            val fallbackChar = roster.firstOrNull { it.name.equals("NARRATOR", ignoreCase = true) }
-                ?: roster.firstOrNull()
-                ?: MangaCharacterProfile(
-                    id = "char_narrator_auto",
-                    name = "NARRATOR",
-                    gender = VoiceGender.ANDROGYNOUS,
-                    voiceDesignPrompt = "Commanding theatrical narrator voice, crisp articulation, dramatic pacing"
-                ).also { roster += it }
+            // ✨ NARRATOR IDENTITY LAW (v1.9.9): auto-resolved guesses map unknown speakers to a
+            // REAL cast member — never to a synthesized NARRATOR entry (narration is MIKA's
+            // hardcoded job, and placeholder names are not cast members). If no real character
+            // exists, the UNKNOWN line stays UNKNOWN (no-label subtitle + smart-matcher voice).
+            val fallbackChar = roster.firstOrNull { !MangaTextBender.isPlaceholderOrNarratorName(it.name) }
 
             val updatedChapters = proj.chapters.map { ch ->
                 if (ch.id != chapterId) ch
@@ -1437,10 +1441,14 @@ class MangaDubStudioManager(
                                         else {
                                             val candidate = ln.candidateSpeakers
                                                 .firstNotNullOfOrNull { candName ->
-                                                    roster.firstOrNull { it.name.equals(candName, ignoreCase = true) }
+                                                    roster.firstOrNull {
+                                                        it.name.equals(candName, ignoreCase = true) &&
+                                                            !MangaTextBender.isPlaceholderOrNarratorName(it.name)
+                                                    }
                                                 }
-                                                ?: fallbackChar
-                                            ln.copy(
+                                                ?: roster.firstOrNull { !MangaTextBender.isPlaceholderOrNarratorName(it.name) }
+                                            if (candidate == null) ln
+                                            else ln.copy(
                                                 speakerId = candidate.id,
                                                 speakerName = candidate.name,
                                                 confidence = 0.85f,
@@ -1594,15 +1602,23 @@ class MangaDubStudioManager(
                         addLog = true
                     )
 
-                    val charProfile = proj.characters.firstOrNull {
-                        it.id == line.speakerId || it.name.equals(line.speakerName, ignoreCase = true)
+                    val isNarratorLine = line.speakerName.equals("NARRATOR", ignoreCase = true)
+                    // ✨ NARRATOR IDENTITY LAW (v1.9.9): MIKA's hardcoded narrator voice resolves
+                    // in isolation — a legacy storyboard-seeded NARRATOR roster entry can never
+                    // influence narration synthesis.
+                    val charProfile = if (isNarratorLine) {
+                        null
+                    } else {
+                        proj.characters.firstOrNull {
+                            it.id == line.speakerId || it.name.equals(line.speakerName, ignoreCase = true)
+                        }
                     }
                     val synthProfile = resolveSynthesisProfileForCharacter(
                         baseProfile = baseProfile,
                         character = charProfile,
                         availableVoices = voices,
                         lockVoicesViaCloning = proj.lockVoicesViaCloning,
-                        isNarrator = line.speakerName.equals("NARRATOR", ignoreCase = true)
+                        isNarrator = isNarratorLine
                     )
                     val outcome = backendRouter.synthesizeSpeechChunk(
                         chunk = PurrChunk.Speech(
@@ -1735,7 +1751,8 @@ class MangaDubStudioManager(
             .toSet()
 
         val charsToLock = proj.characters.filter { ch ->
-            ch.assignedVoiceId.isBlank() &&
+            !MangaTextBender.isPlaceholderOrNarratorName(ch.name) &&
+                ch.assignedVoiceId.isBlank() &&
                 ch.voiceDesignPrompt.isNotBlank() &&
                 (activeSpeakers.isEmpty() || ch.name.trim().uppercase() in activeSpeakers || ch.lineCount > 0)
         }
