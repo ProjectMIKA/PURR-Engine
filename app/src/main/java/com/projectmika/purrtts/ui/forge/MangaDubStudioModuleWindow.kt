@@ -253,6 +253,34 @@ fun MangaDubStudioModuleWindowBody(
         }
     }
 
+    // ✨ v2.4.1 LOOSE IMAGE IMPORT: multi-select individual image files (any BitmapFactory-
+    // decodable format) — selection order becomes page order, no archive needed.
+    val imagePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (!uris.isNullOrEmpty()) {
+            val targetId = if (importIntoCurrentSeries && seriesTitleInput.isBlank()) activeProject?.id else null
+            viewModel.importMangaImages(
+                uris = uris,
+                titleUri = uris.first(),
+                targetProjectId = targetId,
+                seriesTitleInput = seriesTitleInput,
+                readingOrder = selectedReadingOrder,
+                autoProduceMp4 = autoCookFullMp4,
+                pauseOnFlags = pauseOnFlags,
+                videoAspect = selectedVideoAspect,
+                burnInSubtitles = selectedBurnSubtitles,
+                videoQuality = selectedVideoQuality,
+                includeNonBubbleText = includeNonBubbleText,
+                lockVoicesViaCloning = lockVoicesViaCloning,
+                narratorEnabled = narratorEnabled,
+                preferredVisionModel = selectedVisionTier,
+                expectedCharacterCount = expectedCharCount,
+                selectedOpenAiVisionEngineId = selectedOpenAiEngine?.id ?: ""
+            )
+        }
+    }
+
     // Confirmation dialogs for Project / Chapter deletion & Clear All
     pendingDeleteProject?.let { targetProj ->
         AlertDialog(
@@ -894,6 +922,32 @@ fun MangaDubStudioModuleWindowBody(
                     fontSize = 9.5.sp
                 )
             }
+        }
+
+        // ✨ v2.4.1 LOOSE IMAGE IMPORT button
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.NeonCyan.copy(alpha = 0.18f))
+                .border(1.5.dp, MikaColors.NeonCyan, RoundedCornerShape(6.dp))
+                .clickable(enabled = !isBusy) {
+                    imagePicker.launch(arrayOf("image/*"))
+                }
+                .padding(vertical = 10.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonCyan, size = 13.dp)
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (autoCookFullMp4) "+ IMPORT IMAGE FILES & COOK .MP4" else "+ IMPORT IMAGE FILES & STORYBOARD",
+                color = MikaColors.NeonCyan,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.8.sp
+            )
         }
 
         // Detailed Cooking Console (always displays when busy OR logs/output exist)

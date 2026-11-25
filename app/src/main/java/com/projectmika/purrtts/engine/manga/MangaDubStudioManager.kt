@@ -494,6 +494,7 @@ class MangaDubStudioManager(
 
     fun importCbzChapter(
         uri: Uri,
+        imageUris: List<Uri>? = null,
         targetProjectId: String?,
         seriesTitleInput: String,
         readingOrder: MangaReadingOrder,
@@ -560,7 +561,44 @@ class MangaDubStudioManager(
                     progress = 0.04f,
                     addLog = true
                 )
-                val extractedFiles = extractCbzImages(uri, chapterPagesDir, rawName)
+                val extractedFiles = if (imageUris != null) {
+                    // ✨ v2.4.1 LOOSE IMAGE IMPORT: individually picked image files (any
+                    // BitmapFactory-decodable format) become the chapter pages directly —
+                    // everything downstream (slice -> vision -> cast -> forge -> mux) is the
+                    // exact same pipeline as archives. Selection order = page order.
+                    reportTelemetry(
+                        stage = MangaPipelineStage.EXTRACT_AND_SLICE,
+                        detail = "🖼️ COPYING ${imageUris.size} IMAGE FILE(S) -> PAGES...",
+                        progress = 0.04f,
+                        addLog = true
+                    )
+                    val copied = ArrayList<File>(imageUris.size)
+                    imageUris.forEachIndexed { idx, imageUri ->
+                        val imgName = resolveFileName(imageUri)
+                        val declaredExt = imgName.substringAfterLast('.', "")
+                            .lowercase(Locale.US)
+                            .takeIf { it in MangaCbzExtractorUtils.ALLOWED_IMAGE_EXT } ?: "jpg"
+                        val dest = File(chapterPagesDir, "import_%04d.$declaredExt".format(idx))
+                        val imgStream = context.contentResolver.openInputStream(imageUri)
+                            ?: throw IllegalStateException(
+                                "Android denied read access to image #${idx + 1} ('$imgName'). Try files from internal storage."
+                            )
+                        imgStream.use { ins -> FileOutputStream(dest).use { outs -> ins.copyTo(outs, 65536) } }
+                        if (dest.exists() && dest.length() > 0L) {
+                            copied += dest
+                            appendLog("🖼️ Page ${idx + 1}: $imgName (${dest.length() / 1024} KB)")
+                        } else {
+                            appendLog("⚠️ Image #${idx + 1} ('$imgName') copied as 0 bytes — skipped")
+                        }
+                    }
+                    if (copied.isEmpty()) {
+                        throw IllegalStateException("None of the ${imageUris.size} selected image files could be read.")
+                    }
+                    appendLog("🖼️ ${copied.size} image page(s) ready — entering the normal dub pipeline")
+                    copied
+                } else {
+                    extractCbzImages(uri, chapterPagesDir, rawName)
+                }
                 if (extractedFiles.isEmpty()) {
                     throw IllegalStateException(
                         "No readable manga image pages (JPG/JPEG/JFIF/PNG/WebP/GIF/BMP/HEIC/HEIF/AVIF) " +
@@ -683,7 +721,9 @@ class MangaDubStudioManager(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (err: Exception) {
-                val msg = err.message ?: "Unknown extract error"
+                // ✨ v2.4.1: messageless exceptions (IndexOOB/NPE from platform codecs) now name
+                // their class instead of the useless "Unknown extract error"
+                val msg = err.message ?: err.javaClass.simpleName
                 finishTelemetry("❌ COOK ERROR: $msg")
                 onComplete("Manga dub failed: $msg")
             } finally {
@@ -1816,7 +1856,7 @@ class MangaDubStudioManager(
             } catch (err: Exception) {
                 mutateChapterStatus(projectId, chapterId, MangaChapterStatus.FAILED, err.message)
                 finishTelemetry("❌ PRODUCTION ERROR: ${err.message}")
-                onComplete("Production failed: ${err.message}")
+                onComplete("Production failed: ${err.message ?: err.javaClass.simpleName}")
             } finally {
                 backendRouter.markIdle()
                 _isBusy.value = false

@@ -848,6 +848,9 @@ object MangaMotionVideoMuxer {
         val muxer = MediaMuxer(tempAudioFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var trackIdx = -1
         var muxerStarted = false
+        var eosSeen = false
+        var finalized = false
+        var stopFailure: Throwable? = null
         val info = MediaCodec.BufferInfo()
 
         fun drainAudio(eos: Boolean): Boolean {
@@ -859,7 +862,9 @@ object MangaMotionVideoMuxer {
                 when {
                     outIdx == MediaCodec.INFO_TRY_AGAIN_LATER -> {
                         if (!eos) break
-                        if (++eosWaitTries >= 250) break
+                        // ✨ v2.4.1: EOS budget 250 (2.5s) -> 2000 (20s) — on a loaded device the
+                        // AAC encoder can miss the 2.5s window, silently leaving the m4a unfinalized
+                        if (++eosWaitTries >= 2000) break
                     }
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         if (!muxerStarted) {
@@ -928,16 +933,41 @@ object MangaMotionVideoMuxer {
                 }
                 if (drainAudio(eos = false)) break
             }
+            // ✨ v2.4.1 EOS DRAIN PERSISTENCE: keep draining until EOS is actually observed.
+            // Each drain call now carries a 20s internal budget; up to 3 passes = ~60s ceiling.
             if (eosQueued) {
-                drainAudio(eos = true)
+                var eosDrainPasses = 0
+                while (!eosSeen) {
+                    eosSeen = drainAudio(eos = true)
+                    if (eosSeen || ++eosDrainPasses >= 3) break
+                }
             }
         } finally {
             runCatching { encoder.stop() }
             runCatching { encoder.release() }
-            runCatching {
-                if (muxerStarted) muxer.stop()
-                muxer.release()
+            // ✨ v2.4.1 FINALIZATION LAW: muxer.stop() failure is CAPTURED, never swallowed —
+            // a swallowed stop failure leaves the temp m4a broken (no moov box), which used to
+            // surface later as a messageless "Unknown extract error" at the mux step.
+            if (muxerStarted) {
+                try {
+                    muxer.stop()
+                    finalized = true
+                } catch (t: Throwable) {
+                    stopFailure = t
+                }
             }
+            runCatching { muxer.release() }
+        }
+        // ✨ FINALIZATION LAW (continued): never hand the mux step a broken/trackless m4a —
+        // fail loudly HERE with a real message instead of a messageless crash downstream.
+        if (!finalized) {
+            val why = when {
+                stopFailure != null -> "MediaMuxer.stop failed: ${stopFailure"
+                !muxerStarted -> "encoder produced no output format (0 samples encoded)"
+                !eosSeen -> "encoder EOS was never drained (retry budget exhausted)"
+                else -> "unknown finalize failure"
+            }
+            throw IllegalStateException("AAC audio track was not finalized (${why} — re-run the dub; the audio intermediate is invalid")
         }
     }
 
@@ -948,11 +978,20 @@ object MangaMotionVideoMuxer {
     ) {
         val vExt = MediaExtractor()
         val aExt = MediaExtractor()
-        vExt.setDataSource(videoFile.absolutePath)
-        aExt.setDataSource(audioFile.absolutePath)
         val muxer = MediaMuxer(destMp4File.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
         try {
+            // ✨ v2.4.1: setDataSource moved INSIDE the try (leaked extractors on throw) and the
+            // intermediates are validated — a broken/trackless file fails with a REAL message
+            // instead of a messageless IndexOutOfBounds (the "Unknown extract error" scar).
+            vExt.setDataSource(videoFile.absolutePath)
+            aExt.setDataSource(audioFile.absolutePath)
+            if (vExt.trackCount < 1) {
+                throw IllegalStateException("Mux step: video intermediate has 0 tracks (${videoFile.name})")
+            }
+            if (aExt.trackCount < 1) {
+                throw IllegalStateException("Mux step: audio intermediate has 0 tracks (${audioFile.name}) — the AAC track was not finalized")
+            }
             vExt.selectTrack(0)
             aExt.selectTrack(0)
             val vTrack = muxer.addTrack(vExt.getTrackFormat(0))

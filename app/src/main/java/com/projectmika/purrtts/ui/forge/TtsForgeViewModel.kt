@@ -1971,6 +1971,47 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
+    // ✨ v2.4.1 LOOSE IMAGE IMPORT: individual image files become a dub chapter directly
+    fun importMangaImages(
+        uris: List<Uri>,
+        titleUri: Uri,
+        targetProjectId: String?,
+        seriesTitleInput: String,
+        readingOrder: MangaReadingOrder,
+        autoProduceMp4: Boolean = false,
+        pauseOnFlags: Boolean = true,
+        videoAspect: MangaVideoAspect? = null,
+        burnInSubtitles: Boolean? = null,
+        videoQuality: MangaVideoQuality? = null,
+        includeNonBubbleText: Boolean? = null,
+        lockVoicesViaCloning: Boolean? = null,
+        narratorEnabled: Boolean? = null,
+        preferredVisionModel: MangaVisionModelTier? = null,
+        expectedCharacterCount: Int? = null,
+        selectedOpenAiVisionEngineId: String? = null
+    ) {
+        mangaDubManager.importCbzChapter(
+            uri = titleUri,
+            imageUris = uris,
+            targetProjectId = targetProjectId,
+            seriesTitleInput = seriesTitleInput,
+            readingOrder = readingOrder,
+            autoProduceMp4 = autoProduceMp4,
+            pauseOnFlags = pauseOnFlags,
+            videoAspect = videoAspect,
+            burnInSubtitles = burnInSubtitles,
+            videoQuality = videoQuality,
+            includeNonBubbleText = includeNonBubbleText,
+            lockVoicesViaCloning = lockVoicesViaCloning,
+            narratorEnabled = narratorEnabled,
+            preferredVisionModel = preferredVisionModel,
+            expectedCharacterCount = expectedCharacterCount,
+            selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId
+        ) { msg ->
+            showToast(msg)
+        }
+    }
+
     fun autoResolveAndProduceMangaMp4(projectId: String, chapterId: String) {
         mangaDubManager.autoResolveDecisionsAndProduce(projectId, chapterId) { msg ->
             showToast(msg)
