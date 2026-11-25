@@ -1933,48 +1933,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         mangaDubManager.setMangaMaxPanelsPerPage(maxPanels)
     }
 
-    fun importMangaCbz(
-        uri: Uri,
-        targetProjectId: String?,
-        seriesTitleInput: String,
-        readingOrder: MangaReadingOrder,
-        autoProduceMp4: Boolean = false,
-        pauseOnFlags: Boolean = true,
-        videoAspect: MangaVideoAspect? = null,
-        burnInSubtitles: Boolean? = null,
-        videoQuality: MangaVideoQuality? = null,
-        includeNonBubbleText: Boolean? = null,
-        lockVoicesViaCloning: Boolean? = null,
-        narratorEnabled: Boolean? = null,
-        preferredVisionModel: MangaVisionModelTier? = null,
-        expectedCharacterCount: Int? = null,
-        selectedOpenAiVisionEngineId: String? = null
-    ) {
-        mangaDubManager.importCbzChapter(
-            uri = uri,
-            targetProjectId = targetProjectId,
-            seriesTitleInput = seriesTitleInput,
-            readingOrder = readingOrder,
-            autoProduceMp4 = autoProduceMp4,
-            pauseOnFlags = pauseOnFlags,
-            videoAspect = videoAspect,
-            burnInSubtitles = burnInSubtitles,
-            videoQuality = videoQuality,
-            includeNonBubbleText = includeNonBubbleText,
-            lockVoicesViaCloning = lockVoicesViaCloning,
-            narratorEnabled = narratorEnabled,
-            preferredVisionModel = preferredVisionModel,
-            expectedCharacterCount = expectedCharacterCount,
-            selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId
-        ) { msg ->
-            showToast(msg)
-        }
-    }
-
-    // ✨ v2.4.1 LOOSE IMAGE IMPORT: individual image files become a dub chapter directly
-    fun importMangaImages(
+    // ✨ v2.4.2 SMART IMPORTER: one entry for .cbz/.zip/.cbt archives AND loose image files —
+    // the manager routes by file type.
+    fun importMangaFiles(
         uris: List<Uri>,
-        titleUri: Uri,
         targetProjectId: String?,
         seriesTitleInput: String,
         readingOrder: MangaReadingOrder,
@@ -1990,9 +1952,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         expectedCharacterCount: Int? = null,
         selectedOpenAiVisionEngineId: String? = null
     ) {
-        mangaDubManager.importCbzChapter(
-            uri = titleUri,
-            imageUris = uris,
+        mangaDubManager.importMangaFiles(
+            uris = uris,
             targetProjectId = targetProjectId,
             seriesTitleInput = seriesTitleInput,
             readingOrder = readingOrder,

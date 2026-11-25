@@ -492,6 +492,87 @@ class MangaDubStudioManager(
         finishTelemetry("CANCELLED // VRAM CLEARED")
     }
 
+    // ✨ v2.4.2 SMART IMPORTER: ONE entry point for .cbz/.zip/.cbt archives AND loose image
+    // files — routes by file type so the user never has to pick the right button.
+    fun importMangaFiles(
+        uris: List<Uri>,
+        targetProjectId: String?,
+        seriesTitleInput: String,
+        readingOrder: MangaReadingOrder,
+        autoProduceMp4: Boolean = false,
+        pauseOnFlags: Boolean = true,
+        videoAspect: MangaVideoAspect? = null,
+        burnInSubtitles: Boolean? = null,
+        videoQuality: MangaVideoQuality? = null,
+        includeNonBubbleText: Boolean? = null,
+        lockVoicesViaCloning: Boolean? = null,
+        narratorEnabled: Boolean? = null,
+        preferredVisionModel: MangaVisionModelTier? = null,
+        expectedCharacterCount: Int? = null,
+        selectedOpenAiVisionEngineId: String? = null,
+        onComplete: (String) -> Unit
+    ) {
+        val archives = uris.filter { isArchiveFile(it) }
+        val images = uris.filterNot { isArchiveFile(it) }
+        when {
+            archives.isEmpty() && images.isEmpty() ->
+                onComplete("Nothing importable in that selection — choose a .cbz/.zip archive or image files.")
+            archives.size > 1 ->
+                onComplete("Multiple archives selected (${archives.size}) — import ONE .cbz/.zip chapter at a time.")
+            archives.isNotEmpty() && images.isNotEmpty() ->
+                onComplete("Mixed selection — import ONE archive OR a set of image files, not both.")
+            archives.size == 1 ->
+                importCbzChapter(
+                    uri = archives.first(),
+                    imageUris = null,
+                    targetProjectId = targetProjectId,
+                    seriesTitleInput = seriesTitleInput,
+                    readingOrder = readingOrder,
+                    autoProduceMp4 = autoProduceMp4,
+                    pauseOnFlags = pauseOnFlags,
+                    videoAspect = videoAspect,
+                    burnInSubtitles = burnInSubtitles,
+                    videoQuality = videoQuality,
+                    includeNonBubbleText = includeNonBubbleText,
+                    lockVoicesViaCloning = lockVoicesViaCloning,
+                    narratorEnabled = narratorEnabled,
+                    preferredVisionModel = preferredVisionModel,
+                    expectedCharacterCount = expectedCharacterCount,
+                    selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId,
+                    onComplete = onComplete
+                )
+            else ->
+                importCbzChapter(
+                    uri = images.first(),
+                    imageUris = images,
+                    targetProjectId = targetProjectId,
+                    seriesTitleInput = seriesTitleInput,
+                    readingOrder = readingOrder,
+                    autoProduceMp4 = autoProduceMp4,
+                    pauseOnFlags = pauseOnFlags,
+                    videoAspect = videoAspect,
+                    burnInSubtitles = burnInSubtitles,
+                    videoQuality = videoQuality,
+                    includeNonBubbleText = includeNonBubbleText,
+                    lockVoicesViaCloning = lockVoicesViaCloning,
+                    narratorEnabled = narratorEnabled,
+                    preferredVisionModel = preferredVisionModel,
+                    expectedCharacterCount = expectedCharacterCount,
+                    selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId,
+                    onComplete = onComplete
+                )
+        }
+    }
+
+    private fun isArchiveFile(uri: Uri): Boolean {
+        val name = resolveFileName(uri).lowercase(Locale.US)
+        val mime = context.contentResolver.getType(uri)?.lowercase(Locale.US).orEmpty()
+        val ext = name.substringAfterLast('.', "")
+        return ext in setOf("cbz", "zip", "cbt", "tar") ||
+            mime.contains("zip") || mime.contains("cbz") || mime.contains("cbt") ||
+            mime.contains("tar") || mime.contains("comicbook")
+    }
+
     fun importCbzChapter(
         uri: Uri,
         imageUris: List<Uri>? = null,
@@ -1103,7 +1184,12 @@ class MangaDubStudioManager(
                     itemTotal = ch.pages.size,
                     addLog = true
                 )
-                val bmp = BitmapFactory.decodeFile(page.localImagePath) ?: continue
+                // ✨ v2.4.2 MUTABILITY LAW: this bitmap is drawn on downstream (annotated-page
+                // render) — BitmapFactory decodes IMMUTABLE by default, which crashes Canvas.
+                val bmp = BitmapFactory.decodeFile(
+                    page.localImagePath,
+                    BitmapFactory.Options().apply { inMutable = true }
+                ) ?: continue
                 try {
                     val panelRects = page.panels.map { it.panelRect }
                     val (analysis, engineBadge) = visionEngine.analyzeMangaPage(

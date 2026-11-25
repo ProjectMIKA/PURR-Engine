@@ -228,13 +228,15 @@ fun MangaDubStudioModuleWindowBody(
         mutableStateOf(!hasAnyVisionModel)
     }
 
-    val cbzPicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenDocument()
-    ) { uri: Uri? ->
-        uri?.let {
+    // ✨ v2.4.2 SMART IMPORTER: one picker for .cbz/.zip/.cbt archives AND loose image files —
+    // the manager routes by file type, so there is only ONE import button.
+    val mangaFilePicker = rememberLauncherForActivityResult(
+        ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris: List<Uri> ->
+        if (!uris.isNullOrEmpty()) {
             val targetId = if (importIntoCurrentSeries && seriesTitleInput.isBlank()) activeProject?.id else null
-            viewModel.importMangaCbz(
-                uri = it,
+            viewModel.importMangaFiles(
+                uris = uris,
                 targetProjectId = targetId,
                 seriesTitleInput = seriesTitleInput,
                 readingOrder = selectedReadingOrder,
@@ -253,33 +255,6 @@ fun MangaDubStudioModuleWindowBody(
         }
     }
 
-    // ✨ v2.4.1 LOOSE IMAGE IMPORT: multi-select individual image files (any BitmapFactory-
-    // decodable format) — selection order becomes page order, no archive needed.
-    val imagePicker = rememberLauncherForActivityResult(
-        ActivityResultContracts.OpenMultipleDocuments()
-    ) { uris: List<Uri> ->
-        if (!uris.isNullOrEmpty()) {
-            val targetId = if (importIntoCurrentSeries && seriesTitleInput.isBlank()) activeProject?.id else null
-            viewModel.importMangaImages(
-                uris = uris,
-                titleUri = uris.first(),
-                targetProjectId = targetId,
-                seriesTitleInput = seriesTitleInput,
-                readingOrder = selectedReadingOrder,
-                autoProduceMp4 = autoCookFullMp4,
-                pauseOnFlags = pauseOnFlags,
-                videoAspect = selectedVideoAspect,
-                burnInSubtitles = selectedBurnSubtitles,
-                videoQuality = selectedVideoQuality,
-                includeNonBubbleText = includeNonBubbleText,
-                lockVoicesViaCloning = lockVoicesViaCloning,
-                narratorEnabled = narratorEnabled,
-                preferredVisionModel = selectedVisionTier,
-                expectedCharacterCount = expectedCharCount,
-                selectedOpenAiVisionEngineId = selectedOpenAiEngine?.id ?: ""
-            )
-        }
-    }
 
     // Confirmation dialogs for Project / Chapter deletion & Clear All
     pendingDeleteProject?.let { targetProj ->
@@ -753,17 +728,38 @@ fun MangaDubStudioModuleWindowBody(
                     }
                 }
             }
-            SimplePurrToggle(
-                title = "MIKA NARRATOR (NARRATION BOXES)",
-                subtitle = "ON by default: MIKA dubs boxed narration & thought captions in her dedicated narrator voice. OFF: narration boxes stay extracted for review but are skipped in the dub (no voice, no subtitle). Character speech bubbles are never affected.",
-                checked = narratorEnabled,
-                accent = MikaColors.NeonPink,
-                icon = CyberIconType.BOOK_NARRATOR,
-                onToggle = { checked ->
-                    viewModel.setMangaNarratorEnabled(checked)
-                    activeProject?.let { viewModel.updateMangaProjectConfig(it.id, narratorEnabled = checked) }
-                }
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "NARRATION:",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    modifier = Modifier.width(62.dp)
+                )
+                MikaTagPill(
+                    label = "MIKA ON",
+                    selected = narratorEnabled,
+                    activeColor = MikaColors.NeonPink,
+                    onClick = {
+                        viewModel.setMangaNarratorEnabled(true)
+                        activeProject?.let { viewModel.updateMangaProjectConfig(it.id, narratorEnabled = true) }
+                    }
+                )
+                MikaTagPill(
+                    label = "MIKA OFF",
+                    selected = !narratorEnabled,
+                    activeColor = MikaColors.NeonPink,
+                    onClick = {
+                        viewModel.setMangaNarratorEnabled(false)
+                        activeProject?.let { viewModel.updateMangaProjectConfig(it.id, narratorEnabled = false) }
+                    }
+                )
+            }
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -833,6 +829,17 @@ fun MangaDubStudioModuleWindowBody(
                 fontSize = 7.6.sp,
                 lineHeight = 10.5.sp
             )
+            Text(
+                text = if (narratorEnabled) {
+                    "MIKA NARRATOR: ON — boxed narration & thought captions are dubbed in MIKA's dedicated narrator voice. Character speech bubbles are never affected."
+                } else {
+                    "MIKA NARRATOR: OFF — narration boxes stay extracted for review but are skipped in the dub (no voice, no subtitle). Character speech bubbles are never affected."
+                },
+                color = MikaColors.CyanWhite.copy(alpha = 0.80f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 7.6.sp,
+                lineHeight = 10.5.sp
+            )
         }
         Spacer(modifier = Modifier.height(6.dp))
 
@@ -878,11 +885,11 @@ fun MangaDubStudioModuleWindowBody(
                     .background(MikaColors.NeonPink.copy(alpha = 0.22f))
                     .border(1.5.dp, MikaColors.NeonPink, RoundedCornerShape(6.dp))
                     .clickable(enabled = !isBusy) {
-                        cbzPicker.launch(
+                        mangaFilePicker.launch(
                             arrayOf(
                                 "application/x-cbz", "application/vnd.comicbook+zip", "application/zip",
                                 "application/x-zip-compressed", "application/octet-stream",
-                                "application/x-cbt", "application/x-tar", "*/*"
+                                "application/x-cbt", "application/x-tar", "image/*"
                             )
                         )
                     }
@@ -893,7 +900,7 @@ fun MangaDubStudioModuleWindowBody(
                 MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonPink, size = 13.dp)
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (autoCookFullMp4) "+ IMPORT .CBZ/.ZIP & COOK .MP4" else "+ IMPORT .CBZ/.ZIP & STORYBOARD",
+                    text = if (autoCookFullMp4) "+ IMPORT & DUB (CBZ · ZIP · IMAGES)" else "+ IMPORT & STORYBOARD (CBZ · ZIP · IMAGES)",
                     color = MikaColors.NeonPink,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
@@ -922,32 +929,6 @@ fun MangaDubStudioModuleWindowBody(
                     fontSize = 9.5.sp
                 )
             }
-        }
-
-        // ✨ v2.4.1 LOOSE IMAGE IMPORT button
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(6.dp))
-                .background(MikaColors.NeonCyan.copy(alpha = 0.18f))
-                .border(1.5.dp, MikaColors.NeonCyan, RoundedCornerShape(6.dp))
-                .clickable(enabled = !isBusy) {
-                    imagePicker.launch(arrayOf("image/*"))
-                }
-                .padding(vertical = 10.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonCyan, size = 13.dp)
-            Spacer(modifier = Modifier.width(6.dp))
-            Text(
-                text = if (autoCookFullMp4) "+ IMPORT IMAGE FILES & COOK .MP4" else "+ IMPORT IMAGE FILES & STORYBOARD",
-                color = MikaColors.NeonCyan,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 9.8.sp
-            )
         }
 
         // Detailed Cooking Console (always displays when busy OR logs/output exist)

@@ -169,7 +169,18 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         val outW = (pageBitmap.width * scale).toInt().coerceAtLeast(64)
         val outH = (pageBitmap.height * scale).toInt().coerceAtLeast(64)
         val scaled = Bitmap.createScaledBitmap(pageBitmap, outW, outH, true)
-        val canvas = Canvas(scaled)
+        // ✨ v2.4.2 MUTABILITY LAW: createScaledBitmap returns the SOURCE bitmap itself when the
+        // dimensions are unchanged, and BitmapFactory-decoded pages are IMMUTABLE — Canvas(scaled)
+        // then throws "Immutable bitmap passed to Canvas constructor". Copy to a mutable bitmap
+        // whenever the call aliased the source.
+        val canvasBmp = if (scaled.isMutable) {
+            scaled
+        } else {
+            val copy = scaled.copy(Bitmap.Config.ARGB_8888, true)
+            if (scaled !== pageBitmap) scaled.recycle()
+            copy
+        }
+        val canvas = Canvas(canvasBmp)
 
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
@@ -203,10 +214,10 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
 
         targetFile.parentFile?.mkdirs()
         FileOutputStream(targetFile).use { fos ->
-            scaled.compress(Bitmap.CompressFormat.JPEG, 90, fos)
+            canvasBmp.compress(Bitmap.CompressFormat.JPEG, 90, fos)
         }
-        if (scaled !== pageBitmap) {
-            scaled.recycle()
+        if (canvasBmp !== pageBitmap) {
+            canvasBmp.recycle()
         }
     }
 
