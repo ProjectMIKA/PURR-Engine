@@ -1,3 +1,27 @@
+# 🌌 PURR-TTS v2.4.1 // The Loose Pages
+
+### ✨ What's New since v2.4.0
+
+Two big ones: the **~50% "Unknown extract error" that killed dubs at the very last mux step is fixed at the root**, and the Manga Dub Studio now accepts **loose image files directly** — pick individual pages (any supported format) and dub them, no archive needed. 🖼️🔧
+
+* **🔧 Root-Cause Fix: the intermittent "Unknown extract error" at MUX (`MangaMotionVideoMuxer`)**:
+  * **The full failure chain**: the AAC encoder's EOS drain had a 2.5s budget (250 x 10ms) — under device load it could miss the window; `muxer.stop()` failing was then **swallowed by `runCatching`**, leaving the intermediate `.m4a` written WITHOUT its moov box (broken/trackless); the mux step then hit a **messageless** platform exception on the invalid file → `Unknown extract error` right after "MUXING .MP4 VIDEO & AUDIO...".
+  * **EOS drain persistence**: budget raised to 20s per pass x 3 passes (~60s ceiling) — the encoder is drained until EOS is actually observed.
+  * **Finalization Law**: `muxer.stop()` failure is now CAPTURED, never swallowed; if the audio track was not finalized (stop failure / no output format / EOS never drained), the mux fails LOUDLY with a real diagnostic instead of silently handing a broken file downstream.
+  * **Intermediate validation**: the mux step validates both intermediates have >= 1 track (with file names in the error) and `setDataSource` moved inside the try (fixes leaked MediaExtractor handles on throw).
+  * **Better crash diagnostics**: messageless exceptions now report their class (`err.javaClass.simpleName`) instead of "Unknown extract error" / "Production failed: null".
+* **🖼️ Loose Image File Import (`MangaDubStudioManager` / `MangaDubStudioModuleWindow` / `TtsForgeViewModel`)**:
+  * NEW cyan button **"+ IMPORT IMAGE FILES & DUB"** — multi-select individual image files (any supported format: JPG/PNG/WebP/GIF/BMP/HEIC/HEIF/AVIF) and they become the chapter pages directly, in selection order.
+  * Everything downstream is the exact same pipeline as archives: BFS panel slicing -> Gemma vision OCR -> cast discovery -> Qwen voice forging -> motion .MP4.
+  * Per-file telemetry (`Page 1: IMG_1234.jpg (812 KB)`) and real error messages for denied read access or 0-byte copies.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.4.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `46`).
+2. **`PURR-TTS_V2.4.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.4.0 // The Universal Import
 
 ### ✨ What's New since v2.3.0
