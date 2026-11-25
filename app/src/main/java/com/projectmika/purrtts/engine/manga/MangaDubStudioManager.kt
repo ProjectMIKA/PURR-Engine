@@ -561,7 +561,10 @@ class MangaDubStudioManager(
                 )
                 val extractedFiles = extractCbzImages(uri, chapterPagesDir, rawName)
                 if (extractedFiles.isEmpty()) {
-                    throw IllegalStateException("No readable manga image pages (.jpg/.png/.webp) found in $rawName")
+                    throw IllegalStateException(
+                        "No readable manga image pages (JPG/JPEG/JFIF/PNG/WebP/GIF/BMP/HEIC/HEIF/AVIF) " +
+                            "found in '$rawName'. Official containers: .cbz, .zip, .cbt."
+                    )
                 }
 
                 val initialProj = existingProject?.copy(

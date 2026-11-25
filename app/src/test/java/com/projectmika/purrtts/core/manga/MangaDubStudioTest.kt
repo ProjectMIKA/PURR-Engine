@@ -18,6 +18,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -1900,5 +1901,77 @@ class MangaDubStudioTest {
         assertEquals("", MangaTextBender.sanitizeMangaDialogue("\u200B\uFEFF♪→①"))
         // Deterministic guard: ANY unenumerated non-letter still cannot start a chunk
         assertEquals("Follow the rules.", MangaTextBender.sanitizeMangaDialogue("§ Follow the rules."))
+    }
+
+    @Test
+    fun `universal image formats accept heic avif jfif entries and officially support zip named archives`() {
+        val tempRoot = Files.createTempDirectory("purr_universal_test").toFile()
+        try {
+            val zipFile = File(tempRoot, "chapter.zip") // OFFICIAL .zip support — container-name agnostic
+            val destDir = File(tempRoot, "out")
+
+            fun jpegMagic(): ByteArray =
+                byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte()) + ByteArray(40)
+
+            fun isobmff(brand: String): ByteArray {
+                val bytes = ByteArray(40)
+                bytes[4] = 'f'.code.toByte(); bytes[5] = 't'.code.toByte()
+                bytes[6] = 'y'.code.toByte(); bytes[7] = 'p'.code.toByte()
+                for ((i, c) in brand.padEnd(4).take(4).withIndex()) bytes[8 + i] = c.code.toByte()
+                return bytes
+            }
+
+            // Magic-byte unit checks: image brands map, MP4 video brands do not
+            assertEquals("heic", MangaCbzExtractorUtils.detectImageExtensionByMagic(isobmff("heic"), 40))
+            assertEquals("avif", MangaCbzExtractorUtils.detectImageExtensionByMagic(isobmff("avif"), 40))
+            assertEquals("heif", MangaCbzExtractorUtils.detectImageExtensionByMagic(isobmff("mif1"), 40))
+            assertNull(MangaCbzExtractorUtils.detectImageExtensionByMagic(isobmff("isom"), 40))
+            assertTrue("heic" in MangaCbzExtractorUtils.ALLOWED_IMAGE_EXT)
+            assertTrue("avif" in MangaCbzExtractorUtils.ALLOWED_IMAGE_EXT)
+            assertTrue("jfif" in MangaCbzExtractorUtils.ALLOWED_IMAGE_EXT)
+
+            ZipArchiveOutputStream(zipFile.outputStream()).use { zos ->
+                fun addEntry(name: String, bytes: ByteArray) {
+                    zos.putArchiveEntry(ZipArchiveEntry(name))
+                    zos.write(bytes)
+                    zos.closeArchiveEntry()
+                }
+                addEntry("001.jpg", jpegMagic())
+                addEntry("002.heic", isobmff("heic"))          // declared HEIC extension now allowed
+                addEntry("003.avif", isobmff("avif"))          // declared AVIF extension now allowed
+                addEntry("004.JFIF", jpegMagic())              // uppercase extension + JPEG family alias
+                addEntry("005_extensionless", isobmff("heic")) // magic-byte HEIC detection
+                addEntry("notes.txt", "not an image".toByteArray())
+            }
+
+            val pages = MangaCbzExtractorUtils.extractArchiveFromFile(zipFile, destDir, "chapter.zip")
+            assertEquals(5, pages.size)
+            assertTrue(pages.any { it.extension == "heic" })
+            assertTrue(pages.any { it.extension == "avif" })
+            assertTrue(pages.any { it.extension == "jfif" })
+            assertTrue(pages.all { it.exists() && it.length() >= 32L })
+        } finally {
+            tempRoot.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun `undecodable image formats surface explicit conversion guidance when no pages extract`() {
+        val tempRoot = Files.createTempDirectory("purr_tiff_test").toFile()
+        try {
+            val zipFile = File(tempRoot, "tiff_only.zip")
+            ZipArchiveOutputStream(zipFile.outputStream()).use { zos ->
+                zos.putArchiveEntry(ZipArchiveEntry("p1.tiff"))
+                zos.write(ByteArray(64))
+                zos.closeArchiveEntry()
+            }
+            val err = assertThrows(IllegalStateException::class.java) {
+                MangaCbzExtractorUtils.extractArchiveFromFile(zipFile, File(tempRoot, "out"), "tiff_only.zip")
+            }
+            assertTrue(err.message!!.contains("TIFF"))
+            assertTrue(err.message!!.contains("convert pages to PNG/JPG/WebP"))
+        } finally {
+            tempRoot.deleteRecursively()
+        }
     }
 }

@@ -2733,11 +2733,30 @@ object MangaTelemetryUtils {
  * 2. Apache Commons Compress `ZipArchiveInputStream` (`allowStoredEntriesWithDataDescriptor = true`)
  * 3. Android / JVM `java.util.zip.ZipFile`
  * 4. Apache Commons Compress `TarArchiveInputStream`
- * with magic-byte sniffing for extensionless images and clear diagnostics for RAR (`.cbr`), 7z, or PDF.
+ * with magic-byte sniffing for extensionless images (JPEG/PNG/WebP/GIF/BMP/HEIC/HEIF/AVIF via
+ * the ISOBMFF `ftyp` brand), explicit undecodable-format diagnostics (TIFF/SVG/ICO/PSD...),
+ * and clear guidance for RAR (`.cbr`), 7z, or PDF. `.zip` and `.cbt` archives are OFFICIALLY
+ * supported alongside `.cbz` — the extractor is container-name agnostic.
  */
 object MangaCbzExtractorUtils {
 
-    val ALLOWED_IMAGE_EXT: Set<String> = setOf("jpg", "jpeg", "png", "webp", "bmp", "gif")
+    // ✨ UNIVERSAL IMAGE FORMAT SUPPORT (v2.3.1): everything Android's BitmapFactory can decode
+    // is a first-class page format — JPEG family (jpg/jpeg/jpe/jfif), PNG/APNG, WebP, GIF,
+    // BMP/DIB, HEIC/HEIF/HIF (Android 8+), AVIF/AVIFS (Android 12+). Formats the platform
+    // CANNOT decode (TIFF, SVG, ICO, PSD...) are listed in KNOWN_UNDECODABLE_IMAGE_EXT so a
+    // failed import NAMES them explicitly instead of silently skipping.
+    val ALLOWED_IMAGE_EXT: Set<String> = setOf(
+        "jpg", "jpeg", "jpe", "jfif",
+        "png", "apng",
+        "webp",
+        "gif",
+        "bmp", "dib",
+        "heic", "heif", "hif",
+        "avif", "avifs"
+    )
+    val KNOWN_UNDECODABLE_IMAGE_EXT: Set<String> = setOf(
+        "tif", "tiff", "svg", "svgz", "ico", "psd", "xcf", "dng", "tga", "exr", "pcx", "pic"
+    )
     private val ZIP_CHARSETS: List<String> = listOf("UTF-8", "Shift_JIS", "CP437", "ISO-8859-1")
 
     fun detectUnsupportedContainerHint(header: ByteArray, length: Int): String? {
@@ -2817,6 +2836,25 @@ object MangaCbzExtractorUtils {
         ) {
             return "bmp"
         }
+        // ✨ ISOBMFF/ftyp family (v2.3.1): HEIC/HEIF/AVIF all share the ISO-BMFF container —
+        // the brand lives at bytes 8..11 after the "ftyp" marker. Only image brands map here;
+        // MP4 video brands (isom/mp42) intentionally fall through to null so videos never
+        // import as pages. The resolved extension only NAMES the extracted file — BitmapFactory
+        // decodes by content, so device decode capability decides final support.
+        if (length >= 12 &&
+            header[4] == 'f'.code.toByte() &&
+            header[5] == 't'.code.toByte() &&
+            header[6] == 'y'.code.toByte() &&
+            header[7] == 'p'.code.toByte()
+        ) {
+            val brand = String(header, 8, 4, Charsets.US_ASCII).uppercase(Locale.US)
+            return when {
+                brand.startsWith("AV") -> "avif"
+                brand.startsWith("HE") -> "heic"
+                brand.startsWith("MIF") || brand.startsWith("MSF") || brand.startsWith("HIF") -> "heif"
+                else -> null
+            }
+        }
         return null
     }
 
@@ -2837,11 +2875,12 @@ object MangaCbzExtractorUtils {
         }
 
         val failures = mutableListOf<String>()
+        val unsupportedSeen = LinkedHashSet<String>()
 
         // Strategy 1: Commons Compress random-access ZipFile across UTF-8 / Shift_JIS / CP437 / Latin-1
         for (cs in ZIP_CHARSETS) {
             clearTempExtracts(destDir)
-            val hit = runCatching { extractWithCommonsZipFile(archiveFile, destDir, cs) }
+            val hit = runCatching { extractWithCommonsZipFile(archiveFile, destDir, cs, unsupportedSeen) }
             val list = hit.getOrNull().orEmpty()
             if (list.isNotEmpty()) return normalizeSortedPages(list, destDir)
             hit.exceptionOrNull()?.message?.let { failures += "ZipFile($cs): $it" }
@@ -2850,7 +2889,7 @@ object MangaCbzExtractorUtils {
         // Strategy 2: Commons Compress streaming ZipArchiveInputStream with Data Descriptor support
         for (cs in listOf("UTF-8", "Shift_JIS", "CP437")) {
             clearTempExtracts(destDir)
-            val hit = runCatching { extractWithCommonsZipStream(archiveFile, destDir, cs) }
+            val hit = runCatching { extractWithCommonsZipStream(archiveFile, destDir, cs, unsupportedSeen) }
             val list = hit.getOrNull().orEmpty()
             if (list.isNotEmpty()) return normalizeSortedPages(list, destDir)
             hit.exceptionOrNull()?.message?.let { failures += "ZipStream($cs): $it" }
@@ -2858,21 +2897,25 @@ object MangaCbzExtractorUtils {
 
         // Strategy 3: JDK/Android native java.util.zip.ZipFile
         clearTempExtracts(destDir)
-        val jdkHit = runCatching { extractWithJavaZipFile(archiveFile, destDir) }
+        val jdkHit = runCatching { extractWithJavaZipFile(archiveFile, destDir, unsupportedSeen) }
         val jdkList = jdkHit.getOrNull().orEmpty()
         if (jdkList.isNotEmpty()) return normalizeSortedPages(jdkList, destDir)
         jdkHit.exceptionOrNull()?.message?.let { failures += "JdkZipFile: $it" }
 
         // Strategy 4: TAR (.cbt / mislabeled tarballs)
         clearTempExtracts(destDir)
-        val tarHit = runCatching { extractWithTarStream(archiveFile, destDir) }
+        val tarHit = runCatching { extractWithTarStream(archiveFile, destDir, unsupportedSeen) }
         val tarList = tarHit.getOrNull().orEmpty()
         if (tarList.isNotEmpty()) return normalizeSortedPages(tarList, destDir)
         tarHit.exceptionOrNull()?.message?.let { failures += "Tar: $it" }
 
         clearTempExtracts(destDir)
         val reason = failures.firstOrNull()?.take(140) ?: "0 image entries"
-        throw IllegalStateException("Could not extract comic pages from '$displayName' ($reason).")
+        val undecodableNote = if (unsupportedSeen.isNotEmpty()) {
+            "; skipped undecodable image format(s): " + unsupportedSeen.sorted().joinToString(", ") +
+                " — Android cannot decode these, convert pages to PNG/JPG/WebP"
+        } else ""
+        throw IllegalStateException("Could not extract comic pages from '$displayName' ($reason$undecodableNote).")
     }
 
     private fun clearTempExtracts(destDir: File) {
@@ -2884,7 +2927,8 @@ object MangaCbzExtractorUtils {
     private fun extractWithCommonsZipFile(
         archiveFile: File,
         destDir: File,
-        charsetName: String
+        charsetName: String,
+        unsupportedSeen: MutableSet<String>?
     ): List<Pair<String, File>> {
         val out = mutableListOf<Pair<String, File>>()
         val zip = CommonsZipFile.builder()
@@ -2900,7 +2944,7 @@ object MangaCbzExtractorUtils {
                 val norm = normalizeEntryName(entry.name)
                 if (shouldSkipEntry(norm)) continue
                 zf.getInputStream(entry).use { entryStream ->
-                    copyImageEntryIfSupported(norm, entryStream, destDir, idx++)?.let { pair ->
+                    copyImageEntryIfSupported(norm, entryStream, destDir, idx++, unsupportedSeen)?.let { pair ->
                         out += pair
                     }
                 }
@@ -2912,7 +2956,8 @@ object MangaCbzExtractorUtils {
     private fun extractWithCommonsZipStream(
         archiveFile: File,
         destDir: File,
-        charsetName: String
+        charsetName: String,
+        unsupportedSeen: MutableSet<String>?
     ): List<Pair<String, File>> {
         val out = mutableListOf<Pair<String, File>>()
         ZipArchiveInputStream(
@@ -2927,7 +2972,7 @@ object MangaCbzExtractorUtils {
                 if (entry.isDirectory) continue
                 val norm = normalizeEntryName(entry.name)
                 if (shouldSkipEntry(norm)) continue
-                copyImageEntryIfSupported(norm, zis, destDir, idx++)?.let { pair ->
+                copyImageEntryIfSupported(norm, zis, destDir, idx++, unsupportedSeen)?.let { pair ->
                     out += pair
                 }
             }
@@ -2935,7 +2980,11 @@ object MangaCbzExtractorUtils {
         return out
     }
 
-    private fun extractWithJavaZipFile(archiveFile: File, destDir: File): List<Pair<String, File>> {
+    private fun extractWithJavaZipFile(
+        archiveFile: File,
+        destDir: File,
+        unsupportedSeen: MutableSet<String>?
+    ): List<Pair<String, File>> {
         val out = mutableListOf<Pair<String, File>>()
         JavaZipFile(archiveFile).use { zf ->
             val entries = zf.entries()
@@ -2946,7 +2995,7 @@ object MangaCbzExtractorUtils {
                 val norm = normalizeEntryName(entry.name)
                 if (shouldSkipEntry(norm)) continue
                 zf.getInputStream(entry).use { entryStream ->
-                    copyImageEntryIfSupported(norm, entryStream, destDir, idx++)?.let { pair ->
+                    copyImageEntryIfSupported(norm, entryStream, destDir, idx++, unsupportedSeen)?.let { pair ->
                         out += pair
                     }
                 }
@@ -2955,7 +3004,11 @@ object MangaCbzExtractorUtils {
         return out
     }
 
-    private fun extractWithTarStream(archiveFile: File, destDir: File): List<Pair<String, File>> {
+    private fun extractWithTarStream(
+        archiveFile: File,
+        destDir: File,
+        unsupportedSeen: MutableSet<String>?
+    ): List<Pair<String, File>> {
         val out = mutableListOf<Pair<String, File>>()
         TarArchiveInputStream(BufferedInputStream(archiveFile.inputStream(), 65536)).use { tis ->
             var idx = 0
@@ -2964,7 +3017,7 @@ object MangaCbzExtractorUtils {
                 if (entry.isDirectory) continue
                 val norm = normalizeEntryName(entry.name)
                 if (shouldSkipEntry(norm)) continue
-                copyImageEntryIfSupported(norm, tis, destDir, idx++)?.let { pair ->
+                copyImageEntryIfSupported(norm, tis, destDir, idx++, unsupportedSeen)?.let { pair ->
                     out += pair
                 }
             }
@@ -2988,12 +3041,16 @@ object MangaCbzExtractorUtils {
         normName: String,
         stream: InputStream,
         destDir: File,
-        tempIdx: Int
+        tempIdx: Int,
+        unsupportedSeen: MutableSet<String>? = null
     ): Pair<String, File>? {
-        val declaredExt = normName.substringAfterLast('/', normName)
+        val lowerExt = normName.substringAfterLast('/', normName)
             .substringAfterLast('.', "")
             .lowercase(Locale.US)
-            .takeIf { it in ALLOWED_IMAGE_EXT }
+        val declaredExt = lowerExt.takeIf { it in ALLOWED_IMAGE_EXT }
+        if (unsupportedSeen != null && declaredExt == null && lowerExt in KNOWN_UNDECODABLE_IMAGE_EXT) {
+            unsupportedSeen += lowerExt.uppercase(Locale.US)
+        }
 
         val peek = ByteArray(16)
         var peekLen = 0

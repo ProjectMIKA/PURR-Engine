@@ -107,11 +107,11 @@ private sealed interface MangaVisionLlmChoice {
 }
 
 /**
- * ✨ TOOL-11: MANGA AUTO-DUB STUDIO (1-TAP CBZ -> GEMMA 4 VISION & QWEN VOICEDESIGN -> .MP4) ✨
+ * ✨ TOOL-11: MANGA AUTO-DUB STUDIO (1-TAP CBZ/ZIP -> GEMMA 4 VISION & QWEN VOICEDESIGN -> .MP4) ✨
  *
  * Designed for effortless front-surface workflow:
  * 1. Enter Series Title (or attach chapter to existing series)
- * 2. Pick `.CBZ` manga file
+ * 2. Pick `.CBZ` / `.ZIP` manga file (any ZIP container; .cbt tar also accepted)
  * 3. Watch the live 5-Stage Cooking Console as Gemma 4 E2B/E4B scans panels, casts custom voices
  *    via Qwen3 1.7B VoiceDesign, and muxes the hardware `.MP4` (pausing only when Gemma flags an
  *    ambiguous speaker bubble, or auto-cooking straight to completion).
@@ -361,7 +361,7 @@ fun MangaDubStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Pick your reading direction and Vision LLM, enter a series title, and import your .CBZ chapter. Your selected VLM scans zoomed panels individually for sharp speech bubbles, casts Qwen3 VoiceDesign voices, and renders a synchronized .MP4 automatically.",
+            text = "Pick your reading direction and Vision LLM, enter a series title, and import your .CBZ / .ZIP chapter. Your selected VLM scans zoomed panels individually for sharp speech bubbles, casts Qwen3 VoiceDesign voices, and renders a synchronized .MP4 automatically.",
             color = MikaColors.CyanWhite.copy(alpha = 0.80f),
             fontFamily = FontFamily.Monospace,
             fontSize = 9.5.sp,
@@ -851,7 +851,11 @@ fun MangaDubStudioModuleWindowBody(
                     .border(1.5.dp, MikaColors.NeonPink, RoundedCornerShape(6.dp))
                     .clickable(enabled = !isBusy) {
                         cbzPicker.launch(
-                            arrayOf("application/x-cbz", "application/zip", "application/octet-stream", "*/*")
+                            arrayOf(
+                                "application/x-cbz", "application/vnd.comicbook+zip", "application/zip",
+                                "application/x-zip-compressed", "application/octet-stream",
+                                "application/x-cbt", "application/x-tar", "*/*"
+                            )
                         )
                     }
                     .padding(vertical = 11.dp),
@@ -861,7 +865,7 @@ fun MangaDubStudioModuleWindowBody(
                 MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonPink, size = 13.dp)
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (autoCookFullMp4) "+ IMPORT .CBZ & COOK .MP4" else "+ IMPORT .CBZ & STORYBOARD",
+                    text = if (autoCookFullMp4) "+ IMPORT .CBZ/.ZIP & COOK .MP4" else "+ IMPORT .CBZ/.ZIP & STORYBOARD",
                     color = MikaColors.NeonPink,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
