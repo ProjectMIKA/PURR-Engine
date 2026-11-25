@@ -1764,7 +1764,12 @@ object MangaVisionResponseParser {
                 val obj = elem as? JsonObject ?: return@mapNotNull null
                 val cname = ((obj["canonical_name"] ?: obj["name"]) as? JsonPrimitive)
                     ?.contentOrNull.orEmpty().trim().uppercase(Locale.ROOT)
-                if (cname.isEmpty() || cname == "UNKNOWN" || MangaTextBender.isNarratorName(cname)) {
+                // ✨ NARRATOR IDENTITY LAW + contamination guard (v2.2.0): canonical names may
+                // never be narrator labels, MIKA (the director herself), UNKNOWN, or empty —
+                // MIKA-flavored silly names from the prompt are fine, self-naming is not.
+                if (cname.isEmpty() || cname == "UNKNOWN" || cname == "MIKA" ||
+                    MangaTextBender.isNarratorName(cname)
+                ) {
                     return@mapNotNull null
                 }
                 val aliases = ((obj["merged_aliases"] ?: obj["aliases"]) as? JsonArray).orEmpty()
@@ -1793,7 +1798,7 @@ object MangaVisionResponseParser {
                 val lineId = ((obj["line_id"] ?: obj["id"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
                 val speaker = ((obj["speaker"] ?: obj["canonical_speaker"] ?: obj["character"]) as? JsonPrimitive)
                     ?.contentOrNull.orEmpty().trim().uppercase(Locale.ROOT)
-                if (lineId.isEmpty() || speaker.isEmpty() || speaker == "UNKNOWN") return@mapNotNull null
+                if (lineId.isEmpty() || speaker.isEmpty() || speaker == "UNKNOWN" || speaker == "MIKA") return@mapNotNull null
                 val gStr = (obj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase(Locale.ROOT)
                 val gender = when {
                     gStr.startsWith("f") -> VoiceGender.FEMALE

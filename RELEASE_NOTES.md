@@ -1,3 +1,26 @@
+# 🌌 PURR-TTS v2.2.0 // MIKA's Casting Room — Adaptive Cast Refinement & Silly-Name Privilege
+
+### ✨ What's New since v2.1.2
+
+The storyboard preview only sees thumbnails; the deep panel scan sees the truth. Now the consolidation pass is explicitly MIKA's casting room — she corrects her provisional cast with full-script evidence, fixes genders, polishes descriptions, and is welcome to give nameless characters delightfully silly names. 🎭🐾
+
+* **🎭 MIKA's Casting Room (`buildCastConsolidationPrompt`)**:
+  * The consolidation pass is now framed as **MIKA reviewing her own provisional storyboard cast** with the full transcribed script: real names spoken or written in the manga **always override** placeholder/role labels (THE_WOMAN → OJOU_SAMA when the script addresses her), gender mistakes get fixed (the cloned voice depends on it), and visual descriptions get polished with deep-scan details.
+  * **MIKA's naming privilege**: when a character's true name is never revealed, she is welcome to give them a fun, affectionate, family-friendly silly cast name that fits their vibe — `SIR_HOPPINGTON` for a dignified rabbit butler, `MARSHMALLOW_MENACE` for a chaotic gremlin — kept stable across the whole chapter. Real names always beat silly names.
+* **🛡️ Contamination Guards (`parseCastConsolidation`)**:
+  * `canonical_name` may never be NARRATOR, MIKA, UNKNOWN, or empty — the director cannot name a character after herself. `line_fixes` may not re-attribute lines to MIKA either. Silly names pass; self-naming does not.
+* **🧬 Rename-Safe Voice Locks (verified)**:
+  * Cast renames preserve character identity and voice state — `autoCloneVoiceId` / `autoClonePromptHash` / assigned voices survive THE_WOMAN → OJOU_SAMA-style renames, so an already-cloned voice keeps its lock and only re-seeds if its design prompt actually changed.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.2.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `41`).
+2. **`PURR-TTS_V2.2.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.1.2 // Engine-Affinity Dub Batching & Vision Source Priority Law
 
 ### ✨ What's New since v2.1.1

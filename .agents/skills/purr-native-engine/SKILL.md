@@ -351,6 +351,13 @@ voices went flat:
   revoke the project's legacy `powerUserVisionUrl` — `resolveOpenAiRequestTarget` otherwise
   kept preferring the stale LAN URL over any local model (the "switched back to my API model"
   bug). TOOL-12 OpenAI engines remain an explicit, deliberate selection.
+- **MIKA's casting room (v2.2.0)** (`buildCastConsolidationPrompt` + `parseCastConsolidation`):
+  the consolidation pass is framed as MIKA correcting her PROVISIONAL storyboard cast with
+  full-script evidence — real names override role labels, genders get fixed, descriptions get
+  polished, and she holds naming privilege over nameless characters (family-friendly ALL_CAPS
+  silly names, stable across the chapter). Hard parser guards: canonical_name/line_fix speaker
+  may never be NARRATOR, MIKA, UNKNOWN, or empty. Renames preserve character ids and voice
+  state (`mergeProfiles` keeps assignedVoiceId/autoCloneVoiceId) so clone locks survive.
 - **Cast cards show the EFFECTIVE dub voice** (v1.9.9): the `ASSIGNED VOICE (OR CLONE)`
   dropdown fell back to `activeProfile.primaryVoiceId` — the user's system-TTS pick — which
   mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen". The fallback chain is now

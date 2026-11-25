@@ -1252,6 +1252,95 @@ class MangaDubStudioTest {
     }
 
     @Test
+    fun `cast consolidation rejects mika self naming and preserves voice locks through renames`() {
+        val raw = """
+            {
+              "cohesive_story_summary": "A woman chugs potions while a rabbit butler counts down.",
+              "canonical_characters": [
+                {"canonical_name": "MIKA", "merged_aliases": ["THE_WOMAN"], "gender": "female", "visual_description": "contaminated"},
+                {"canonical_name": "OJOU_SAMA", "merged_aliases": ["THE_WOMAN"], "gender": "female", "visual_description": "Blonde heiress in a school uniform"},
+                {"canonical_name": "SIR_HOPPINGTON", "merged_aliases": ["BUNNY_BUTLER", "NARRATOR"], "gender": "male", "visual_description": "Dignified rabbit butler in a lab coat"}
+              ],
+              "line_fixes": [
+                {"line_id": "ln_0_0_0", "speaker": "MIKA", "gender": "female"}
+              ]
+            }
+        """.trimIndent()
+        val parsed = MangaVisionResponseParser.parseCastConsolidation(raw)
+        assertNotNull(parsed)
+        // MIKA self-naming + MIKA line-fix rejected; NARRATOR alias dropped; silly names accepted
+        assertEquals(2, parsed!!.canonicalCharacters.size)
+        assertEquals("OJOU_SAMA", parsed.canonicalCharacters[0].canonicalName)
+        assertEquals("SIR_HOPPINGTON", parsed.canonicalCharacters[1].canonicalName)
+        assertTrue(parsed.canonicalCharacters[1].mergedAliases.contains("BUNNY_BUTLER"))
+        assertTrue(parsed.canonicalCharacters[1].mergedAliases.none { it.equals("NARRATOR", ignoreCase = true) })
+        assertEquals(0, parsed.lineFixes.size)
+
+        // Renaming preserves identity AND the voice-clone lock (the whole point of the law split)
+        val roster = listOf(
+            MangaCharacterProfile(
+                id = "char_the_woman_1",
+                name = "THE_WOMAN",
+                gender = VoiceGender.FEMALE,
+                voiceDesignPrompt = "Warm expressive voice",
+                autoCloneVoiceId = "manga_auto_p1_char_the_woman_1",
+                autoClonePromptHash = "abc123"
+            )
+        )
+        val pages = listOf(
+            MangaPageEntry(
+                pageIndex = 0,
+                fileName = "page_001.png",
+                localImagePath = "/tmp/page_001.png",
+                widthPx = 800,
+                heightPx = 1200,
+                panels = listOf(
+                    MangaPanelNode(
+                        id = "pan_0_0",
+                        pageIndex = 0,
+                        panelIndex = 0,
+                        panelRect = MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f),
+                        cameraStartRect = MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f),
+                        cameraEndRect = MangaNormalizedRect(0.02f, 0.02f, 0.98f, 0.98f),
+                        lines = listOf(
+                            MangaSpeechLine(
+                                id = "ln_0_0_0",
+                                bubbleIndex = 1,
+                                speakerId = "char_the_woman_1",
+                                speakerName = "THE_WOMAN",
+                                rawText = "Hello there!",
+                                sanitizedText = "Hello there!"
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        val (newRoster, newPages) = MangaCastConsolidator.consolidateChapterCastAndLines(
+            roster = roster,
+            pages = pages,
+            consolidation = MangaVisionResponseParser.ParsedCastConsolidation(
+                cohesiveStorySummary = "test",
+                canonicalCharacters = listOf(
+                    MangaVisionResponseParser.ParsedConsolidatedCharacter(
+                        canonicalName = "OJOU_SAMA",
+                        mergedAliases = listOf("THE_WOMAN"),
+                        gender = VoiceGender.FEMALE,
+                        visualDescription = "Blonde heiress",
+                        voiceDesignPrompt = ""
+                    )
+                ),
+                lineSpeakerFixes = emptyList()
+            )
+        )
+        assertEquals(1, newRoster.size)
+        assertEquals("OJOU_SAMA", newRoster[0].name)
+        assertEquals("char_the_woman_1", newRoster[0].id)
+        assertEquals("manga_auto_p1_char_the_woman_1", newRoster[0].autoCloneVoiceId)
+        assertEquals("OJOU_SAMA", newPages[0].panels[0].lines[0].speakerName)
+    }
+
+    @Test
     fun `generic role voices cover every gender for universal cast coverage`() {
         val male = MangaTextBender.genericRoleVoicePrompt(VoiceGender.MALE)
         val female = MangaTextBender.genericRoleVoicePrompt(VoiceGender.FEMALE)

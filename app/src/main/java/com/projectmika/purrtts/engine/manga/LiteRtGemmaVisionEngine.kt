@@ -906,7 +906,8 @@ Output ONLY valid JSON:
             "CHARACTER COUNT: AUTO — merge any duplicate/drifted role labels referring to the same person across pages into ONE canonical character."
         }
         return """
-You are the Head Story & Casting Editor reviewing the COMPLETE transcribed script for "$seriesTitle".
+You are MIKA — the playful catgirl dub director of this production, reviewing the COMPLETE transcribed script for "$seriesTitle".
+The cast entries below came from a quick thumbnail storyboard preview — treat them as PROVISIONAL. You have now read the full script with deep per-panel context, so CORRECT them wherever the evidence disagrees.
 Earlier summary: ${currentStorySummary.ifBlank { "(synthesize from script)" }}
 $baselineDirective
 
@@ -918,10 +919,17 @@ $scriptBlock
 
 TASK:
 1. Understand the complete cohesive story across all pages and write a crisp 2-3 sentence `cohesive_story_summary`.
-2. Unify any duplicate or drifted character labels from different pages (e.g. TOWEL_GIRL on Page 1 + SUIT_WOMAN on Page 2 -> ONE canonical name) inside `canonical_characters` with `merged_aliases`.
-   - NEVER put NARRATOR in `canonical_characters`.
-   - Set every character's `gender` (`female` or `male` strongly preferred whenever clear from story context/pronouns/appearance; use `androgynous` only if truly uncertain).
-3. If any specific `line_id` was attributed to the wrong speaker or drifted label, list its correction in `line_fixes`.
+2. **Correct the provisional storyboard cast with your deep-scan knowledge**:
+   - A real name spoken or written in the script ALWAYS overrides a placeholder/role label (e.g. if the woman is addressed as OJOU-SAMA, her canonical_name becomes OJOU_SAMA).
+   - Fix gender mistakes — the cloned voice depends on it (`female` or `male` strongly preferred whenever clear from story context/pronouns/appearance; `androgynous` only if truly uncertain).
+   - Polish each `visual_description` with what the deep scan learned (outfit changes, hair, species traits).
+3. Unify any duplicate or drifted character labels from different pages (e.g. TOWEL_GIRL on Page 1 + SUIT_WOMAN on Page 2 -> ONE canonical character) inside `canonical_characters` with `merged_aliases`.
+4. **MIKA's naming privilege**: when a character's true name is never revealed, you are welcome to give them a fun, affectionate, family-friendly silly cast name that fits their vibe — ALL_CAPS_SNAKE, consistent across the whole chapter (e.g. SIR_HOPPINGTON for a dignified rabbit butler, MARSHMALLOW_MENACE for a chaotic gremlin). Real names always beat silly names; keep every silly name stable once chosen.
+
+HARD BANS (violating these breaks the dub):
+- NEVER use NARRATOR, MIKA, UNKNOWN, or lazy THE_* placeholders (THE_WOMAN, THE_MAN, THE_GIRL) as a `canonical_name`.
+- NEVER merge two clearly different characters into one.
+- Boxed narration captions always stay with the narrator — never create a narrator character.
 
 Output ONLY valid JSON:
 {
