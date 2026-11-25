@@ -1,3 +1,25 @@
+# 🌌 PURR-TTS v2.4.2 // The Shapeshifter
+
+### ✨ What's New since v2.4.1
+
+The import flow collapses into **ONE smart button** that accepts .cbz, .zip, .cbt or any pile of image files and figures it out for you — plus a root-cause fix for the "Immutable bitmap passed to Canvas constructor" crash that hit pages at 1024px or smaller, and a Narration selector that finally matches the rest of the studio's controls. 🖼️🎭
+
+* **🖼️ Root-Cause Fix: "Immutable bitmap passed to Canvas constructor" (`LiteRtGemmaVisionEngine` / `MangaDubStudioManager`)**:
+  * `Bitmap.createScaledBitmap` returns the SOURCE bitmap itself when the dimensions are unchanged (pages <= 1024px max-dimension) — and BitmapFactory-decoded pages are IMMUTABLE, so drawing the vision-engine's cyan panel annotations on it crashed.
+  * **MUTABILITY LAW**: the page decode now requests `inMutable = true`, and the renderer defensively copies to a mutable bitmap whenever the scale call aliases the source. Pages of ANY dimension now scan cleanly (this is also why it seemed inconsistent — it depended on each page's pixel size).
+* **🖱️ ONE Smart Importer Button (`MangaDubStudioManager` / `MangaDubStudioModuleWindow` / `TtsForgeViewModel`)**:
+  * The two import buttons collapse into a single **"+ IMPORT & DUB (CBZ · ZIP · IMAGES)"** picker that accepts archives AND loose image files in one place.
+  * New `importMangaFiles` router classifies the selection: one .cbz/.zip/.cbt archive -> the archive pipeline; any set of image files -> the loose-image pipeline (selection order = page order); multiple archives or a mixed archive+image selection -> clear guidance instead of guessing.
+* **🎭 Narration Selector Restyled (`MangaDubStudioModuleWindow`)**:
+  * The MIKA Narrator toggle is now a compact `NARRATION: [MIKA ON] [MIKA OFF]` pill row matching the CAST QTY selector style, with the full explanation moved below the cast-qty blurb as a state-aware info line.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.4.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `47`).
+2. **`PURR-TTS_V2.4.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.4.1 // The Loose Pages
 
 ### ✨ What's New since v2.4.0
