@@ -1357,7 +1357,8 @@ class MangaDubStudioTest {
         assertEquals("Wait!", MangaTextBender.sanitizeMangaDialogue("--WAIT!"))
         assertEquals("Huh?!", MangaTextBender.sanitizeMangaDialogue("...Huh?!"))
         assertEquals("Stop right there, fool!", MangaTextBender.sanitizeMangaDialogue("— — STOP RIGHT THERE, FOOL!!"))
-        assertEquals("No way, seriously?!", MangaTextBender.sanitizeMangaDialogue("… — NO WAY... SERIOUSLY?!"))
+        assertEquals("No way. Seriously?!", MangaTextBender.sanitizeMangaDialogue("… — NO WAY... SERIOUSLY?!"))
+        assertEquals("No way, seriously?!", MangaTextBender.sanitizeMangaDialogue("… — NO WAY — SERIOUSLY?!"))
 
         // Very long multi-sentence speech bubble stays ONE unbroken single string
         val longBubble = "--LISTEN TO ME CAREFULLY! " +
