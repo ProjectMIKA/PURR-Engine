@@ -38,6 +38,7 @@ import java.io.FileOutputStream
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -85,6 +86,9 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     @Volatile
     var lastEngineError: String? = null
         private set
+
+    val isLocalModelMounted: Boolean
+        get() = engineHandle != null
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)
@@ -389,13 +393,19 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
 
                 var rawResponse: String? = null
                 if (apiTarget != null) {
-                    val label = openAiEngine?.name ?: "LAN Vision Endpoint"
+                    val label = openAiEngine?.name?.ifBlank { "OpenAI Vision API" } ?: "LAN Vision Endpoint"
                     onLog("🗺️ Running Storyboard Sheet ${batchIdx + 1}/${batches.size} (${batchPairs.size} pg) via [$label]...")
                     rawResponse = runCatching { queryOpenAiVisionEndpoint(apiTarget, sheetFile, prompt) }
                         .onFailure { onLog("$label Storyboard error: ${it.message}") }
                         .getOrNull()
-                }
-                if (rawResponse.isNullOrBlank()) {
+                    if (rawResponse.isNullOrBlank()) {
+                        delay(500)
+                        onLog("🔁 Retrying Storyboard Sheet ${batchIdx + 1}/${batches.size} via [$label]...")
+                        rawResponse = runCatching { queryOpenAiVisionEndpoint(apiTarget, sheetFile, prompt) }
+                            .onFailure { onLog("$label Storyboard retry error: ${it.message}") }
+                            .getOrNull()
+                    }
+                } else {
                     val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
                     if (localModel != null) {
                         val activeTier = resolveTierForFile(localModel, preferredVisionModel)
@@ -549,7 +559,10 @@ Output ONLY valid JSON:
         val targetPanels = panels.ifEmpty { listOf(MangaNormalizedRect(0.01f, 0.01f, 0.99f, 0.99f)) }
         val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
 
-        // Tier 1: Optional OpenAI-Compatible Vision Engine (TOOL-12 Saved Engine or LAN Power-User URL)
+        // Tier 1: Optional OpenAI-Compatible Vision Engine (TOOL-12 Saved Engine or LAN Power-User URL).
+        // Strict Engine Isolation Law (v2.2.2): when an API LLM is selected, stay 100% on API from
+        // start to finish — NEVER fall through to Tier 2 and mount a local .litertlm model in RAM
+        // on an API error, blank reply, or a silent splash/cover page with 0 bubbles.
         if (apiTarget != null) {
             val apiBadge = openAiEngine?.name?.ifBlank { "OpenAI Vision API" } ?: "LAN Vision Endpoint"
             val annotatedFile = File(context.cacheDir, "manga_vision_page_$pageIndex.jpg")
@@ -566,10 +579,21 @@ Output ONLY valid JSON:
                 expectedCharacterCount = expectedCharacterCount
             )
             onLog("Querying [$apiBadge] for Page ${pageIndex + 1}...")
-            val rawRemote = runCatching { queryOpenAiVisionEndpoint(apiTarget, annotatedFile, prompt) }
-                .onFailure { onLog("$apiBadge error: ${it.message}") }
-                .getOrNull()
-            runCatching { annotatedFile.delete() }
+            var rawRemote: String? = null
+            try {
+                rawRemote = runCatching { queryOpenAiVisionEndpoint(apiTarget, annotatedFile, prompt) }
+                    .onFailure { onLog("$apiBadge error: ${it.message}") }
+                    .getOrNull()
+                if (rawRemote.isNullOrBlank()) {
+                    delay(500)
+                    onLog("Retrying [$apiBadge] for Page ${pageIndex + 1}...")
+                    rawRemote = runCatching { queryOpenAiVisionEndpoint(apiTarget, annotatedFile, prompt) }
+                        .onFailure { onLog("$apiBadge retry error: ${it.message}") }
+                        .getOrNull()
+                }
+            } finally {
+                runCatching { annotatedFile.delete() }
+            }
             if (!rawRemote.isNullOrBlank()) {
                 val parsed = MangaVisionResponseParser.parsePageAnalysis(
                     rawResponse = rawRemote,
@@ -578,10 +602,28 @@ Output ONLY valid JSON:
                     includeNonBubbleText = includeNonBubbleText,
                     readingOrder = readingOrder
                 )
-                if (parsed.panels.isNotEmpty()) {
-                    return@withContext parsed to apiBadge
+                val finalParsed = if (parsed.panels.isNotEmpty()) {
+                    parsed
+                } else {
+                    parsed.copy(
+                        panels = targetPanels.indices.map { pIdx ->
+                            MangaVisionResponseParser.DiscoveredPanelSpec(
+                                panelIndex = pIdx,
+                                sceneMood = "silent_panel",
+                                thoughtTrace = parsed.thoughtTrace,
+                                lines = emptyList()
+                            )
+                        }
+                    )
                 }
+                return@withContext finalParsed to apiBadge
             }
+            onLog("⚠️ [$apiBadge] Page ${pageIndex + 1} returned empty response — skipping without mounting local VLM")
+            return@withContext MangaVisionResponseParser.ParsedPageAnalysis(
+                thoughtTrace = "",
+                storySummary = storySummary,
+                panels = emptyList()
+            ) to "$apiBadge (no response)"
         }
 
         // Tier 2: On-Device LiteRT-LM Vision LLM — zoomed per-panel crops for sharp OCR + exact alignment
@@ -869,9 +911,19 @@ Output ONLY valid JSON:
         val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
         var rawOut: String? = null
         if (apiTarget != null) {
-            rawOut = runCatching { queryOpenAiTextEndpoint(apiTarget, prompt) }.getOrNull()
-        }
-        if (rawOut.isNullOrBlank()) {
+            val label = openAiEngine?.name?.ifBlank { "OpenAI Vision API" } ?: "LAN Vision Endpoint"
+            onLog("🧩 Consolidating Story & Cast (${roster.size} speakers, ${allLines.size} lines) via [$label]...")
+            rawOut = runCatching { queryOpenAiTextEndpoint(apiTarget, prompt) }
+                .onFailure { onLog("$label consolidation error: ${it.message}") }
+                .getOrNull()
+            if (rawOut.isNullOrBlank()) {
+                delay(500)
+                onLog("🔁 Retrying Story & Cast Consolidation via [$label]...")
+                rawOut = runCatching { queryOpenAiTextEndpoint(apiTarget, prompt) }
+                    .onFailure { onLog("$label consolidation retry error: ${it.message}") }
+                    .getOrNull()
+            }
+        } else {
             val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
             if (localModel != null) {
                 val activeTier = resolveTierForFile(localModel, preferredVisionModel)
@@ -980,9 +1032,19 @@ Output ONLY valid JSON:
         var rawCasting: String? = null
         val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
         if (apiTarget != null) {
-            rawCasting = runCatching { queryOpenAiTextEndpoint(apiTarget, castingPrompt) }.getOrNull()
-        }
-        if (rawCasting.isNullOrBlank()) {
+            val label = openAiEngine?.name?.ifBlank { "OpenAI Vision API" } ?: "LAN Vision Endpoint"
+            onLog("🎭 Crafting Qwen3 VoiceDesign prompts (${characters.size} cast) via [$label]...")
+            rawCasting = runCatching { queryOpenAiTextEndpoint(apiTarget, castingPrompt) }
+                .onFailure { onLog("$label VoiceDesign casting error: ${it.message}") }
+                .getOrNull()
+            if (rawCasting.isNullOrBlank()) {
+                delay(500)
+                onLog("🔁 Retrying VoiceDesign casting via [$label]...")
+                rawCasting = runCatching { queryOpenAiTextEndpoint(apiTarget, castingPrompt) }
+                    .onFailure { onLog("$label VoiceDesign casting retry error: ${it.message}") }
+                    .getOrNull()
+            }
+        } else {
             val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
             if (localModel != null) {
                 val activeTier = resolveTierForFile(localModel, preferredVisionModel)

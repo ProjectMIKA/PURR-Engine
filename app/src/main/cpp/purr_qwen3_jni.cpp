@@ -5,6 +5,7 @@
 #include "logger.h"
 #include "lunavox_c_api.h"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 #include <string>
@@ -12,6 +13,14 @@
 #define PURR_LOG_TAG "PurrQwen3JNI"
 
 namespace {
+
+int compute_safe_max_audio_tokens(const char * c_text) {
+    if (!c_text) return 0; // 0 = use model_profile.json default_max_new_tokens (400 = ~32s @ 12.5Hz)
+    const size_t tlen = std::strlen(c_text);
+    if (tlen <= 200) return 0;
+    // Keep well below talker_n_ctx (2048) after prefill tokens + M-RoPE margin
+    return std::min(1400, std::max(400, static_cast<int>(tlen * 3)));
+}
 
 std::once_flag g_log_init_once;
 std::string g_last_global_error;
@@ -109,15 +118,9 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeSynthesizeCust
     lunavox_default_params(&params);
     params.n_threads = nThreads > 0 ? nThreads : 4;
     params.language_id = languageId;
-    params.temperature = 0.72f;
-    params.top_p = 0.90f;
-    if (c_text) {
-        const size_t tlen = std::strlen(c_text);
-        if (tlen > 140) {
-            const int scaled = static_cast<int>(tlen * 14);
-            params.max_audio_tokens = std::min(4096, std::max(params.max_audio_tokens, scaled));
-        }
-    }
+    params.temperature = 0.78f;
+    params.top_p = 0.95f;
+    params.max_audio_tokens = compute_safe_max_audio_tokens(c_text);
 
     LunavoxAudio * audio = lunavox_synthesize_custom(
         engine,
@@ -157,15 +160,10 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeSynthesizeClon
     params.language_id = languageId;
     params.ref_text = c_ref_txt;
     // Moderate sampling heat vs upstream 0.9/1.0 default to curb onset breath/babble hallucinations
-    params.temperature = 0.72f;
-    params.top_p = 0.90f;
-    if (c_text) {
-        const size_t tlen = std::strlen(c_text);
-        if (tlen > 140) {
-            const int scaled = static_cast<int>(tlen * 14);
-            params.max_audio_tokens = std::min(4096, std::max(params.max_audio_tokens, scaled));
-        }
-    }
+    // while keeping enough entropy for short 1-3 word manga utterances.
+    params.temperature = 0.78f;
+    params.top_p = 0.95f;
+    params.max_audio_tokens = compute_safe_max_audio_tokens(c_text);
 
     LunavoxAudio * audio = lunavox_synthesize_with_voice_file(
         engine,
@@ -200,15 +198,9 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeSynthesizeDesi
     lunavox_default_params(&params);
     params.n_threads = nThreads > 0 ? nThreads : 4;
     params.language_id = languageId;
-    params.temperature = 0.72f;
-    params.top_p = 0.90f;
-    if (c_text) {
-        const size_t tlen = std::strlen(c_text);
-        if (tlen > 140) {
-            const int scaled = static_cast<int>(tlen * 14);
-            params.max_audio_tokens = std::min(4096, std::max(params.max_audio_tokens, scaled));
-        }
-    }
+    params.temperature = 0.78f;
+    params.top_p = 0.95f;
+    params.max_audio_tokens = compute_safe_max_audio_tokens(c_text);
 
     LunavoxAudio * audio = lunavox_synthesize_design(
         engine,

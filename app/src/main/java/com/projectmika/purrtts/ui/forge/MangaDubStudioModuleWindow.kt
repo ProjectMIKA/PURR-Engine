@@ -209,7 +209,7 @@ fun MangaDubStudioModuleWindowBody(
         MangaVisionModelTier.entries.map { MangaVisionLlmChoice.LocalTier(it) } +
             enabledOpenAiEngines.map { MangaVisionLlmChoice.SavedApiEngine(it) }
     }
-    val activeOpenAiId = (activeProject?.selectedOpenAiVisionEngineId?.takeIf { it.isNotBlank() } ?: selectedOpenAiEngineId)
+    val activeOpenAiId = activeProject?.selectedOpenAiVisionEngineId ?: selectedOpenAiEngineId
     val selectedOpenAiEngine = enabledOpenAiEngines.firstOrNull { it.id == activeOpenAiId }
     val selectedVisionChoice: MangaVisionLlmChoice = remember(selectedVisionTier, selectedOpenAiEngine, visionLlmOptions) {
         if (selectedOpenAiEngine != null) {

@@ -401,19 +401,30 @@ voices went flat:
     raised-cosine edge fades, and appends 120ms digital zero tail silence so Qwen3 0.6B Base ICL
     cloning never bleeds trailing seed breath into frame 0 of cloned clips; `Qwen3TtsEngine`
     guarantees a single leading space before `text` in ICL mode so BPE concatenation never glues
-    the first word onto `ref_text`'s period. `purr_qwen3_jni.cpp` moderates sampling
-    (`temperature = 0.72`, `top_p = 0.90`).
+    the first word onto `ref_text`'s period. `purr_qwen3_jni.cpp` sets sampling to
+    (`temperature = 0.78`, `top_p = 0.95`) and keeps `max_audio_tokens` within `talker_n_ctx = 2048`.
+- **LunaVox 4D M-RoPE Batch & `talker_n_ctx` Law (v2.2.2)**:
+  - `TalkerPredictor::run_prefill` passes `n_prompt_tokens * 4` M-RoPE position entries into
+    `talker_batch_.set_embeddings(...)`, while upstream LunaVox (`ae5db5cd`) allocated `talker_batch_`
+    with `n_ctx` entries — failing ANY prompt >=193 tokens with `pos_count exceeds batch capacity`.
+    `patches/lunavox_opencl_gpu_offload.patch` scales `talker_batch_` by `4x` (`min(n_ctx * 4, 8192)`),
+    clamps `max_frames` inside `talker_ctx_cap_ = 2048`, and CI pins LunaVox at `ae5db5cd`.
+    VoiceDesign prompts pass through `compactQwenVoiceDesignPrompt` and GPU offload failures failover
+    automatically to CPU NEON in `Qwen3TtsEngine`.
+- **Strict Vision Engine Isolation Law (v2.2.2)**:
+  - When an API LLM (`TOOL-12` or LAN URL) is active, Storyboard, Page OCR, Consolidation, and Casting
+    MUST start and finish on the API LLM (plus API retry) and NEVER fall through into
+    `resolveInstalledGemmaModelFile` / local `.litertlm` mounting on API error or silent `panels: []` pages.
 - **Whole-Bubble Single-Chunk Law (`PurrChunk.Speech.singleChunkOnly = true`)**:
   - Manga Dub bubbles (and character auditions) ALWAYS synthesize as ONE unbroken speech chunk
     regardless of bubble length: `OnnxRuntimeEngine` bypasses Phonon's 48-token splitter and
     scales token ceilings, `LiteRtKokoroEngine` G2P accepts up to 512 chars, and
-    `purr_qwen3_jni.cpp` scales `max_audio_tokens` for long monologues. Vision prompts enforce
-    1 drawn speech bubble = 1 `lines` entry.
+    `purr_qwen3_jni.cpp` scales `max_audio_tokens` safely (up to `1400` inside `talker_n_ctx = 2048`)
+    for long monologues. Vision prompts enforce 1 drawn speech bubble = 1 `lines` entry.
 - **`TOOL-12` OpenAI Vision API Hub (`tool_openai_vision_api`, disabled by default)**:
   - Built-in OS cartridge marked `INSTALLED` in `modelStates` and **excluded** from
     `PurrForgeState.slottedCartridges` defaults AND upgrade auto-slotting (`PurrProfileRepository`).
   - `SavedOpenAiVisionEngine` + `OpenAiVisionProviderPreset` (`NanoGPT`, `OpenRouter`, `Clinepass`,
     `OpenAI Official`, `Together AI`, `Groq Cloud`, and `Custom OpenAI Endpoint` last) normalize
     endpoints via `OpenAiEndpointUtils.normalizeChatCompletionsUrl`, pass `Bearer` auth and
-    selected `modelId` in `LiteRtGemmaVisionEngine`, and fall back cleanly to local VLM if `TOOL-12`
-    is ejected.
+    selected `modelId` in `LiteRtGemmaVisionEngine`, and honor strict engine isolation when active.

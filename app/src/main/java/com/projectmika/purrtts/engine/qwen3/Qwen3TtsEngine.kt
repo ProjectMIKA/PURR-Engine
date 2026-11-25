@@ -124,6 +124,7 @@ class Qwen3TtsEngine(
     private var activeSpecId: String? = null
     private var activeInstructSupport: Boolean = false
     private var activeGpuOffload: Boolean = false
+    private var gpuOffloadDisabledForSession: Boolean = false
 
     private fun modelDirForSpec(specId: String): File =
         File(context.filesDir, "models/native/$specId")
@@ -142,6 +143,15 @@ class Qwen3TtsEngine(
         }
     }
 
+    fun isSpecReadyForVoice(voiceId: String): Boolean {
+        val cleanVoiceId = voiceId.substringAfter(':')
+        val cloned = clonedVoicesProvider().firstOrNull {
+            it.id == cleanVoiceId && it.resolvedCloneEngineId == SPEC_BASE_CLONE_06B
+        }
+        val targetSpec = if (cloned != null) SPEC_BASE_CLONE_06B else resolveSpecForVoice(cleanVoiceId)
+        return isSpecDownloaded(targetSpec)
+    }
+
     override val isModelReady: Boolean
         get() = isSpecDownloaded(SPEC_CUSTOM_06B) ||
             isSpecDownloaded(SPEC_BASE_CLONE_06B) ||
@@ -151,7 +161,9 @@ class Qwen3TtsEngine(
         mutex.withLock {
             val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
             val targetSpec = resolveSpecForVoice(cleanVoiceId)
-            ensureEngineLoadedLocked(targetSpec, gpuOffloadProvider())
+            val userWantsGpu = gpuOffloadProvider()
+            if (!userWantsGpu) gpuOffloadDisabledForSession = false
+            ensureEngineLoadedLocked(targetSpec, userWantsGpu && !gpuOffloadDisabledForSession)
         }
         resetIdleTimer()
     }
@@ -201,7 +213,30 @@ class Qwen3TtsEngine(
                 )
             }
 
-            val handle = ensureEngineLoadedLocked(targetSpec, gpuOffloadProvider())
+            if (clonedVoice != null && !File(clonedVoice.referenceWavPath).let { it.exists() && it.length() > 44L }) {
+                return@withContext SynthesisOutcome(
+                    pcmFloat24k = FloatArray(0),
+                    sampleRateHz = SAMPLE_RATE_HZ,
+                    hardwareBadge = HardwareStatusBadge.IDLE,
+                    engineSummary = "Qwen3 Base clone WAV missing for ${clonedVoice.displayName}",
+                    isFallbackNeuralPreview = true
+                )
+            }
+            if (cleanVoiceId == "qwen3_base_clone_default" && clonedVoice == null) {
+                return@withContext SynthesisOutcome(
+                    pcmFloat24k = FloatArray(0),
+                    sampleRateHz = SAMPLE_RATE_HZ,
+                    hardwareBadge = HardwareStatusBadge.IDLE,
+                    engineSummary = "Record or import a 3s voice sample in Clone Studio (Qwen3 0.6B Base)",
+                    isFallbackNeuralPreview = true
+                )
+            }
+
+            val userWantsGpu = gpuOffloadProvider()
+            if (!userWantsGpu) gpuOffloadDisabledForSession = false
+            val initialUseGpu = userWantsGpu && !gpuOffloadDisabledForSession
+
+            var handle = ensureEngineLoadedLocked(targetSpec, initialUseGpu)
             if (handle == 0L) {
                 val err = Qwen3NativeBridge.nativeGetLastError(0L).ifBlank { "nativeCreate failed" }
                 return@withContext SynthesisOutcome(
@@ -214,84 +249,31 @@ class Qwen3TtsEngine(
             }
 
             val langId = detectQwenLanguageId(text)
-            val rawAudio: FloatArray? = when {
-                clonedVoice != null -> {
-                    val wavFile = File(clonedVoice.referenceWavPath)
-                    if (!wavFile.exists() || wavFile.length() <= 44L) {
-                        return@withContext SynthesisOutcome(
-                            pcmFloat24k = FloatArray(0),
-                            sampleRateHz = SAMPLE_RATE_HZ,
-                            hardwareBadge = HardwareStatusBadge.IDLE,
-                            engineSummary = "Qwen3 Base clone WAV missing for ${clonedVoice.displayName}",
-                            isFallbackNeuralPreview = true
-                        )
-                    }
-                    val rawRefText = clonedVoice.referenceTranscript.trim()
-                    val alignedRefText = if (rawRefText.isNotEmpty() && rawRefText.last() !in charArrayOf('.', '!', '?', '…')) {
-                        "$rawRefText."
-                    } else {
-                        rawRefText
-                    }
-                    // LunaVox concatenates encode(ref_text) + encode(text) directly without
-                    // inserting a separator; prefixing a single leading space prevents the first
-                    // target word from fusing onto ref_text's trailing period without a BPE space.
-                    val alignedTargetText = if (alignedRefText.isNotEmpty()) {
-                        " ${text.trimStart()}"
-                    } else {
-                        text.trim()
-                    }
-                    var cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
-                        handle = handle,
-                        text = alignedTargetText,
-                        refWavPath = wavFile.absolutePath,
-                        refText = alignedRefText,
-                        languageId = langId,
-                        nThreads = nThreads
-                    )
-                    // If ICL mode (with refText) fails or emits empty audio, retry once in
-                    // x-vector-only mode (empty refText) so speaker-embedding cloning still succeeds.
-                    if ((cloneAudio == null || cloneAudio.isEmpty()) && alignedRefText.isNotBlank()) {
-                        Log.w(TAG, "Qwen3 ICL clone returned empty for ${clonedVoice.displayName}; retrying x-vector clone mode")
-                        cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
-                            handle = handle,
-                            text = text.trim(),
-                            refWavPath = wavFile.absolutePath,
-                            refText = "",
-                            languageId = langId,
-                            nThreads = nThreads
-                        )
-                    }
-                    cloneAudio
-                }
-                cleanVoiceId == "qwen3_base_clone_default" -> {
-                    return@withContext SynthesisOutcome(
-                        pcmFloat24k = FloatArray(0),
-                        sampleRateHz = SAMPLE_RATE_HZ,
-                        hardwareBadge = HardwareStatusBadge.IDLE,
-                        engineSummary = "Record or import a 3s voice sample in Clone Studio (Qwen3 0.6B Base)",
-                        isFallbackNeuralPreview = true
-                    )
-                }
-                targetSpec == SPEC_DESIGN_17B -> {
-                    val designPrompt = profile.voiceDesignPrompt.trim()
-                        .ifBlank { "Warm, expressive studio narrator voice with crisp natural cadence." }
-                    Qwen3NativeBridge.nativeSynthesizeDesign(
-                        handle = handle,
+            var rawAudio = runNativeSynthesisLocked(
+                handle = handle,
+                targetSpec = targetSpec,
+                cleanVoiceId = cleanVoiceId,
+                clonedVoice = clonedVoice,
+                text = text,
+                profile = profile,
+                langId = langId,
+                nThreads = nThreads
+            )
+            if ((rawAudio == null || rawAudio.isEmpty()) && activeGpuOffload) {
+                val gpuErr = Qwen3NativeBridge.nativeGetLastError(handle).ifBlank { "empty GPU output" }
+                Log.w(TAG, "Qwen3 GPU offload synthesis failed ($gpuErr); failing over to CPU NEON for $targetSpec")
+                gpuOffloadDisabledForSession = true
+                val cpuHandle = ensureEngineLoadedLocked(targetSpec, false)
+                if (cpuHandle != 0L) {
+                    handle = cpuHandle
+                    rawAudio = runNativeSynthesisLocked(
+                        handle = cpuHandle,
+                        targetSpec = targetSpec,
+                        cleanVoiceId = cleanVoiceId,
+                        clonedVoice = clonedVoice,
                         text = text,
-                        instruct = designPrompt,
-                        languageId = langId,
-                        nThreads = nThreads
-                    )
-                }
-                else -> {
-                    val speaker = SPEAKER_MAP[cleanVoiceId] ?: "vivian"
-                    val instruct = if (activeInstructSupport) buildSentimentInstruct(text, profile) else ""
-                    Qwen3NativeBridge.nativeSynthesizeCustom(
-                        handle = handle,
-                        text = text,
-                        speaker = speaker,
-                        instruct = instruct,
-                        languageId = langId,
+                        profile = profile,
+                        langId = langId,
                         nThreads = nThreads
                     )
                 }
@@ -335,6 +317,89 @@ class Qwen3TtsEngine(
         }
     }
 
+    private fun runNativeSynthesisLocked(
+        handle: Long,
+        targetSpec: String,
+        cleanVoiceId: String,
+        clonedVoice: ClonedVoiceProfile?,
+        text: String,
+        profile: PurrProfile,
+        langId: Int,
+        nThreads: Int
+    ): FloatArray? = when {
+        clonedVoice != null -> {
+            val wavFile = File(clonedVoice.referenceWavPath)
+            if (!wavFile.exists() || wavFile.length() <= 44L) {
+                null
+            } else {
+                val rawRefText = clonedVoice.referenceTranscript.trim()
+                val alignedRefText = if (rawRefText.isNotEmpty() && rawRefText.last() !in charArrayOf('.', '!', '?', '…')) {
+                    "$rawRefText."
+                } else {
+                    rawRefText
+                }
+                // LunaVox concatenates encode(ref_text) + encode(text) directly without
+                // inserting a separator; prefixing a single leading space prevents the first
+                // target word from fusing onto ref_text's trailing period without a BPE space.
+                val alignedTargetText = if (alignedRefText.isNotEmpty()) {
+                    " ${text.trimStart()}"
+                } else {
+                    text.trim()
+                }
+                var cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
+                    handle = handle,
+                    text = alignedTargetText,
+                    refWavPath = wavFile.absolutePath,
+                    refText = alignedRefText,
+                    languageId = langId,
+                    nThreads = nThreads
+                )
+                // If ICL mode (with refText) fails or emits empty audio, retry once in
+                // x-vector-only mode (empty refText) so speaker-embedding cloning still succeeds.
+                if ((cloneAudio == null || cloneAudio.isEmpty()) && alignedRefText.isNotBlank()) {
+                    Log.w(TAG, "Qwen3 ICL clone returned empty for ${clonedVoice.displayName}; retrying x-vector clone mode")
+                    cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
+                        handle = handle,
+                        text = text.trim(),
+                        refWavPath = wavFile.absolutePath,
+                        refText = "",
+                        languageId = langId,
+                        nThreads = nThreads
+                    )
+                }
+                cloneAudio
+            }
+        }
+        cleanVoiceId == "qwen3_base_clone_default" -> null
+        targetSpec == SPEC_DESIGN_17B -> {
+            val sanitizedPrompt = profile.voiceDesignPrompt
+                .replace(Regex("[\\r\\n\\t]+"), " ")
+                .replace(Regex("\\s+"), " ")
+                .trim()
+                .take(520)
+                .ifBlank { "Warm, expressive studio narrator voice with crisp natural cadence." }
+            Qwen3NativeBridge.nativeSynthesizeDesign(
+                handle = handle,
+                text = text,
+                instruct = sanitizedPrompt,
+                languageId = langId,
+                nThreads = nThreads
+            )
+        }
+        else -> {
+            val speaker = SPEAKER_MAP[cleanVoiceId] ?: "vivian"
+            val instruct = if (activeInstructSupport) buildSentimentInstruct(text, profile) else ""
+            Qwen3NativeBridge.nativeSynthesizeCustom(
+                handle = handle,
+                text = text,
+                speaker = speaker,
+                instruct = instruct,
+                languageId = langId,
+                nThreads = nThreads
+            )
+        }
+    }
+
     override suspend fun evictResources() {
         mutex.withLock {
             if (activeHandle != 0L) {
@@ -370,20 +435,24 @@ class Qwen3TtsEngine(
         if (!isSpecDownloaded(specId)) return 0L
         val nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
         val libDir = Qwen3NativeBridge.nativeLibDir(context)
-        // ✨ ADRENO OPENCL GPU OFFLOAD: OFF = n_gpu_layers 0 (byte-identical CPU path);
-        // ON = n_gpu_layers -1 (llama.cpp offloads every layer it can — unsupported tensor
-        // types / missing vendor OpenCL fall back to CPU per-tensor, never fail-open).
-        val nGpuLayers = if (gpuOffload) -1 else 0
-        val handle = Qwen3NativeBridge.nativeCreate(dir.absolutePath, libDir, nThreads, nGpuLayers)
+        var effectiveGpu = gpuOffload
+        var handle = Qwen3NativeBridge.nativeCreate(dir.absolutePath, libDir, nThreads, if (effectiveGpu) -1 else 0)
+        if (handle == 0L && effectiveGpu) {
+            val err = Qwen3NativeBridge.nativeGetLastError(0L)
+            Log.w(TAG, "Qwen3 GPU offload load failed for $specId ($err); falling back to CPU NEON")
+            gpuOffloadDisabledForSession = true
+            effectiveGpu = false
+            handle = Qwen3NativeBridge.nativeCreate(dir.absolutePath, libDir, nThreads, 0)
+        }
         if (handle != 0L) {
             activeHandle = handle
             activeSpecId = specId
-            activeGpuOffload = gpuOffload
+            activeGpuOffload = effectiveGpu
             activeInstructSupport = runCatching {
                 parseInstructSupport(File(dir, "model_profile.json").readText())
             }.getOrDefault(false)
-            _statusFlow.value = if (gpuOffload) HardwareStatusBadge.GPU_FP16 else HardwareStatusBadge.CPU_NEON
-            Log.i(TAG, "Mounted Qwen3-TTS [$specId] (instruct=$activeInstructSupport, gpu=${if (gpuOffload) "Adreno OpenCL" else "off"}) from ${dir.absolutePath}")
+            _statusFlow.value = if (effectiveGpu) HardwareStatusBadge.GPU_FP16 else HardwareStatusBadge.CPU_NEON
+            Log.i(TAG, "Mounted Qwen3-TTS [$specId] (instruct=$activeInstructSupport, gpu=${if (effectiveGpu) "Adreno OpenCL" else "off"}) from ${dir.absolutePath}")
         }
         return handle
     }

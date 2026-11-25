@@ -403,6 +403,14 @@ class MangaDubStudioManager(
 
     fun selectProject(projectId: String) {
         _activeProjectId.value = projectId
+        _projects.value.firstOrNull { it.id == projectId }?.let { proj ->
+            prefs.edit()
+                .putString("selected_vision_model", proj.preferredVisionModel.name)
+                .putString("selected_openai_vision_engine_id", proj.selectedOpenAiVisionEngineId)
+                .apply()
+            _selectedVisionModel.value = proj.preferredVisionModel
+            _selectedOpenAiVisionEngineId.value = proj.selectedOpenAiVisionEngineId
+        }
     }
 
     fun deleteProject(projectId: String) {
@@ -843,12 +851,19 @@ class MangaDubStudioManager(
 
     fun reanalyzeChapterWithVision(projectId: String, chapterId: String, onComplete: (String) -> Unit) {
         if (_isBusy.value) return
+        val targetProj = _projects.value.firstOrNull { it.id == projectId }
+        val targetOpenAi = targetProj?.let { resolveActiveOpenAiEngine(it) }
+        val startDetail = if (targetOpenAi != null) {
+            "🌐 CONNECTING TO [${targetOpenAi.name}] FOR CHAPTER RESCAN..."
+        } else {
+            "🧠 MOUNTING ${(targetProj?.preferredVisionModel ?: _selectedVisionModel.value).shortLabel} FOR CHAPTER RESCAN..."
+        }
         activeJob = scope.launch {
             _isBusy.value = true
             _overallProgress.value = 0.05f
             startTelemetryTicker(
                 stage = MangaPipelineStage.VISION_SCAN,
-                detail = "🧠 MOUNTING GEMMA 4 VISION FOR CHAPTER RESCAN..."
+                detail = startDetail
             )
             try {
                 val updated = runVisionPhaseOnChapter(
@@ -897,6 +912,7 @@ class MangaDubStudioManager(
         val pageScanSpan = progressSpan * 0.70f
         val castingOffset = pageScanOffset + pageScanSpan
         val castingSpan = progressSpan * 0.22f
+        var activeApiEngine: SavedOpenAiVisionEngine? = null
 
         try {
             val activeVisionTier = _selectedVisionModel.value
@@ -915,6 +931,7 @@ class MangaDubStudioManager(
             }
             val expectedCharCount = proj.expectedCharacterCount.coerceIn(0, 24)
             val openAiEngine = resolveActiveOpenAiEngine(proj)
+            activeApiEngine = openAiEngine
             if (openAiEngine != null) {
                 appendLog("🌐 Using OpenAI Vision Engine: ${openAiEngine.name} (${openAiEngine.modelId})")
             } else if (proj.selectedOpenAiVisionEngineId.isNotBlank() && !repository.isOpenAiVisionModuleActive()) {
@@ -1231,9 +1248,16 @@ class MangaDubStudioManager(
                 )
             }
         } finally {
-            // Strict LMKD protection: release Gemma 4 LiteRT weights immediately after Vision + Casting pass
+            // Strict LMKD protection: release LiteRT Vision weights immediately if any local model was mounted
+            val hadLocalVlm = visionEngine.isLocalModelMounted
             visionEngine.unload()
-            appendLog("🧹 Evicted Gemma 4 Vision VRAM -> ready for Qwen3 VoiceDesign")
+            if (hadLocalVlm) {
+                appendLog("🧹 Evicted Local Vision VRAM -> ready for Qwen3 Voice Forge")
+            } else {
+                activeApiEngine?.let { api ->
+                    appendLog("🌐 [${api.name}] Storyboard & Casting complete -> transitioning to Qwen3 Voice Forge")
+                }
+            }
         }
 
         val recomputedRoster = recomputeCharacterLineCounts(roster, ch.copy(pages = updatedPages), proj.chapters.filter { it.id != chapterId })
@@ -1805,16 +1829,21 @@ class MangaDubStudioManager(
         // the video as silent subtitles (the "undubbed" ghosts). Now: build the complete dub
         // plan first, group jobs by mounted engine spec, synthesize each group contiguously
         // (one native mount per group), then reassemble in original reading order.
-        data class DubJob(val line: MangaSpeechLine, val profile: PurrProfile, val text: String)
+        data class DubJob(
+            val line: MangaSpeechLine,
+            val profile: PurrProfile,
+            val text: String,
+            val canRescueWithQwenCustom: Boolean,
+            val rescueGender: VoiceGender
+        )
 
+        val qwenCustomInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_CUSTOM_06B]?.state == DownloadState.INSTALLED
         val dubPlan = ArrayList<DubJob>(allLinesCount)
         val passThroughLines = HashMap<String, MangaSpeechLine>()
-        var linesDone = 0
         for (page in chapter.pages) {
             for (panel in page.panels) {
                 for (line in panel.lines) {
                     if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
-                    linesDone++
                     val textToSpeak = line.sanitizedText.ifBlank { line.rawText }.trim()
                     if (textToSpeak.isEmpty()) {
                         passThroughLines[line.id] = line
@@ -1855,7 +1884,16 @@ class MangaDubStudioManager(
                         passThroughLines[line.id] = line
                         continue
                     }
-                    dubPlan += DubJob(line, synthProfile, bubbleSpeechText)
+                    val userPinnedExplicit = !isNarratorLine && (charProfile?.assignedVoiceId?.isNotBlank() == true)
+                    val canRescue = qwenCustomInstalled && !userPinnedExplicit &&
+                        synthProfile.preferredBackend == BackendType.QWEN3_NATIVE &&
+                        synthProfile.selectedCartridgeId != Qwen3TtsEngine.SPEC_CUSTOM_06B
+                    val effectiveGender = when {
+                        isNarratorLine -> VoiceGender.FEMALE
+                        charProfile != null -> charProfile.gender
+                        else -> line.genderHint
+                    }
+                    dubPlan += DubJob(line, synthProfile, bubbleSpeechText, canRescue, effectiveGender)
                 }
             }
         }
@@ -1863,93 +1901,131 @@ class MangaDubStudioManager(
         // Group by the engine spec each job will mount (Qwen3: clone vs design vs custom) so
         // native model reloads happen once per GROUP instead of once per character alternation.
         val groupedJobs = dubPlan.groupBy { dubSpecGroupKey(it.profile) }
-
+        val totalDubJobs = dubPlan.size.coerceAtLeast(1)
+        var linesDone = 0
+        val rescueJobs = ArrayList<DubJob>()
         val renderedById = HashMap<String, MangaSpeechLine>(allLinesCount)
+
+        suspend fun synthesizeForJob(speakText: String, jobProfile: PurrProfile, isNarratorLine: Boolean) =
+            backendRouter.synthesizeSpeechChunk(
+                chunk = PurrChunk.Speech(
+                    text = speakText,
+                    role = if (isNarratorLine) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
+                    targetVoiceId = jobProfile.primaryVoiceId,
+                    speakingRate = jobProfile.baseSpeed,
+                    pitch = jobProfile.basePitch,
+                    volumeGain = 1.0f,
+                    sentiment = SentimentResult(),
+                    singleChunkOnly = true
+                ),
+                profile = jobProfile
+            )
+
+        suspend fun finalizeJobOutcome(job: DubJob, outcome: com.projectmika.purrtts.engine.SynthesisOutcome) {
+            linesDone++
+            val wavFile = File(audioDir, "${job.line.id}.wav")
+            val rawPcmFloat = outcome.pcmFloat24k
+            val pcmFloat = if (rawPcmFloat.isNotEmpty()) {
+                PurrDspProcessor.conditionDubClipOnset(rawPcmFloat, sampleRate)
+            } else {
+                rawPcmFloat
+            }
+            val durMs = if (pcmFloat.isNotEmpty()) {
+                val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
+                writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
+                ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
+            } else {
+                appendLog("⚠️ EMPTY AUDIO [${job.line.speakerName}] via ${outcome.engineSummary.take(160)} voice=${job.profile.primaryVoiceId} text=\"${job.text.take(40)}\" — line left undubbed")
+                maxOf(1400L, job.text.length * 60L)
+            }
+            renderedById[job.line.id] = job.line.copy(
+                renderedWavPath = if (pcmFloat.isNotEmpty()) wavFile.absolutePath else "",
+                durationMs = durMs
+            )
+            val statusVerb = if (pcmFloat.isNotEmpty()) "🎙️ VOICED" else "⚠️ UNDUBBED"
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "$statusVerb [${job.line.speakerName}] $linesDone/$totalDubJobs (${"%.1f".format(durMs / 1000f)}s via ${outcome.engineSummary.take(28)})",
+                progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / totalDubJobs.toFloat())),
+                itemCurrent = linesDone,
+                itemTotal = totalDubJobs,
+                addLog = true
+            )
+        }
+
         for ((groupKey, jobs) in groupedJobs) {
             reportTelemetry(
                 stage = MangaPipelineStage.VOICE_FORGE,
                 detail = "🎙️ MOUNTING ${groupKey.replace('_', ' ')} BATCH (${jobs.size} LINES)...",
-                progress = progressOffset + progressSpan * 0.05f,
+                progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / totalDubJobs.toFloat())),
                 itemCurrent = linesDone,
-                itemTotal = allLinesCount,
+                itemTotal = totalDubJobs,
                 addLog = true
             )
             for (job in jobs) {
                 if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
-                linesDone++
+                val nextIndex = (linesDone + 1).coerceAtMost(totalDubJobs)
                 reportTelemetry(
                     stage = MangaPipelineStage.VOICE_FORGE,
-                    detail = "🎙️ FORGING VOICE [${job.line.speakerName}] ($linesDone/$allLinesCount)...",
-                    progress = progressOffset + progressSpan * (0.05f + 0.52f * ((linesDone - 1).toFloat() / allLinesCount.toFloat())),
+                    detail = "🎙️ FORGING VOICE [${job.line.speakerName}] ($nextIndex/$totalDubJobs)...",
+                    progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / totalDubJobs.toFloat())),
                     itemCurrent = linesDone,
-                    itemTotal = allLinesCount,
+                    itemTotal = totalDubJobs,
                     addLog = true
                 )
 
-                suspend fun synthesizeOnce(speakText: String) = backendRouter.synthesizeSpeechChunk(
-                    chunk = PurrChunk.Speech(
-                        text = speakText,
-                        role = if (job.line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
-                        targetVoiceId = job.profile.primaryVoiceId,
-                        speakingRate = job.profile.baseSpeed,
-                        pitch = job.profile.basePitch,
-                        volumeGain = 1.0f,
-                        sentiment = SentimentResult(),
-                        singleChunkOnly = true
-                    ),
-                    profile = job.profile
-                )
-
-                var outcome = synthesizeOnce(job.text)
+                val isNarratorLine = job.line.speakerName.equals("NARRATOR", ignoreCase = true)
+                var outcome = synthesizeForJob(job.text, job.profile, isNarratorLine)
                 if (outcome.pcmFloat24k.isEmpty()) {
-                    // Attempt 2: identical retry after a cool-down (transient native mount
-                    // hiccups under memory pressure right after the vision-phase evictions).
+                    // Attempt 2: identical retry after a cool-down
                     delay(350)
-                    outcome = synthesizeOnce(job.text)
+                    outcome = synthesizeForJob(job.text, job.profile, isNarratorLine)
                 }
                 if (outcome.pcmFloat24k.isEmpty()) {
-                    // Attempt 3: diversified token stream — the upstream LunaVox codec
-                    // occasionally emits zero audio for a specific text ("empty audio during
-                    // speech codec decoding"), and an identical retry repeats the failure when
-                    // sampling degenerated. The variant rebuilds the line as plain words.
+                    // Attempt 3: diversified plain-words token stream
                     val variant = MangaTextBender.qwenRetryTextVariant(job.text)
                     if (variant.isNotEmpty() && variant != job.text) {
-                        outcome = synthesizeOnce(variant)
+                        outcome = synthesizeForJob(variant, job.profile, isNarratorLine)
                     }
                 }
-
-                val wavFile = File(audioDir, "${job.line.id}.wav")
-                    val rawPcmFloat = outcome.pcmFloat24k
-                    val pcmFloat = if (rawPcmFloat.isNotEmpty()) {
-                        PurrDspProcessor.conditionDubClipOnset(rawPcmFloat, sampleRate)
-                    } else {
-                        rawPcmFloat
-                    }
-                    val durMs = if (pcmFloat.isNotEmpty()) {
-                        val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
-                        writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
-                        ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
-                    } else {
-                        // ✨ FAILURE VISIBILITY: an empty synthesis is never silent to the operator
-                        // — name the engine summary, the voice, and the offending text so LunaVox
-                        // codec failures are diagnosable from the cooking console alone.
-                        appendLog("⚠️ EMPTY AUDIO [${job.line.speakerName}] via ${outcome.engineSummary.take(48)} voice=${job.profile.primaryVoiceId} text=\"${job.text.take(40)}\" — line left undubbed")
-                        maxOf(1400L, job.text.length * 60L)
-                    }
-                    renderedById[job.line.id] = job.line.copy(
-                        renderedWavPath = if (pcmFloat.isNotEmpty()) wavFile.absolutePath else "",
-                        durationMs = durMs
-                    )
-                    reportTelemetry(
-                        stage = MangaPipelineStage.VOICE_FORGE,
-                        detail = "🎙️ VOICED [${job.line.speakerName}] $linesDone/$allLinesCount (${"%.1f".format(durMs / 1000f)}s via ${outcome.engineSummary.take(22)})",
-                        progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / allLinesCount.toFloat())),
-                        itemCurrent = linesDone,
-                        itemTotal = allLinesCount,
-                        addLog = true
-                    )
+                if (outcome.pcmFloat24k.isEmpty() && job.canRescueWithQwenCustom) {
+                    appendLog("🔄 Queueing Qwen3 0.6B CustomVoice rescue for [${job.line.speakerName}] (${outcome.engineSummary.take(120)})")
+                    rescueJobs += job
+                    continue
                 }
+                finalizeJobOutcome(job, outcome)
             }
+        }
+
+        if (rescueJobs.isNotEmpty()) {
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "🎙️ MOUNTING QWEN CUSTOM RESCUE BATCH (${rescueJobs.size} LINES)...",
+                progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / totalDubJobs.toFloat())),
+                itemCurrent = linesDone,
+                itemTotal = totalDubJobs,
+                addLog = true
+            )
+            for (job in rescueJobs) {
+                if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+                val rescueVoiceId = resolveQwenCustomFallbackVoiceId(job.rescueGender, job.line.speakerName)
+                val rescueProfile = job.profile.copy(
+                    primaryVoiceId = rescueVoiceId,
+                    preferredBackend = BackendType.QWEN3_NATIVE,
+                    selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
+                    voiceDesignPrompt = ""
+                )
+                val isNarratorLine = job.line.speakerName.equals("NARRATOR", ignoreCase = true)
+                var rescueOutcome = synthesizeForJob(job.text, rescueProfile, isNarratorLine)
+                if (rescueOutcome.pcmFloat24k.isEmpty()) {
+                    val variant = MangaTextBender.qwenRetryTextVariant(job.text)
+                    if (variant.isNotEmpty()) {
+                        rescueOutcome = synthesizeForJob(variant, rescueProfile, isNarratorLine)
+                    }
+                }
+                finalizeJobOutcome(job.copy(profile = rescueProfile), rescueOutcome)
+            }
+        }
 
         // Reassemble in original reading order (skipped lines pass through untouched).
         val renderedPages = ArrayList<MangaPageEntry>(chapter.pages.size)
@@ -2113,7 +2189,8 @@ class MangaDubStudioManager(
             if (ch !in charsToLock) continue
             if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
 
-            val promptHash = Integer.toHexString("${ch.voiceDesignPrompt.trim()}|$targetCloneEngineId".hashCode())
+            val compactSeedDesignPrompt = MangaTextBender.compactQwenVoiceDesignPrompt(ch.voiceDesignPrompt, ch.gender)
+            val promptHash = Integer.toHexString("$compactSeedDesignPrompt|$targetCloneEngineId".hashCode())
             val existingCloneValid = ch.autoCloneVoiceId.isNotBlank() &&
                 ch.autoClonePromptHash == promptHash &&
                 File(ch.autoCloneSeedWavPath).let { it.isFile && it.length() > 2048L } &&
@@ -2123,7 +2200,7 @@ class MangaDubStudioManager(
             // ✨ EXPRESSIVE SEED LAW (v1.9.7): anchor the clone on the character's OWN transcribed
             // lines (register & excitement variety) instead of one generic neutral sentence — the
             // 0.6B cloner inherits the seed's prosody, so a flat seed meant flat dubbed voices.
-            val seedTranscript = MangaTextBender.composeVoiceSeedTranscript(
+            var seedTranscript = MangaTextBender.composeVoiceSeedTranscript(
                 chapter.pages.asSequence()
                     .flatMap { it.panels.asSequence() }
                     .flatMap { it.lines.asSequence() }
@@ -2141,8 +2218,8 @@ class MangaDubStudioManager(
                 addLog = true
             )
 
-            val designProfile = designBase.copy(voiceDesignPrompt = ch.voiceDesignPrompt)
-            val outcome = backendRouter.synthesizeSpeechChunk(
+            val designProfile = designBase.copy(voiceDesignPrompt = compactSeedDesignPrompt)
+            var outcome = backendRouter.synthesizeSpeechChunk(
                 chunk = PurrChunk.Speech(
                     text = seedTranscript,
                     role = if (ch.name.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
@@ -2150,14 +2227,32 @@ class MangaDubStudioManager(
                     speakingRate = 1.0f,
                     pitch = 1.0f,
                     volumeGain = 1.0f,
-                    sentiment = SentimentResult()
+                    sentiment = SentimentResult(),
+                    singleChunkOnly = true
                 ),
                 profile = designProfile
             )
             synthesizedAnySeed = true
+            if (outcome.pcmFloat24k.isEmpty() && seedTranscript != MangaTextBender.FALLBACK_VOICE_SEED) {
+                delay(300)
+                seedTranscript = MangaTextBender.FALLBACK_VOICE_SEED
+                outcome = backendRouter.synthesizeSpeechChunk(
+                    chunk = PurrChunk.Speech(
+                        text = seedTranscript,
+                        role = SegmentRole.DIALOGUE,
+                        targetVoiceId = "qwen3_design_custom",
+                        speakingRate = 1.0f,
+                        pitch = 1.0f,
+                        volumeGain = 1.0f,
+                        sentiment = SentimentResult(),
+                        singleChunkOnly = true
+                    ),
+                    profile = designProfile
+                )
+            }
             val rawSeedPcm = outcome.pcmFloat24k
             if (rawSeedPcm.isEmpty()) {
-                appendLog("⚠️ Seed clip empty for [${ch.name}]; keeping direct VoiceDesign fallback")
+                appendLog("⚠️ Seed clip empty for [${ch.name}] (${outcome.engineSummary.take(120)}); keeping direct VoiceDesign fallback")
                 continue
             }
             val cleanSeedPcm = PurrDspProcessor.prepareCleanCloneSeedPcm(
@@ -2218,12 +2313,22 @@ class MangaDubStudioManager(
         return updatedProj
     }
 
+    private fun resolveQwenCustomFallbackVoiceId(gender: VoiceGender, speakerKey: String): String {
+        val pool = when (gender) {
+            VoiceGender.FEMALE -> listOf("qwen3_vivian", "qwen3_serena", "qwen3_sohee", "qwen3_ono_anna")
+            VoiceGender.MALE -> listOf("qwen3_ryan", "qwen3_aiden", "qwen3_dylan", "qwen3_uncle_fu")
+            VoiceGender.ANDROGYNOUS -> listOf("qwen3_serena", "qwen3_aiden")
+        }
+        val idx = (speakerKey.trim().uppercase(Locale.ROOT).hashCode() and 0x7FFFFFFF) % pool.size
+        return pool[idx]
+    }
+
     /**
      * ✨ CARTRIDGE GUARD (v1.9.7) ✨
      * Clone descriptors live in persisted state regardless of cartridge installation, and the
      * router deliberately never hijacks clone requests with CORE_OS speech — so routing to an
      * uninstalled clone yields EMPTY audio (silent subtitle ghosts). Detect it here and fall
-     * through to the direct VoiceDesign / matcher fallbacks instead.
+     * through to the direct VoiceDesign / Qwen CustomVoice / matcher fallbacks instead.
      */
     private fun cloneDescriptorUnavailable(descriptor: VoiceDescriptor): Boolean {
         if (!descriptor.isCloned) return false
@@ -2239,35 +2344,59 @@ class MangaDubStudioManager(
         isNarrator: Boolean = false,
         genderHint: VoiceGender = VoiceGender.ANDROGYNOUS
     ): PurrProfile {
+        val modelStates = repository.state.value.modelStates
+        val designInstalled = modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+        val customInstalled = modelStates[Qwen3TtsEngine.SPEC_CUSTOM_06B]?.state == DownloadState.INSTALLED
+
         // 0. ✨ MIKA IS THE MANGA DUB NARRATOR (v1.9.8): narration lines resolve to M.I.K.A.'s
         // hardcoded Qwen3 1.7B VoiceDesign voice directly — no roster entry, no casting-pass
-        // override, no clone lock. Falls through to the smart matcher only if the 1.7B
-        // VoiceDesign cartridge isn't installed.
+        // override, no clone lock. Falls through to Qwen3 0.6B CustomVoice / matcher if 1.7B absent.
         if (isNarrator) {
-            val narratorDesignInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
-            if (narratorDesignInstalled) {
+            if (designInstalled) {
                 return baseProfile.copy(
                     primaryVoiceId = "qwen3_design_custom",
                     preferredBackend = BackendType.QWEN3_NATIVE,
-                    selectedCartridgeId = "rom_qwen3_custom_06b",
-                    voiceDesignPrompt = MangaTextBender.MIKA_NARRATOR_VOICE_PROMPT,
+                    selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
+                    voiceDesignPrompt = MangaTextBender.compactQwenVoiceDesignPrompt(
+                        MangaTextBender.MIKA_NARRATOR_VOICE_PROMPT,
+                        VoiceGender.FEMALE
+                    ),
+                    baseSpeed = baseProfile.baseSpeed.coerceIn(0.6f, 1.8f),
+                    basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
+                )
+            }
+            if (customInstalled) {
+                return baseProfile.copy(
+                    primaryVoiceId = "qwen3_vivian",
+                    preferredBackend = BackendType.QWEN3_NATIVE,
+                    selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
                     baseSpeed = baseProfile.baseSpeed.coerceIn(0.6f, 1.8f),
                     basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
                 )
             }
         }
         // 0.5 ✨ UNIVERSAL CAST COVERAGE (v2.0.0): no spoken line EVER falls back to the user's
-        // default system-TTS voice. Lines whose speaker the VLM could not attribute to a cast
-        // member synthesize through Qwen3 1.7B VoiceDesign with a deterministic expressive role
-        // voice keyed by the line's gender hint (Master's law: always a custom QWEN voice).
+        // default system-TTS voice. Lines whose speaker could not attribute to a cast member
+        // prioritize Qwen3 1.7B VoiceDesign, then Qwen3 0.6B CustomVoice.
         if (character == null) {
-            val roleDesignInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
-            if (roleDesignInstalled) {
+            if (designInstalled) {
                 return baseProfile.copy(
                     primaryVoiceId = "qwen3_design_custom",
                     preferredBackend = BackendType.QWEN3_NATIVE,
-                    selectedCartridgeId = "rom_qwen3_custom_06b",
-                    voiceDesignPrompt = MangaTextBender.genericRoleVoicePrompt(genderHint),
+                    selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
+                    voiceDesignPrompt = MangaTextBender.compactQwenVoiceDesignPrompt(
+                        MangaTextBender.genericRoleVoicePrompt(genderHint),
+                        genderHint
+                    ),
+                    baseSpeed = baseProfile.baseSpeed.coerceIn(0.6f, 1.8f),
+                    basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
+                )
+            }
+            if (customInstalled) {
+                return baseProfile.copy(
+                    primaryVoiceId = resolveQwenCustomFallbackVoiceId(genderHint, "NARRATOR"),
+                    preferredBackend = BackendType.QWEN3_NATIVE,
+                    selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
                     baseSpeed = baseProfile.baseSpeed.coerceIn(0.6f, 1.8f),
                     basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
                 )
@@ -2275,7 +2404,7 @@ class MangaDubStudioManager(
             return baseProfile
         }
 
-        // 1. Explicit assigned voice (including manual Clone Studio voices)
+        // 1. Explicit assigned voice (including manual Clone Studio voices or non-Qwen overrides)
         if (character.assignedVoiceId.isNotBlank()) {
             val matched = availableVoices.firstOrNull { it.id == character.assignedVoiceId }
             if (matched != null && !cloneDescriptorUnavailable(matched)) {
@@ -2300,27 +2429,35 @@ class MangaDubStudioManager(
                     selectedCartridgeId = autoCloneMatched.cartridgeId,
                     sherpaFamily = autoCloneMatched.sherpaFamily ?: baseProfile.sherpaFamily,
                     baseSpeed = (baseProfile.baseSpeed * character.speedScale).coerceIn(0.6f, 1.8f),
-                    // ✨ NO PITCH RE-SHIFT (v1.9.7): the seed clip already carries the designed
-                    // register from its VoiceDesign prompt; re-shifting by pitchScale here
-                    // double-applies the design and adds cubic-interpolation artifacts on top
-                    // of the cloned timbre. Speed stays (WSOLA is far gentler than pitch shifting).
                     basePitch = baseProfile.basePitch.coerceIn(0.88f, 1.12f)
                 )
             }
         }
 
         // 3. Direct Qwen3 1.7B VoiceDesign fallback (when clone lock is OFF or no cloner cartridge
-        // is installed). Blank prompts resolve to the deterministic gendered role voice — a cast
-        // member is NEVER left on the user's default system voice (Universal Cast Coverage).
-        val designInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]?.state == DownloadState.INSTALLED
+        // is installed). Blank prompts resolve to the deterministic gendered role voice.
         if (designInstalled) {
             return baseProfile.copy(
                 primaryVoiceId = "qwen3_design_custom",
                 preferredBackend = BackendType.QWEN3_NATIVE,
-                selectedCartridgeId = "rom_qwen3_custom_06b",
-                voiceDesignPrompt = character.voiceDesignPrompt.ifBlank {
-                    MangaTextBender.genericRoleVoicePrompt(character.gender)
-                },
+                selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
+                voiceDesignPrompt = MangaTextBender.compactQwenVoiceDesignPrompt(
+                    character.voiceDesignPrompt.ifBlank {
+                        MangaTextBender.genericRoleVoicePrompt(character.gender)
+                    },
+                    character.gender
+                ),
+                baseSpeed = (baseProfile.baseSpeed * character.speedScale).coerceIn(0.6f, 1.8f),
+                basePitch = (baseProfile.basePitch * character.pitchScale).coerceIn(0.88f, 1.12f)
+            )
+        }
+
+        // 3.5 Gendered Qwen3 0.6B CustomVoice fallback (keeps Qwen-first priority before non-Qwen engines)
+        if (customInstalled) {
+            return baseProfile.copy(
+                primaryVoiceId = resolveQwenCustomFallbackVoiceId(character.gender, character.name),
+                preferredBackend = BackendType.QWEN3_NATIVE,
+                selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
                 baseSpeed = (baseProfile.baseSpeed * character.speedScale).coerceIn(0.6f, 1.8f),
                 basePitch = (baseProfile.basePitch * character.pitchScale).coerceIn(0.88f, 1.12f)
             )

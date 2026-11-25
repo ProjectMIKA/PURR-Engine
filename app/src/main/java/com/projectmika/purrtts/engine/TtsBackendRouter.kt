@@ -306,7 +306,10 @@ class TtsBackendRouter(
         if (voiceId.startsWith(ExternalProxyEngine.SYS_VOICE_PREFIX) || voiceId == "core_os_auto") {
             return BackendType.CORE_OS
         }
-        val cloned = repository.state.value.clonedVoices.firstOrNull { it.id == voiceId }
+        val cleanId = voiceId.substringAfter(':')
+        val cloned = repository.state.value.clonedVoices.firstOrNull {
+            it.id == voiceId || it.id == cleanId
+        }
         if (cloned != null) {
             return when (cloned.resolvedCloneEngineId) {
                 "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
@@ -315,7 +318,15 @@ class TtsBackendRouter(
             }
         }
 
-        val descriptor = repository.allAvailableVoices().firstOrNull { it.id == voiceId }
+        // Route Qwen3 VoiceDesign / Base / Custom voices straight to QWEN3_NATIVE whenever their
+        // native model files are installed, even if the parent hub card isn't manually slotted.
+        if (cleanId == "qwen3_design_custom" || cleanId == "qwen3_base_clone_default" || cleanId.startsWith("qwen3_")) {
+            if (qwen3Engine.isSpecReadyForVoice(cleanId)) {
+                return BackendType.QWEN3_NATIVE
+            }
+        }
+
+        val descriptor = repository.allAvailableVoices().firstOrNull { it.id == cleanId || it.id == voiceId }
         if (descriptor != null && repository.isCartridgeSlotted(descriptor.cartridgeId)) {
             return descriptor.engine
         }

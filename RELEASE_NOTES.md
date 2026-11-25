@@ -1,3 +1,31 @@
+# 🌌 PURR-TTS v2.2.2 // Qwen3 Dub Fix, Strict API/Local Vision Lock & Batch Counter Fix
+
+### ✨ What's New since v2.2.1
+
+Critical fix for Manga Dub Studio Qwen3 voice synthesis (`Failed to generate speech` / `Seed clip empty`), strict API-vs-Local Vision LLM isolation, and exact dub progress counting. 🎙️🔒🌐
+
+* **🔊 Root Cause Fix for Qwen3 `Failed to generate speech` & `Seed clip empty` (`patches/lunavox_opencl_gpu_offload.patch`, `purr_qwen3_jni.cpp`, `MangaDubModels`)**:
+  * **LunaVox 4D M-RoPE Batch Overflow Fix**: Qwen3-TTS `TalkerPredictor::run_prefill` passes 4D M-RoPE position arrays (`n_prompt_tokens * 4`), while `talker_batch_` was capped at `n_ctx` (`768` / `1024`). Any prompt ≥193 tokens (all cast VoiceDesign prompts and clone seeds) deterministically tripped `pos_count exceeds batch capacity`. Scaled `talker_batch_` capacity to `min(n_ctx * 4, 8192)` and clamped `max_frames` inside `talker_ctx_cap_ = 2048` so prompts and seeds never overflow context.
+  * **Safe Decode Token Scaling & Sampling (`purr_qwen3_jni.cpp`)**: Replaced `tlen * 14` (which pushed `141+` char clone seeds & bubbles past `talker_n_ctx = 2048`) with safe 12.5 Hz bounds (`default 400`, scaled up to `1400` only for >200-char monologues), and tuned sampling to `temperature = 0.78 / top_p = 0.95`.
+  * **Instruct Token-Diet Compaction**: `compactQwenVoiceDesignPrompt` strips reasoning tags/markdown and prevents `composePrompt` + `nuance` + `voice_design_prompt` duplication on verbose API LLM outputs, while `composeVoiceSeedTranscript` caps seed clips cleanly at `<= 125` chars.
+* **⚡ Automatic Qwen3 GPU → CPU Failover & Qwen-First Priority (`Qwen3TtsEngine` / `TtsBackendRouter` / `MangaDubStudioManager`)**:
+  * If Adreno OpenCL offload fails at load or synthesis time, `Qwen3TtsEngine` automatically falls back to CPU NEON and retries cleanly.
+  * Qwen3 voices (`VoiceDesign`, `Base Clone`, `CustomVoice`) route straight to `QWEN3_NATIVE` whenever downloaded, and `MangaDubStudioManager` adds a contiguous `QWEN_CUSTOM_RESCUE` pass (plus Qwen3 0.6B CustomVoice fallback before non-Qwen engines) so dubs stay Qwen-first unless a character is manually edited to another engine.
+* **🔒 Strict Vision Engine Isolation (`LiteRtGemmaVisionEngine` / `MangaDubStudioManager` / `MangaDubStudioModuleWindow`)**:
+  * Selecting an API LLM (`TOOL-12`) now locks **100% of Storyboard, Page OCR, Consolidation, and Casting** onto the selected API endpoint (with automatic 1x API retry) and transitions cleanly straight to Qwen3 Voice Forge — it can **never** fall back to mounting a local `.litertlm` VLM on timeout, blank reply, or silent splash pages (`"panels":[]`).
+  * Switching projects syncs the active Vision LLM selection cleanly with each project.
+* **📊 Dub Progress Counter & Full Diagnostics Fix (`MangaDubStudioManager`)**:
+  * Fixed the Voice Forge progress counter overflowing past 100% (e.g. `28/16`) by removing a duplicate increment during `dubPlan` construction, and widened `⚠️ EMPTY AUDIO` failure summaries to 160 chars.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.2.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `43`).
+2. **`PURR-TTS_V2.2.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.2.1 // LunaVox Empty-Audio Retry Ladder
 
 ### ✨ What's New since v2.2.0

@@ -693,19 +693,55 @@ object MangaTextBender {
         val picked = ArrayList<String>()
         var total = 0
         for (raw in sampleLines) {
-            if (picked.size >= 3 || total >= 180) break
+            if (picked.size >= 3 || total >= 125) break
             var line = raw.trim().trimEnd(',', ';', ':', '…', '-', '—', '.')
             if (line.length < 2) continue
-            if (picked.isEmpty() && line.length > 180) {
-                line = line.take(180).trimEnd().substringBeforeLast(' ', line.take(180).trimEnd())
+            if (picked.isEmpty() && line.length > 125) {
+                line = line.take(125).trimEnd().substringBeforeLast(' ', line.take(125).trimEnd())
             }
-            if (picked.isNotEmpty() && total + line.length + 1 > 180) break
+            if (picked.isNotEmpty() && total + line.length + 1 > 125) break
             picked += line
             total += line.length + 1
         }
         if (picked.isEmpty()) return FALLBACK_VOICE_SEED
         val joined = picked.joinToString(" ")
         return if (joined.lastOrNull() in setOf('.', '!', '?', '…')) joined else "$joined."
+    }
+
+    /**
+     * ✨ QWEN3 INSTRUCT TOKEN-DIET COMPACTOR (v2.2.2) ✨
+     * Keeps VoiceDesign `instruct` descriptions clean, single-line, and compact so LunaVox Talker
+     * prefill stays fast and well inside context/batch ceilings across verbose API LLM outputs.
+     */
+    fun compactQwenVoiceDesignPrompt(
+        rawPrompt: String,
+        fallbackGender: VoiceGender = VoiceGender.ANDROGYNOUS,
+        maxWords: Int = 52,
+        maxChars: Int = 340
+    ): String {
+        val stripped = rawPrompt
+            .replace(Regex("""<(?:thought|thinking)>[\s\S]*?</(?:thought|thinking)>""", RegexOption.IGNORE_CASE), " ")
+            .replace(Regex("""[`*_#>]+"""), " ")
+            .replace(Regex("""[\r\n\t]+"""), " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+        if (stripped.isBlank() || stripped.none { it.isLetterOrDigit() }) {
+            return genericRoleVoicePrompt(fallbackGender)
+        }
+        val words = stripped.split(' ').filter { it.isNotBlank() }
+        val builder = StringBuilder()
+        var wordCount = 0
+        for (w in words) {
+            if (wordCount >= maxWords) break
+            val nextLen = if (builder.isEmpty()) w.length else builder.length + 1 + w.length
+            if (nextLen > maxChars) break
+            if (builder.isNotEmpty()) builder.append(' ')
+            builder.append(w)
+            wordCount++
+        }
+        val compacted = builder.toString().trim().trimEnd(',', ';', ':', '-', '—')
+        if (compacted.isBlank()) return genericRoleVoicePrompt(fallbackGender)
+        return if (compacted.lastOrNull() in setOf('.', '!', '?')) compacted else "$compacted."
     }
 }
 
@@ -1917,10 +1953,13 @@ object MangaVisionResponseParser {
 
         if (jsonCandidate != null) {
             val sanitizedJson = cleanupTrailingCommas(jsonCandidate)
+            var hasExplicitPanelsArray = false
             val parsedJson = runCatching {
                 val root = lenientJson.parseToJsonElement(sanitizedJson) as? JsonObject ?: return@runCatching null
                 val summary = (root["story_summary"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-                val panelsArr = root["panels"] as? JsonArray ?: JsonArray(emptyList())
+                val rawPanels = root["panels"] as? JsonArray
+                hasExplicitPanelsArray = rawPanels != null
+                val panelsArr = rawPanels ?: JsonArray(emptyList())
                 val knownNames = existingCharacters.map { it.name }.distinct()
 
                 val rawPanelNums = panelsArr.mapIndexedNotNull { idx, elem ->
@@ -1950,7 +1989,7 @@ object MangaVisionResponseParser {
                 ParsedPageAnalysis(thoughtTrace = thoughtTrace, storySummary = summary, panels = parsedPanels)
             }.getOrNull()
 
-            if (parsedJson != null && parsedJson.panels.isNotEmpty()) {
+            if (parsedJson != null && (parsedJson.panels.isNotEmpty() || hasExplicitPanelsArray || parsedJson.storySummary.isNotBlank())) {
                 return parsedJson
             }
         }
@@ -2304,7 +2343,9 @@ object MangaVisionResponseParser {
         hasStructuredAttrs: Boolean
     ): String {
         val wordCount = rawPrompt.trim().split(Regex("""\s+""")).count { it.isNotBlank() }
-        if (!hasStructuredAttrs && wordCount >= 28) return rawPrompt
+        if (!hasStructuredAttrs && wordCount >= 18) {
+            return MangaTextBender.compactQwenVoiceDesignPrompt(rawPrompt, gender, maxWords = 58, maxChars = 380)
+        }
 
         val vdGender = when (gender) {
             VoiceGender.FEMALE -> VoiceDesignGender.FEMALE
@@ -2366,13 +2407,29 @@ object MangaVisionResponseParser {
         val acoustics = runCatching { VoiceDesignAcoustics.valueOf(strField("acoustics")) }.getOrElse {
             VoiceDesignAcoustics.CLOSE_MIC_STUDIO
         }
-        val personaRole = (update["persona_role"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
-            .ifBlank { visualDesc.takeIf { it.isNotBlank() } ?: "Manga character ($characterName)" }
-        val customNuance = ((update["nuance"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim() +
-            (if (rawPrompt.isNotBlank()) " $rawPrompt" else "")).trim()
-            .ifBlank { "Distinct, emotionally expressive manga voice acting with steady pitch identity across lines." }
+        val personaRoleRaw = (update["persona_role"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+            .ifBlank { visualDesc.trim() }
+        val personaRole = personaRoleRaw
+            .split(Regex("""\s+"""))
+            .filter { it.isNotBlank() }
+            .take(10)
+            .joinToString(" ")
+            .ifBlank { "manga character" }
 
-        return QwenVoiceDesignBuilder.composePrompt(
+        // Keep nuance concise and never duplicate rawPrompt + nuance on top of composePrompt's core phrase.
+        val nuanceField = (update["nuance"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+        val chosenNuanceSource = when {
+            nuanceField.isNotBlank() -> nuanceField
+            rawPrompt.isNotBlank() -> rawPrompt
+            else -> "Steady expressive anime dialogue cadence."
+        }
+        val customNuance = chosenNuanceSource
+            .split(Regex("""\s+"""))
+            .filter { it.isNotBlank() }
+            .take(14)
+            .joinToString(" ")
+
+        val compiled = QwenVoiceDesignBuilder.composePrompt(
             VoiceDesignSpec(
                 gender = vdGender,
                 age = age,
@@ -2385,6 +2442,12 @@ object MangaVisionResponseParser {
                 personaRole = personaRole,
                 customNuance = customNuance
             )
+        )
+        return MangaTextBender.compactQwenVoiceDesignPrompt(
+            rawPrompt = compiled,
+            fallbackGender = gender,
+            maxWords = 78,
+            maxChars = 520
         )
     }
 

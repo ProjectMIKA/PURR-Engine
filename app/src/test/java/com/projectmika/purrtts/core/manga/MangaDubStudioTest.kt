@@ -1677,4 +1677,66 @@ class MangaDubStudioTest {
         assertTrue("z-ai/glm-5.3-flash" in parsedModels)
         assertTrue("cline-pass/kimi-k3" in parsedModels)
     }
+
+    @Test
+    fun `qwen voice design compactor bounds verbose api prompts and strips thought tags`() {
+        val messyVerbose = """
+            <thought>Internal reasoning about the aristocrat character voice.</thought>
+            **Rich theatrical** heiress voice
+            ${"word ".repeat(140)}
+        """.trimIndent()
+        val compacted = MangaTextBender.compactQwenVoiceDesignPrompt(messyVerbose, VoiceGender.FEMALE)
+        assertFalse(compacted.contains("thought", ignoreCase = true))
+        assertFalse(compacted.contains("\n"))
+        assertFalse(compacted.contains("**"))
+        assertTrue(compacted.length <= 345)
+        assertTrue(compacted.split(Regex("\\s+")).size <= 53)
+
+        val roster = listOf(MangaCharacterProfile(id = "c1", name = "OJOU_SAMA", gender = VoiceGender.FEMALE))
+        val verboseStructured = """
+            {
+              "characters": [
+                {
+                  "name": "OJOU_SAMA",
+                  "gender": "female",
+                  "age": "YOUNG_ADULT",
+                  "pitch": "BRIGHT_UPPER_MID",
+                  "timbres": ["CRISP_CLEAR", "BRIGHT_SPARKLY"],
+                  "pace": "NATURAL_FLOWING",
+                  "delivery": "PLAYFUL_TEASING",
+                  "accent": "ANIME_EXPRESSIVE",
+                  "acoustics": "CLOSE_MIC_STUDIO",
+                  "persona_role": "${"heiress ".repeat(25)}",
+                  "nuance": "${"refined crisp haughty cadence ".repeat(12)}",
+                  "voice_design_prompt": "${"duplicate long voice assay ".repeat(35)}"
+                }
+              ]
+            }
+        """.trimIndent()
+        val updated = MangaVisionResponseParser.parseVoiceDesignRoster(verboseStructured, roster)
+        assertEquals(1, updated.size)
+        assertTrue(updated[0].voiceDesignPrompt.length <= 525)
+        assertTrue(updated[0].voiceDesignPrompt.split(Regex("\\s+")).size <= 79)
+    }
+
+    @Test
+    fun `composeVoiceSeedTranscript stays compact and parsePageAnalysis preserves valid empty splash pages`() {
+        val seed = MangaTextBender.composeVoiceSeedTranscript(
+            listOf(
+                "One two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen.",
+                "Another long follow-up sentence that pushes past one hundred twenty-five characters easily.",
+                "Third line should not bloat past the compact ceiling."
+            )
+        )
+        assertTrue("Seed should stay compact for Qwen3 ICL prefill: len=${seed.length}", seed.length <= 130)
+
+        val silentSplash = MangaVisionResponseParser.parsePageAnalysis(
+            rawResponse = """{"story_summary":"Quiet wide shot overlooking the manor.","panels":[]}""",
+            panelCount = 1,
+            existingCharacters = emptyList(),
+            includeNonBubbleText = false
+        )
+        assertEquals("Quiet wide shot overlooking the manor.", silentSplash.storySummary)
+        assertTrue(silentSplash.panels.isEmpty())
+    }
 }

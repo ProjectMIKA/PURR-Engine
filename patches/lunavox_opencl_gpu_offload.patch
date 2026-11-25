@@ -40,7 +40,7 @@ index 6f75211..f616d75 100644
      void * devices;
      void * tensor_buft_overrides;
 diff --git a/src/talker_predictor_llama.cpp b/src/talker_predictor_llama.cpp
-index 37e780e..6446947 100644
+index 37e780e..beacae8 100644
 --- a/src/talker_predictor_llama.cpp
 +++ b/src/talker_predictor_llama.cpp
 @@ -47,10 +47,10 @@ bool TalkerPredictor::load(
@@ -56,3 +56,25 @@ index 37e780e..6446947 100644
          return false;
      }
  
+@@ -245,7 +245,9 @@ bool TalkerPredictor::ensure_talker_runtime(int32_t request_ctx) {
+         }
+     }
+ 
+-    const int64_t desired_batch_cap64 = std::min<int64_t>((int64_t) talker_ctx_.n_ctx(), 2048LL);
++    // Qwen3-TTS run_prefill encodes 4D M-RoPE positions (pos_count = n_prompt_tokens * 4),
++    // and llama_batch_init allocates batch.pos with desired_batch_cap entries.
++    const int64_t desired_batch_cap64 = std::min<int64_t>((int64_t) talker_ctx_.n_ctx() * 4LL, 8192LL);
+     if (desired_batch_cap64 <= 0 || desired_batch_cap64 > (int64_t) std::numeric_limits<int32_t>::max()) {
+         error_msg_ = "Talker batch capacity overflow";
+         return false;
+@@ -734,6 +736,10 @@ bool TalkerPredictor::generate(
+         error_msg_ = "Failed to estimate prompt token budget";
+         return false;
+     }
++    if (talker_ctx_cap_ > prompt_tokens + 64 &&
++        (int64_t) prompt_tokens + (int64_t) max_frames + 32LL > (int64_t) talker_ctx_cap_) {
++        max_frames = talker_ctx_cap_ - prompt_tokens - 32;
++    }
+     const int64_t required_ctx64 = (int64_t) prompt_tokens + (int64_t) max_frames + 32LL;
+     if (required_ctx64 > (int64_t) std::numeric_limits<int32_t>::max()) {
+         error_msg_ = "Context requirement overflow";
