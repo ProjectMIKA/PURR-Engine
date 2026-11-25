@@ -1886,7 +1886,7 @@ class MangaDubStudioManager(
                     addLog = true
                 )
 
-                fun synthesizeOnce() = backendRouter.synthesizeSpeechChunk(
+                suspend fun synthesizeOnce() = backendRouter.synthesizeSpeechChunk(
                     chunk = PurrChunk.Speech(
                         text = job.text,
                         role = if (job.line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
@@ -1907,21 +1907,8 @@ class MangaDubStudioManager(
                     delay(350)
                     outcome = synthesizeOnce()
                 }
-                    val outcome = backendRouter.synthesizeSpeechChunk(
-                        chunk = PurrChunk.Speech(
-                            text = bubbleSpeechText,
-                            role = if (line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
-                            targetVoiceId = synthProfile.primaryVoiceId,
-                            speakingRate = synthProfile.baseSpeed,
-                            pitch = synthProfile.basePitch,
-                            volumeGain = 1.0f,
-                            sentiment = SentimentResult(),
-                            singleChunkOnly = true
-                        ),
-                        profile = synthProfile
-                    )
 
-                    val wavFile = File(audioDir, "${job.line.id}.wav")
+                val wavFile = File(audioDir, "${job.line.id}.wav")
                     val rawPcmFloat = outcome.pcmFloat24k
                     val pcmFloat = if (rawPcmFloat.isNotEmpty()) {
                         PurrDspProcessor.conditionDubClipOnset(rawPcmFloat, sampleRate)
