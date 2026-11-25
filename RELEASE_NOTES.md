@@ -11,6 +11,8 @@ The storyboard preview only sees thumbnails; the deep panel scan sees the truth.
   * `canonical_name` may never be NARRATOR, MIKA, UNKNOWN, or empty — the director cannot name a character after herself. `line_fixes` may not re-attribute lines to MIKA either. Silly names pass; self-naming does not.
 * **🧬 Rename-Safe Voice Locks (verified)**:
   * Cast renames preserve character identity and voice state — `autoCloneVoiceId` / `autoClonePromptHash` / assigned voices survive THE_WOMAN → OJOU_SAMA-style renames, so an already-cloned voice keeps its lock and only re-seeds if its design prompt actually changed.
+* **💡 Cast Qty Field Guidance**:
+  * The `CAST QTY:` hint now carries Master's field insight: **Auto works fine, but small/tiny VLMs follow an explicit speaker count noticeably better** — exact direction during storyboarding & consolidation measurably improves attribution on E2B-class models.
 
 ---
 

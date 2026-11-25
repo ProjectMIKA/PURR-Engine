@@ -782,9 +782,9 @@ fun MangaDubStudioModuleWindowBody(
             }
             Text(
                 text = if (expectedCharCount == 0) {
-                    "CHARACTER COUNT: AUTO (VLM discovers recurring speaking characters across pages; MIKA narrates separately)"
+                    "CHARACTER COUNT: AUTO (VLM discovers recurring speaking characters across pages; MIKA narrates separately). Auto works fine — but small/tiny VLMs follow an explicit count noticeably better."
                 } else {
-                    "CHARACTER COUNT BASELINE: $expectedCharCount speaker(s) (excl. MIKA Narrator) guided during storyboarding & cast consolidation"
+                    "CHARACTER COUNT BASELINE: $expectedCharCount speaker(s) (excl. MIKA Narrator) guided during storyboarding & cast consolidation — small/tiny VLMs dub markedly better with exact direction."
                 },
                 color = MikaColors.CyanWhite.copy(alpha = 0.80f),
                 fontFamily = FontFamily.Monospace,
