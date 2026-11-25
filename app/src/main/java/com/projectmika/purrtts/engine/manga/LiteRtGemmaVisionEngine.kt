@@ -24,12 +24,17 @@ import com.google.ai.edge.litertlm.SessionConfig
 import com.google.ai.edge.litertlm.ThinkingConfig
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
 import com.projectmika.purrtts.core.manga.MangaNormalizedRect
+import com.projectmika.purrtts.core.manga.MangaPageEntry
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
+import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.manga.MangaVisionResponseParser
+import com.projectmika.purrtts.core.purr.OpenAiEndpointUtils
+import com.projectmika.purrtts.core.purr.SavedOpenAiVisionEngine
 import com.projectmika.purrtts.core.purr.VoiceGender
 import java.io.File
 import java.io.FileOutputStream
+import java.util.Locale
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.sync.Mutex
@@ -247,20 +252,20 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
     }
 
     /**
-     * Composites up to 6 chapter pages onto one labeled 1024x1024 storyboard contact sheet
-     * so the Vision LLM grasps whole-chapter character identity, outfits, and plot before panel OCR.
+     * Composites up to 4 chapter pages onto one labeled 1280x1280 storyboard contact sheet
+     * (~620px per page so dialogue bubbles stay legible to 2B-4B local VLMs) before panel OCR.
      */
     fun renderChapterStoryboardSheet(
         pageFiles: List<Pair<Int, File>>,
         targetFile: File
     ): Boolean {
-        val samplePairs = pageFiles.take(6)
+        val samplePairs = pageFiles.take(4)
         if (samplePairs.isEmpty()) return false
 
         val count = samplePairs.size
         val cols = if (count <= 1) 1 else 2
         val rows = ((count + cols - 1) / cols).coerceAtLeast(1)
-        val canvasSize = 1024
+        val canvasSize = 1280
         val pad = 12
         val cellW = (canvasSize - pad * (cols + 1)) / cols
         val cellH = (canvasSize - pad * (rows + 1)) / rows
@@ -279,7 +284,7 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         }
         val tagTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.argb(255, 0, 255, 170)
-            textSize = 22f
+            textSize = 24f
             isFakeBoldText = true
         }
 
@@ -321,15 +326,15 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
 
         targetFile.parentFile?.mkdirs()
         FileOutputStream(targetFile).use { fos ->
-            outBmp.compress(Bitmap.CompressFormat.JPEG, 88, fos)
+            outBmp.compress(Bitmap.CompressFormat.JPEG, 90, fos)
         }
         outBmp.recycle()
         return true
     }
 
     /**
-     * Phase 2A-Pre: Single fast multi-page Storyboard Pass giving the VLM whole-chapter plot context
-     * and canonical cast identity before zoomed per-panel OCR starts.
+     * Phase 2A-Pre: Multi-sheet Storyboard Context Pass giving the VLM whole-chapter plot context,
+     * character count baseline discipline, explicit genders, and canonical cast identity before OCR.
      */
     suspend fun runChapterStoryboardPass(
         seriesTitle: String,
@@ -339,61 +344,119 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         powerUserVisionUrl: String,
         preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
         customModelPaths: List<String> = emptyList(),
+        expectedCharacterCount: Int = 0,
+        openAiEngine: SavedOpenAiVisionEngine? = null,
         onLog: (String) -> Unit = {}
     ): MangaVisionResponseParser.ParsedStoryboardBible? = withContext(Dispatchers.IO) {
         if (pageFiles.isEmpty()) return@withContext null
 
-        val sampledPages: List<Pair<Int, File>> = if (pageFiles.size <= 6) {
+        val sampledPages: List<Pair<Int, File>> = if (pageFiles.size <= 8) {
             pageFiles.mapIndexed { idx, f -> (idx + 1) to f }
         } else {
             val indices = LinkedHashSet<Int>().apply {
                 add(0)
                 add(1)
-                for (step in 1..3) {
-                    add(((step.toFloat() / 4f) * (pageFiles.size - 1)).toInt().coerceIn(0, pageFiles.lastIndex))
+                for (step in 1..5) {
+                    add(((step.toFloat() / 6f) * (pageFiles.size - 1)).toInt().coerceIn(0, pageFiles.lastIndex))
                 }
                 add(pageFiles.lastIndex)
-            }.take(6)
+            }.take(8)
             indices.map { idx -> (idx + 1) to pageFiles[idx] }
         }
 
-        val sheetFile = File(context.cacheDir, "manga_storyboard_sheet_${System.currentTimeMillis()}.jpg")
-        try {
-            if (!renderChapterStoryboardSheet(sampledPages, sheetFile)) return@withContext null
-            val prompt = buildStoryboardPassPrompt(
-                seriesTitle = seriesTitle,
-                totalPages = pageFiles.size,
-                readingOrder = readingOrder,
-                existingCharacters = existingCharacters
-            )
+        val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
+        val mergedSummaryParts = ArrayList<String>()
+        val mergedChars = LinkedHashMap<String, MangaVisionResponseParser.ParsedStoryboardCharacter>()
+        val mergedSynopses = LinkedHashMap<Int, String>()
 
-            var rawResponse: String? = null
-            if (powerUserVisionUrl.isNotBlank()) {
-                rawResponse = runCatching { queryOpenAiVisionEndpoint(powerUserVisionUrl.trim(), sheetFile, prompt) }
-                    .onFailure { onLog("LAN Storyboard error: ${it.message}") }
-                    .getOrNull()
-            }
-            if (rawResponse.isNullOrBlank()) {
-                val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
-                if (localModel != null) {
-                    val activeTier = resolveTierForFile(localModel, preferredVisionModel)
-                    onLog("🗺️ Running Chapter Storyboard Context Pass (${sampledPages.size} pages via ${activeTier.shortLabel})...")
-                    rawResponse = mutex.withLock {
-                        queryLiteRtGemmaMultimodalLocked(
-                            modelFile = localModel,
-                            annotatedJpegFile = sheetFile,
-                            prompt = prompt,
-                            enableThinking = activeTier.supportsThinking,
-                            maxTokens = activeTier.maxContextTokens,
-                            onLog = onLog
+        val runningKnown = existingCharacters.toMutableList()
+        val batches = sampledPages.chunked(4)
+
+        for ((batchIdx, batchPairs) in batches.withIndex()) {
+            val sheetFile = File(context.cacheDir, "manga_storyboard_sheet_${System.currentTimeMillis()}_$batchIdx.jpg")
+            try {
+                if (!renderChapterStoryboardSheet(batchPairs, sheetFile)) continue
+                val prompt = buildStoryboardPassPrompt(
+                    seriesTitle = seriesTitle,
+                    totalPages = pageFiles.size,
+                    readingOrder = readingOrder,
+                    existingCharacters = runningKnown,
+                    expectedCharacterCount = expectedCharacterCount,
+                    priorSummary = mergedSummaryParts.joinToString(" "),
+                    pageNumbersInSheet = batchPairs.map { it.first }
+                )
+
+                var rawResponse: String? = null
+                if (apiTarget != null) {
+                    val label = openAiEngine?.name ?: "LAN Vision Endpoint"
+                    onLog("🗺️ Running Storyboard Sheet ${batchIdx + 1}/${batches.size} (${batchPairs.size} pg) via [$label]...")
+                    rawResponse = runCatching { queryOpenAiVisionEndpoint(apiTarget, sheetFile, prompt) }
+                        .onFailure { onLog("$label Storyboard error: ${it.message}") }
+                        .getOrNull()
+                }
+                if (rawResponse.isNullOrBlank()) {
+                    val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
+                    if (localModel != null) {
+                        val activeTier = resolveTierForFile(localModel, preferredVisionModel)
+                        onLog("🗺️ Running Chapter Storyboard Sheet ${batchIdx + 1}/${batches.size} (${batchPairs.size} pages via ${activeTier.shortLabel})...")
+                        rawResponse = mutex.withLock {
+                            queryLiteRtGemmaMultimodalLocked(
+                                modelFile = localModel,
+                                annotatedJpegFile = sheetFile,
+                                prompt = prompt,
+                                enableThinking = activeTier.supportsThinking,
+                                maxTokens = activeTier.maxContextTokens,
+                                onLog = onLog
+                            )
+                        }
+                    }
+                }
+                val parsed = rawResponse?.let { MangaVisionResponseParser.parseStoryboardPass(it) } ?: continue
+                if (parsed.storySummary.isNotBlank()) {
+                    mergedSummaryParts += parsed.storySummary
+                }
+                parsed.characters.forEach { sbChar ->
+                    val key = sbChar.name.trim().uppercase()
+                    if (key.isEmpty() || key == "UNKNOWN" || MangaTextBender.isNarratorName(key)) return@forEach
+                    val prev = mergedChars[key]
+                    if (prev == null) {
+                        mergedChars[key] = sbChar.copy(name = key)
+                        if (runningKnown.none { it.name.equals(key, ignoreCase = true) }) {
+                            runningKnown += MangaCharacterProfile(
+                                id = "sb_${runningKnown.size}",
+                                name = key,
+                                gender = sbChar.gender,
+                                visualDescription = sbChar.visualDescription,
+                                voiceDesignPrompt = sbChar.voiceDesignPrompt
+                            )
+                        }
+                    } else {
+                        mergedChars[key] = prev.copy(
+                            gender = if (prev.gender != VoiceGender.ANDROGYNOUS) prev.gender else sbChar.gender,
+                            visualDescription = if (sbChar.visualDescription.length > prev.visualDescription.length) {
+                                sbChar.visualDescription
+                            } else prev.visualDescription,
+                            voiceDesignPrompt = if (sbChar.voiceDesignPrompt.length > prev.voiceDesignPrompt.length) {
+                                sbChar.voiceDesignPrompt
+                            } else prev.voiceDesignPrompt
                         )
                     }
                 }
+                mergedSynopses.putAll(parsed.pageSynopses)
+            } finally {
+                runCatching { sheetFile.delete() }
             }
-            if (rawResponse.isNullOrBlank()) return@withContext null
-            MangaVisionResponseParser.parseStoryboardPass(rawResponse)
-        } finally {
-            runCatching { sheetFile.delete() }
+        }
+
+        val combinedSummary = mergedSummaryParts.distinct().joinToString(" ").trim()
+        if (combinedSummary.isBlank() && mergedChars.isEmpty() && mergedSynopses.isEmpty()) {
+            null
+        } else {
+            MangaVisionResponseParser.ParsedStoryboardBible(
+                storySummary = combinedSummary,
+                characters = mergedChars.values.toList(),
+                pageSynopses = mergedSynopses
+            )
         }
     }
 
@@ -401,17 +464,31 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         seriesTitle: String,
         totalPages: Int,
         readingOrder: MangaReadingOrder,
-        existingCharacters: List<MangaCharacterProfile>
+        existingCharacters: List<MangaCharacterProfile>,
+        expectedCharacterCount: Int = 0,
+        priorSummary: String = "",
+        pageNumbersInSheet: List<Int> = emptyList()
     ): String {
         val knownBlock = if (existingCharacters.isEmpty()) {
             "None yet — inspect ALL pages in the sheet to find characters' actual names where spoken (even if revealed on later pages)."
         } else {
             existingCharacters.joinToString("\n") { "- ${it.name} (${it.gender.tag}): ${it.visualDescription}" }
         }
+        val charCountRule = if (expectedCharacterCount > 0) {
+            "USER CHARACTER COUNT BASELINE: The user indicated there are $expectedCharacterCount speaking character(s) in this manga (EXCLUDING NARRATOR). Identify at most $expectedCharacterCount canonical speaking characters and reuse their exact uppercase names/role labels across all pages instead of creating duplicate role labels!"
+        } else {
+            "CHARACTER COUNT: AUTO — determine the true recurring speaking cast across pages and reuse exact canonical uppercase names/role labels rather than inventing new labels per page."
+        }
+        val priorBlock = if (priorSummary.isNotBlank()) "EARLIER STORY CONTEXT SO FAR: $priorSummary\n" else ""
+        val sheetPagesNote = if (pageNumbersInSheet.isNotEmpty()) {
+            "Labeled pages in this sheet: ${pageNumbersInSheet.joinToString(", ") { "PAGE $it" }}."
+        } else ""
         return """
 You are MIKA's Manga Storyboard Director previewing "$seriesTitle" ($totalPages page chapter, ${readingOrder.label}).
-This contact sheet shows multiple pages together so you understand the FULL story arc and character identities before detailed panel scanning begins.
+This high-resolution contact sheet shows multiple pages together so you understand the FULL story arc, character relationships, and genders before detailed panel scanning begins. $sheetPagesNote
 ${readingOrder.vlmPromptDirective}
+$priorBlock
+$charCountRule
 
 KNOWN CAST SO FAR:
 $knownBlock
@@ -419,13 +496,15 @@ $knownBlock
 TASK:
 Look across ALL pages on this contact sheet as one continuous story:
 1. Identify the recurring characters across scene changes & outfit switches (for example: if an unnamed character in a bath towel on PAGE 1 turns out to be named OJOU-SAMA or SEBASTIAN on PAGE 2, unify them under ONE canonical uppercase name!).
-   - NEVER use placeholder names (MIKA, THE_WOMAN, THE_MALE, GIRL, BOY) and never output UNKNOWN. Recurring characters without a confirmable name get a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL), reused consistently across pages.
-2. Summarize the overall chapter premise in 1-2 sentences.
+   - ALWAYS determine each character's gender accurately (`female` or `male`) from visual design, outfits, pronouns, and honorifics so vocal casting never picks the wrong gender. Use `androgynous` ONLY when genuinely ambiguous.
+   - NEVER use placeholder names (MIKA, THE_WOMAN, THE_MALE, GIRL, BOY) and never output UNKNOWN. Recurring characters without a confirmable name get ONE descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL), reused consistently across pages.
+   - Never list NARRATOR inside the character cast list (MIKA narrates boxed narration captions separately).
+2. Summarize the overall chapter premise in 1-3 clear sentences covering who is interacting and what happens.
 3. Give a brief 1-sentence beat summary for each labeled PAGE.
 
 Output ONLY valid JSON:
 {
-  "story_summary": "1-2 sentence chapter plot connecting all pages together",
+  "story_summary": "1-3 sentence chapter plot connecting all pages together",
   "characters": [
     {
       "name": "CANONICAL_UPPERCASE_NAME",
@@ -435,7 +514,7 @@ Output ONLY valid JSON:
     }
   ],
   "page_synopses": [
-    {"page": 1, "synopsis": "What happens on Page 1 and which characters appear"},
+    {"page": 1, "synopsis": "What happens on Page 1 and which characters speak"},
     {"page": 2, "synopsis": "What happens on Page 2 and who is named"}
   ]
 }
@@ -461,13 +540,17 @@ Output ONLY valid JSON:
         pageSynopsis: String = "",
         includeNonBubbleText: Boolean = false,
         kvCacheEnabled: Boolean = false,
+        expectedCharacterCount: Int = 0,
+        openAiEngine: SavedOpenAiVisionEngine? = null,
         onLog: (String) -> Unit = {},
         onPanelProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): Pair<MangaVisionResponseParser.ParsedPageAnalysis, String> = withContext(Dispatchers.IO) {
         val targetPanels = panels.ifEmpty { listOf(MangaNormalizedRect(0.01f, 0.01f, 0.99f, 0.99f)) }
+        val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
 
-        // Tier 1: Optional Power-User External OpenAI-Compatible Vision Server
-        if (powerUserVisionUrl.isNotBlank()) {
+        // Tier 1: Optional OpenAI-Compatible Vision Engine (TOOL-12 Saved Engine or LAN Power-User URL)
+        if (apiTarget != null) {
+            val apiBadge = openAiEngine?.name?.ifBlank { "OpenAI Vision API" } ?: "LAN Vision Endpoint"
             val annotatedFile = File(context.cacheDir, "manga_vision_page_$pageIndex.jpg")
             renderAnnotatedPageForVision(pageBitmap, targetPanels, annotatedFile)
             val prompt = buildGemmaDirectorPrompt(
@@ -478,11 +561,12 @@ Output ONLY valid JSON:
                 recentDialogueContext = recentDialogueContext,
                 storySummary = storySummary,
                 pageSynopsis = pageSynopsis,
-                includeNonBubbleText = includeNonBubbleText
+                includeNonBubbleText = includeNonBubbleText,
+                expectedCharacterCount = expectedCharacterCount
             )
-            onLog("Querying LAN Vision Endpoint for Page ${pageIndex + 1}...")
-            val rawRemote = runCatching { queryOpenAiVisionEndpoint(powerUserVisionUrl.trim(), annotatedFile, prompt) }
-                .onFailure { onLog("LAN Vision error: ${it.message}") }
+            onLog("Querying [$apiBadge] for Page ${pageIndex + 1}...")
+            val rawRemote = runCatching { queryOpenAiVisionEndpoint(apiTarget, annotatedFile, prompt) }
+                .onFailure { onLog("$apiBadge error: ${it.message}") }
                 .getOrNull()
             runCatching { annotatedFile.delete() }
             if (!rawRemote.isNullOrBlank()) {
@@ -494,7 +578,7 @@ Output ONLY valid JSON:
                     readingOrder = readingOrder
                 )
                 if (parsed.panels.isNotEmpty()) {
-                    return@withContext parsed to "LAN Vision Endpoint"
+                    return@withContext parsed to apiBadge
                 }
             }
         }
@@ -552,7 +636,8 @@ Output ONLY valid JSON:
                                     knownCharacters = runningRoster,
                                     storySummary = storySummary,
                                     pageSynopsis = pageSynopsis,
-                                    includeNonBubbleText = includeNonBubbleText
+                                    includeNonBubbleText = includeNonBubbleText,
+                                    expectedCharacterCount = expectedCharacterCount
                                 )
                                 kvEstTokens = estimateApproxTokens(sharedPreface)
                                 kvRosterCursor = runningRoster.size
@@ -618,7 +703,8 @@ Output ONLY valid JSON:
                             recentDialogueContext = runningContext,
                             storySummary = storySummary,
                             pageSynopsis = pageSynopsis,
-                            includeNonBubbleText = includeNonBubbleText
+                            includeNonBubbleText = includeNonBubbleText,
+                            expectedCharacterCount = expectedCharacterCount
                         )
                         rawPanel = mutex.withLock {
                             queryLiteRtGemmaMultimodalLocked(
@@ -746,6 +832,116 @@ Output ONLY valid JSON:
     }
 
     /**
+     * Phase 2A-Post: Text-only Chapter Story & Cast Consolidation Pass.
+     * Runs right after page OCR completes (while the VLM is still hot in RAM, or via saved
+     * OpenAI Vision engine) so the LLM sees the FULL chapter dialogue script together, reconciles
+     * the cohesive plot, merges cross-page drifted role labels (e.g. TOWEL_GIRL + BLONDE_WOMAN ->
+     * canonical character), locks male/female genders, and respects user character count baselines.
+     */
+    suspend fun consolidateChapterStoryAndCast(
+        seriesTitle: String,
+        currentStorySummary: String,
+        roster: List<MangaCharacterProfile>,
+        pages: List<MangaPageEntry>,
+        expectedCharacterCount: Int = 0,
+        preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
+        powerUserVisionUrl: String = "",
+        openAiEngine: SavedOpenAiVisionEngine? = null,
+        customModelPaths: List<String> = emptyList(),
+        onLog: (String) -> Unit = {}
+    ): MangaVisionResponseParser.ParsedCastConsolidation? = withContext(Dispatchers.IO) {
+        val allLines = pages.flatMap { pg ->
+            pg.panels.flatMap { pan ->
+                pan.lines.map { ln -> Triple(pg.pageIndex + 1, pan.panelIndex + 1, ln) }
+            }
+        }
+        if (allLines.isEmpty() || roster.isEmpty()) return@withContext null
+
+        val prompt = buildCastConsolidationPrompt(
+            seriesTitle = seriesTitle,
+            currentStorySummary = currentStorySummary,
+            roster = roster,
+            lines = allLines,
+            expectedCharacterCount = expectedCharacterCount
+        )
+
+        val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
+        var rawOut: String? = null
+        if (apiTarget != null) {
+            rawOut = runCatching { queryOpenAiTextEndpoint(apiTarget, prompt) }.getOrNull()
+        }
+        if (rawOut.isNullOrBlank()) {
+            val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
+            if (localModel != null) {
+                val activeTier = resolveTierForFile(localModel, preferredVisionModel)
+                onLog("🧩 Running Chapter Story & Cast Consolidation Pass (${roster.size} speakers, ${allLines.size} lines via ${activeTier.shortLabel})...")
+                rawOut = mutex.withLock {
+                    queryLiteRtGemmaTextLocked(localModel, prompt, activeTier.maxContextTokens, onLog)
+                }
+            }
+        }
+        rawOut?.let { MangaVisionResponseParser.parseCastConsolidation(it) }
+    }
+
+    private fun buildCastConsolidationPrompt(
+        seriesTitle: String,
+        currentStorySummary: String,
+        roster: List<MangaCharacterProfile>,
+        lines: List<Triple<Int, Int, com.projectmika.purrtts.core.manga.MangaSpeechLine>>,
+        expectedCharacterCount: Int
+    ): String {
+        val rosterBlock = roster
+            .filter { !MangaTextBender.isNarratorName(it.name) }
+            .joinToString("\n") { ch ->
+                "- ${ch.name} (${ch.gender.tag}, lines=${ch.lineCount}): ${ch.visualDescription.ifBlank { ch.voiceDesignPrompt }}"
+            }
+            .ifBlank { "(none)" }
+        val scriptBlock = lines.take(70).joinToString("\n") { (pgNum, panNum, ln) ->
+            "[P$pgNum.$panNum ${ln.id}] ${ln.speakerName}(${ln.genderHint.tag}): \"${ln.sanitizedText.ifBlank { ln.rawText }.take(110)}\""
+        }
+        val baselineDirective = if (expectedCharacterCount > 0) {
+            "TARGET NON-NARRATOR CHARACTER COUNT: The user specified $expectedCharacterCount speaking character(s) (EXCLUDING NARRATOR). Merge drifted aliases so `canonical_characters` contains at most $expectedCharacterCount speaking character(s)!"
+        } else {
+            "CHARACTER COUNT: AUTO — merge any duplicate/drifted role labels referring to the same person across pages into ONE canonical character."
+        }
+        return """
+You are the Head Story & Casting Editor reviewing the COMPLETE transcribed script for "$seriesTitle".
+Earlier summary: ${currentStorySummary.ifBlank { "(synthesize from script)" }}
+$baselineDirective
+
+DISCOVERED CAST ENTRIES SO FAR:
+$rosterBlock
+
+FULL CHAPTER SCRIPT IN READING ORDER:
+$scriptBlock
+
+TASK:
+1. Understand the complete cohesive story across all pages and write a crisp 2-3 sentence `cohesive_story_summary`.
+2. Unify any duplicate or drifted character labels from different pages (e.g. TOWEL_GIRL on Page 1 + SUIT_WOMAN on Page 2 -> ONE canonical name) inside `canonical_characters` with `merged_aliases`.
+   - NEVER put NARRATOR in `canonical_characters`.
+   - Set every character's `gender` (`female` or `male` strongly preferred whenever clear from story context/pronouns/appearance; use `androgynous` only if truly uncertain).
+3. If any specific `line_id` was attributed to the wrong speaker or drifted label, list its correction in `line_fixes`.
+
+Output ONLY valid JSON:
+{
+  "cohesive_story_summary": "2-3 sentence complete story summary",
+  "canonical_characters": [
+    {
+      "canonical_name": "UPPERCASE_NAME",
+      "merged_aliases": ["OLD_PAGE_LABEL_1"],
+      "gender": "female | male | androgynous",
+      "visual_description": "unified visual summary across pages",
+      "voice_design_prompt": "15-25 word Qwen3 VoiceDesign acoustic note"
+    }
+  ],
+  "line_fixes": [
+    {"line_id": "ln_0_1_0", "speaker": "CANONICAL_NAME", "gender": "female | male | androgynous"}
+  ]
+}
+""".trim()
+    }
+
+    /**
      * Phase 2B: Text-only Qwen3 1.7B VoiceDesign Casting Director.
      * Runs while the selected Vision LLM is already mounted in memory (zero extra model load) to refine every
      * character's acoustic Qwen3 VoiceDesign prompt, speaking cadence, and pitch scale from
@@ -758,6 +954,7 @@ Output ONLY valid JSON:
         sampleLinesBySpeaker: Map<String, List<String>>,
         preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
         powerUserVisionUrl: String = "",
+        openAiEngine: SavedOpenAiVisionEngine? = null,
         customModelPaths: List<String> = emptyList(),
         onLog: (String) -> Unit = {}
     ): List<MangaCharacterProfile> = withContext(Dispatchers.IO) {
@@ -772,8 +969,9 @@ Output ONLY valid JSON:
 
         var updatedRoster = characters
         var rawCasting: String? = null
-        if (powerUserVisionUrl.isNotBlank()) {
-            rawCasting = runCatching { queryOpenAiTextEndpoint(powerUserVisionUrl.trim(), castingPrompt) }.getOrNull()
+        val apiTarget = resolveOpenAiRequestTarget(openAiEngine, powerUserVisionUrl)
+        if (apiTarget != null) {
+            rawCasting = runCatching { queryOpenAiTextEndpoint(apiTarget, castingPrompt) }.getOrNull()
         }
         if (rawCasting.isNullOrBlank()) {
             val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
@@ -842,7 +1040,8 @@ Output ONLY valid JSON:
         recentDialogueContext: List<String>,
         storySummary: String = "",
         pageSynopsis: String = "",
-        includeNonBubbleText: Boolean = false
+        includeNonBubbleText: Boolean = false,
+        expectedCharacterCount: Int = 0
     ): String {
         val rosterSummary = if (existingCharacters.isEmpty()) {
             "None yet — name speakers consistently using their canonical uppercase name from STORYBOARD CAST BIBLE below (or NARRATOR for boxed captions)."
@@ -859,6 +1058,9 @@ Output ONLY valid JSON:
         val storyBlock = buildString {
             if (storySummary.isNotBlank()) appendLine("CHAPTER STORYBOARD BIBLE: $storySummary")
             if (pageSynopsis.isNotBlank()) appendLine("PAGE ${pageIndex + 1} BEAT: $pageSynopsis")
+            if (expectedCharacterCount > 0) {
+                appendLine("USER CHARACTER BASELINE: Expect ~$expectedCharacterCount total speaking characters (excl. NARRATOR); prefer matching an existing cast member above before inventing a new role label.")
+            }
         }.trim().ifEmpty { "(Scanning sequential story — keep cast identity consistent across outfit changes or duplicate comedy shots.)" }
 
         val bubbleScopeRule = if (includeNonBubbleText) {
@@ -891,13 +1093,16 @@ $contextLines
 
 TASK:
 $bubbleScopeRule
-SPEAKER & BUBBLE-TAIL ATTRIBUTION RULES:
+WHOLE-BUBBLE INTEGRITY LAW:
+- ONE DRAWN SPEECH BUBBLE = ONE `"lines"` ENTRY: Transcribe ALL text inside a single enclosed speech bubble into ONE single `"text"` string, no matter how many lines or sentences tall that bubble is. NEVER break one speech bubble into multiple `"lines"` entries! Only physically separate bubbles become separate `"lines"` entries.
+SPEAKER, GENDER & BUBBLE-TAIL ATTRIBUTION RULES:
 - For every bubble, inspect its pointed tail direction, tiny inline chibi speaker icon, or jagged scream burst pointing toward a character (or follow split `--` sentence continuations belonging to the previous bubble's speaker). Record who the tail points to in `"tail_target"`.
-- If a bubble has NO clear tail and NO chibi head icon (e.g. off-panel interruption among multiple present characters), assign a descriptive ALL-CAPS role label from the speaker's appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL, SUIT_MAN), set `"tail_target": "unclear"`, `"confidence": 0.45`, and list likely `"candidate_speakers"`.
+- Always classify `"gender"` accurately (`male` or `female`) from visual cues, outfits, pronouns, and the STORYBOARD BIBLE; use `androgynous` ONLY when genuinely indeterminate.
+- If a bubble has NO clear tail and NO chibi head icon (e.g. off-panel interruption among multiple present characters), reuse the best matching established character from KNOWN CAST ROSTER (or assign a descriptive ALL-CAPS role label from appearance), set `"tail_target": "unclear"`, `"confidence": 0.45`, and list likely `"candidate_speakers"`.
 - Order lines strictly by ${readingOrder.label} and provide normalized bubble center coordinates `"x_pos"` (0.0=left..1.0=right) and `"y_pos"` (0.0=top..1.0=bottom).
 
 NAMING & SCOPE RULES:
-- NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE, THE_FEMALE, GIRL, BOY). If a speaker's name is not confirmed inside THIS panel (spoken aloud, written, or unmistakable from context), assign a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL, SUIT_MAN, BLOND_RIVAL) and REUSE the exact same label for that character on every page — every bubble belongs to a voiced cast role.
+- NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE, THE_FEMALE, GIRL, BOY). If a speaker's name is not confirmed inside THIS panel, reuse their matching KNOWN CAST ROSTER name or assign ONE descriptive ALL-CAPS role label from appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL, SUIT_MAN).
 - Transcribe ONLY text visible inside THIS panel crop. Never carry over or invent bubbles from other pages or panels.
 - Boxed narration captions use speaker "NARRATOR" (MIKA voices the narration).
 
@@ -945,7 +1150,8 @@ $previousSnippet
         recentDialogueContext: List<String>,
         storySummary: String = "",
         pageSynopsis: String = "",
-        includeNonBubbleText: Boolean = false
+        includeNonBubbleText: Boolean = false,
+        expectedCharacterCount: Int = 0
     ): String {
         val rosterSummary = if (existingCharacters.isEmpty()) {
             "None yet — name speakers consistently using their canonical uppercase name."
@@ -962,6 +1168,9 @@ $previousSnippet
         val storyBlock = buildString {
             if (storySummary.isNotBlank()) appendLine("CHAPTER STORYBOARD BIBLE: $storySummary")
             if (pageSynopsis.isNotBlank()) appendLine("PAGE ${pageIndex + 1} BEAT: $pageSynopsis")
+            if (expectedCharacterCount > 0) {
+                appendLine("USER CHARACTER BASELINE: Expect ~$expectedCharacterCount total speaking characters (excl. NARRATOR); prefer matching established cast names before inventing new labels.")
+            }
         }.trim().ifEmpty { "(Keep character identity consistent across outfit switches.)" }
 
         val bubbleRule = if (includeNonBubbleText) {
@@ -996,7 +1205,8 @@ $contextLines
 TASK:
 1. First think carefully inside `<thought>...</thought>` about each panel P1..P$panelCount:
    - $bubbleRule
-   - Inspect every edge bubble, pointed bubble tail, miniature inline speaker icon, and `--` sentence continuation to identify each speaker accurately — when a name is unconfirmed, assign a descriptive ALL-CAPS role label from their appearance instead (never UNKNOWN).
+   - ONE DRAWN BUBBLE = ONE `lines` ENTRY: Transcribe ALL text inside one bubble as ONE complete `text` string regardless of length — NEVER split one bubble into two entries.
+   - Inspect every edge bubble, pointed bubble tail, miniature inline speaker icon, and `--` sentence continuation to identify each speaker AND their gender (`female` or `male` preferred) accurately — when a name is unconfirmed, reuse their canonical appearance role label (never UNKNOWN).
 2. Immediately output ONLY a valid JSON object matching this schema:
 {
   "story_summary": "1-sentence running summary update",
@@ -1334,16 +1544,58 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         }
     }
 
-    private fun queryOpenAiVisionEndpoint(
+    private fun resolveOpenAiRequestTarget(
+        openAiEngine: SavedOpenAiVisionEngine?,
+        legacyPowerUserUrl: String
+    ): Triple<String, String, String>? {
+        if (openAiEngine != null && openAiEngine.endpointUrl.isNotBlank()) {
+            val url = OpenAiEndpointUtils.normalizeChatCompletionsUrl(openAiEngine.endpointUrl)
+            if (url.isNotBlank()) {
+                return Triple(url, openAiEngine.apiKey.trim(), openAiEngine.modelId.trim().ifBlank { "gpt-4o-mini" })
+            }
+        }
+        val cleanedLegacy = OpenAiEndpointUtils.normalizeChatCompletionsUrl(legacyPowerUserUrl)
+        if (cleanedLegacy.isNotBlank()) {
+            return Triple(cleanedLegacy, "", "gemma-4-E2B-it")
+        }
+        return null
+    }
+
+    suspend fun testOpenAiEndpointConnection(
         endpointUrl: String,
+        apiKey: String,
+        modelId: String
+    ): Result<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val normalizedUrl = OpenAiEndpointUtils.normalizeChatCompletionsUrl(endpointUrl)
+            require(normalizedUrl.isNotBlank()) { "Endpoint URL is empty" }
+            val resolvedModel = modelId.trim().ifBlank { "gpt-4o-mini" }
+            val payload = buildJsonObject {
+                put("model", resolvedModel)
+                put("temperature", 0.0)
+                put("max_tokens", 24)
+                put("messages", buildJsonArray {
+                    add(buildJsonObject {
+                        put("role", "user")
+                        put("content", "Reply with OK")
+                    })
+                })
+            }.toString()
+            executeOpenAiChatRequestOrThrow(normalizedUrl, apiKey.trim(), payload)
+        }
+    }
+
+    private fun queryOpenAiVisionEndpoint(
+        target: Triple<String, String, String>,
         annotatedJpegFile: File,
         prompt: String
     ): String? {
+        val (endpointUrl, apiKey, modelId) = target
         val b64 = Base64.encodeToString(annotatedJpegFile.readBytes(), Base64.NO_WRAP)
         val payload = buildJsonObject {
-            put("model", "gemma-4-E2B-it")
+            put("model", modelId)
             put("temperature", 0.2)
-            put("max_tokens", 1600)
+            put("max_tokens", 2048)
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "user")
@@ -1363,14 +1615,23 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
             })
         }.toString()
 
-        return executeOpenAiChatRequest(endpointUrl, payload)
+        return runCatching { executeOpenAiChatRequestOrThrow(endpointUrl, apiKey, payload) }
+            .onFailure { err ->
+                lastEngineError = "OpenAI Vision API error: ${err.message}"
+                Log.w(TAG, "[OPENAI_VISION] Vision call failed: ${err.message}")
+            }
+            .getOrNull()
     }
 
-    private fun queryOpenAiTextEndpoint(endpointUrl: String, prompt: String): String? {
+    private fun queryOpenAiTextEndpoint(
+        target: Triple<String, String, String>,
+        prompt: String
+    ): String? {
+        val (endpointUrl, apiKey, modelId) = target
         val payload = buildJsonObject {
-            put("model", "gemma-4-E2B-it")
+            put("model", modelId)
             put("temperature", 0.35)
-            put("max_tokens", 1400)
+            put("max_tokens", 1600)
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "user")
@@ -1378,23 +1639,52 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
                 })
             })
         }.toString()
-        return executeOpenAiChatRequest(endpointUrl, payload)
+        return runCatching { executeOpenAiChatRequestOrThrow(endpointUrl, apiKey, payload) }
+            .onFailure { err ->
+                lastEngineError = "OpenAI Text API error: ${err.message}"
+                Log.w(TAG, "[OPENAI_VISION] Text call failed: ${err.message}")
+            }
+            .getOrNull()
     }
 
-    private fun executeOpenAiChatRequest(endpointUrl: String, payload: String): String? {
+    private fun executeOpenAiChatRequestOrThrow(
+        endpointUrl: String,
+        apiKey: String,
+        payload: String
+    ): String {
         val req = Request.Builder()
             .url(endpointUrl)
+            .apply {
+                if (apiKey.isNotBlank()) header("Authorization", "Bearer $apiKey")
+                header("HTTP-Referer", "https://github.com/ProjectMIKA/PURR-Engine")
+                header("X-Title", "PURR-TTS")
+            }
             .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
             .build()
 
         httpClient.newCall(req).execute().use { res ->
-            if (!res.isSuccessful) return null
-            val body = res.body?.string() ?: return null
-            val root = lenientJson.parseToJsonElement(body) as? JsonObject ?: return null
-            val choices = root["choices"] as? JsonArray ?: return null
-            val first = choices.firstOrNull() as? JsonObject ?: return null
-            val msg = first["message"] as? JsonObject ?: return null
-            return (msg["content"] as? JsonPrimitive)?.contentOrNull
+            val body = res.body?.string().orEmpty()
+            if (!res.isSuccessful) {
+                throw IllegalStateException("HTTP ${res.code}: ${body.take(180).ifBlank { res.message }}")
+            }
+            val root = lenientJson.parseToJsonElement(body) as? JsonObject
+                ?: throw IllegalStateException("Invalid JSON response from endpoint")
+            val choices = root["choices"] as? JsonArray
+                ?: throw IllegalStateException("Missing 'choices' in OpenAI response")
+            val first = choices.firstOrNull() as? JsonObject
+                ?: throw IllegalStateException("Empty 'choices' array")
+            val msg = first["message"] as? JsonObject
+                ?: throw IllegalStateException("Missing 'message' object")
+            val contentElem = msg["content"]
+            val textOut = when (contentElem) {
+                is JsonPrimitive -> contentElem.contentOrNull.orEmpty()
+                is JsonArray -> contentElem.mapNotNull { part ->
+                    ((part as? JsonObject)?.get("text") as? JsonPrimitive)?.contentOrNull
+                }.joinToString("\n")
+                else -> ""
+            }.trim()
+            if (textOut.isEmpty()) throw IllegalStateException("Endpoint returned empty message content")
+            return textOut
         }
     }
 
@@ -1470,7 +1760,8 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         knownCharacters: List<MangaCharacterProfile>,
         storySummary: String,
         pageSynopsis: String,
-        includeNonBubbleText: Boolean
+        includeNonBubbleText: Boolean,
+        expectedCharacterCount: Int = 0
     ): String {
         val roster = if (knownCharacters.isEmpty()) {
             "None yet — introduce consistent uppercase names (or NARRATOR for boxed captions)."
@@ -1482,15 +1773,18 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         } else {
             "STRICT SPEECH-BUBBLE-ONLY: Transcribe ONLY enclosed speech bubbles, thought clouds, scream bursts, and narration boxes. IGNORE floating SFX, watermarks, page numbers, scanlation credits, and signatures."
         }
+        val countHint = if (expectedCharacterCount > 0) {
+            "User Character Baseline: ~$expectedCharacterCount speaking characters (excl. NARRATOR); prefer matching Known Cast above.\n"
+        } else ""
         return """
 You are MIKA's Manga Dubbing Director scanning sequential cropped panels on Page ${pageIndex + 1}.
 ${readingOrder.vlmPromptDirective}
 Story Bible: ${storySummary.ifBlank { "Keep cast identity consistent across outfits." }}
-${if (pageSynopsis.isNotBlank()) "Page Beat: $pageSynopsis" else ""}
-Known Cast: $roster
+${if (pageSynopsis.isNotBlank()) "Page Beat: $pageSynopsis\n" else ""}${countHint}Known Cast: $roster
 Rules: $scope
+ONE DRAWN BUBBLE = ONE `lines` ENTRY: Never split one bubble across multiple `lines` entries regardless of bubble length. Always classify `gender` accurately (`female` or `male` preferred).
 Trace pointed bubble tails, chibi speaker icons, and `--` continuations into `"tail_target"`; set `"confidence": 0.45` only when genuinely ambiguous — the speaker still gets a descriptive ALL-CAPS role label (never UNKNOWN).
-NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE) — unconfirmed speakers get a descriptive ALL-CAPS role label from their appearance (e.g. BUNNY_BUTLER, TOWEL_GIRL), reused across pages; narration boxes use "NARRATOR". Transcribe ONLY text visible in each cropped panel, never from other pages.
+NEVER output "UNKNOWN" and never use lazy placeholders (MIKA, THE_WOMAN, THE_MALE) — unconfirmed speakers reuse their appearance role label across pages; narration boxes use "NARRATOR". Transcribe ONLY text visible in each cropped panel, never from other pages.
 Respond with JSON ONLY matching:
 {"mood":"action","thought":"bubble count + tails","lines":[{"bubble":1,"x_pos":0.85,"y_pos":0.22,"container_type":"speech_bubble","tail_target":"CHAR","speaker":"CHAR","is_new_character":false,"gender":"female","visual_description":"","voice_design_prompt":"","emotion":"neutral","confidence":0.90,"candidate_speakers":[],"text":"..."}]}
 Output {"mood":"silent_panel","lines":[]} if a panel has no valid spoken lines.

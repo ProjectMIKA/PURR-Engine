@@ -212,6 +212,8 @@ class PurrProfileRepository(filesDir: File) {
 
     fun isMangaDubStudioModuleActive(): Boolean = isCartridgeSlotted("tool_manga_dub_studio")
 
+    fun isOpenAiVisionModuleActive(): Boolean = isCartridgeSlotted("tool_openai_vision_api")
+
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
         val voicesForCart = allAvailableVoices().filter { it.cartridgeId == cartridgeId }
@@ -404,6 +406,24 @@ class PurrProfileRepository(filesDir: File) {
     fun deleteVoiceDesign(designId: String) {
         updateState { s ->
             s.copy(savedVoiceDesigns = s.savedVoiceDesigns.filterNot { it.id == designId })
+        }
+    }
+
+    fun upsertOpenAiVisionEngine(engine: SavedOpenAiVisionEngine) {
+        updateState { s ->
+            val existingIdx = s.savedOpenAiVisionEngines.indexOfFirst { it.id == engine.id }
+            val updated = if (existingIdx >= 0) {
+                s.savedOpenAiVisionEngines.mapIndexed { idx, cur -> if (idx == existingIdx) engine else cur }
+            } else {
+                listOf(engine) + s.savedOpenAiVisionEngines
+            }.take(40)
+            s.copy(savedOpenAiVisionEngines = updated)
+        }
+    }
+
+    fun deleteOpenAiVisionEngine(engineId: String) {
+        updateState { s ->
+            s.copy(savedOpenAiVisionEngines = s.savedOpenAiVisionEngines.filterNot { it.id == engineId })
         }
     }
 

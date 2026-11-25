@@ -61,6 +61,17 @@ a law changes here.
   GPU/NPU offloads slot here.
 - PURR Rulebook: vibe presets are ONE `CyberDropdown` (label `> ACTIVE_PRESET`, `name [BADGE_TAG]`
   labels, active preset summary rendered beneath) — never a selectable card wall.
+- **`TOOL-12` (`OpenAiVisionModuleWindowBody`) + `TOOL-11` Pre-Cook Review (`MangaDubStudioModuleWindowBody`, v2.1.0)**:
+  - `OsModuleIconType.OPENAI_VISION_HUB` renders a Canvas cyber-eye lens with 3 circuit nodes.
+  - `OpenAiVisionModuleWindow` hosts the `> API_SERVICE_PROVIDER` dropdown (`NanoGPT`, `OpenRouter`,
+    `Clinepass`, `OpenAI Official`, `Together AI`, `Groq Cloud`, with `Custom OpenAI Endpoint` pinned
+    at the bottom unlocking custom endpoint input), masked API key toggle, model field, `TEST API`,
+    and saved-engine `EDIT` / `DELETE` cards.
+  - `MangaDubStudioModuleWindow` hosts a unified `> VISION_LLM_ENGINE` `CyberDropdown` (all 6 local
+    VLMs + saved `TOOL-12` OpenAI Vision engines when slotted), `CAST QTY` (`AUTO` default or
+    explicit `1..24`), and the `MangaPreCookReviewPanel` before cooking `.MP4` (inline story editor,
+    character count cap apply/rescan, per-character `F`/`M`/`N` gender pills, audition button). Zero
+    system emojis in new UI composables — Canvas `MikaCyberIcon` only.
 
 ## Porting checklist (React → Compose)
 1. Map CSS tokens → `MikaColors` entries; keep hex values identical.

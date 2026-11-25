@@ -353,3 +353,41 @@ voices went flat:
   UI: `PANELS:` pill row (AUTO(8)/4/6/8/12) in the CUSTOMIZE drawer. Validated with a
   faithful Python port against the 2×4 grid (8 panels AUTO / 6 merged), the tall-right
   4-panel layout, and webtoon bands before shipping.
+
+## v2.1.0 Manga Dub cohesion, onset audio, whole-bubble & TOOL-12 laws
+
+- **Multi-sheet Storyboard + Post-OCR Cast Consolidation (`MangaCastConsolidator`, v2.1.0)**:
+  - `runChapterStoryboardPass` samples up to 8 pages across the chapter in readable 1280×1280
+    2×2 batches (≤4 pages/sheet), emphasizing overall plot AND explicit `female`/`male`
+    gender determination.
+  - Right after per-page scanning, while the local VLM is still mounted in RAM,
+    `consolidateChapterStoryAndCast` + `MangaCastConsolidator.consolidateChapterCastAndLines`
+    review the complete chapter script together, merge drifted page role labels onto canonical
+    characters, sync `genderHint` across every character's lines, preserve MIKA's isolated
+    `NARRATOR` channel, and enforce any user-configured `expectedCharacterCount` (`0` = `AUTO`).
+- **Start-of-Clip Onset & Seed Conditioning (v2.1.0)**:
+  - `MangaTextBender.sanitizeMangaDialogue` strips leading `--`, `—`, `...`, `…`, commas, and
+    periods BEFORE and AFTER internal replacement so neural TTS engines never receive leading
+    `, ` / `.` hallucination triggers (`"--WAIT!"` -> `"Wait!"`).
+  - `PurrDspProcessor.conditionDubClipOnset` removes DC bias and applies an 18ms zero-anchored
+    raised-cosine onset ramp on rendered dub clips.
+  - `PurrDspProcessor.prepareCleanCloneSeedPcm` cleans/trims 1.7B VoiceDesign seed WAVs, applies
+    raised-cosine edge fades, and appends 120ms digital zero tail silence so Qwen3 0.6B Base ICL
+    cloning never bleeds trailing seed breath into frame 0 of cloned clips; `Qwen3TtsEngine`
+    guarantees a single leading space before `text` in ICL mode so BPE concatenation never glues
+    the first word onto `ref_text`'s period. `purr_qwen3_jni.cpp` moderates sampling
+    (`temperature = 0.72`, `top_p = 0.90`).
+- **Whole-Bubble Single-Chunk Law (`PurrChunk.Speech.singleChunkOnly = true`)**:
+  - Manga Dub bubbles (and character auditions) ALWAYS synthesize as ONE unbroken speech chunk
+    regardless of bubble length: `OnnxRuntimeEngine` bypasses Phonon's 48-token splitter and
+    scales token ceilings, `LiteRtKokoroEngine` G2P accepts up to 512 chars, and
+    `purr_qwen3_jni.cpp` scales `max_audio_tokens` for long monologues. Vision prompts enforce
+    1 drawn speech bubble = 1 `lines` entry.
+- **`TOOL-12` OpenAI Vision API Hub (`tool_openai_vision_api`, disabled by default)**:
+  - Built-in OS cartridge marked `INSTALLED` in `modelStates` and **excluded** from
+    `PurrForgeState.slottedCartridges` defaults AND upgrade auto-slotting (`PurrProfileRepository`).
+  - `SavedOpenAiVisionEngine` + `OpenAiVisionProviderPreset` (`NanoGPT`, `OpenRouter`, `Clinepass`,
+    `OpenAI Official`, `Together AI`, `Groq Cloud`, and `Custom OpenAI Endpoint` last) normalize
+    endpoints via `OpenAiEndpointUtils.normalizeChatCompletionsUrl`, pass `Bearer` auth and
+    selected `modelId` in `LiteRtGemmaVisionEngine`, and fall back cleanly to local VLM if `TOOL-12`
+    is ejected.

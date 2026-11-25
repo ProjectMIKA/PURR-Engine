@@ -297,6 +297,22 @@ class OnnxRuntimeEngine(
         speakingRate: Float,
         pitch: Float,
         profile: PurrProfile
+    ): SynthesisOutcome = synthesizeChunk(
+        text = text,
+        voiceId = voiceId,
+        speakingRate = speakingRate,
+        pitch = pitch,
+        profile = profile,
+        singleChunkOnly = false
+    )
+
+    suspend fun synthesizeChunk(
+        text: String,
+        voiceId: String,
+        speakingRate: Float,
+        pitch: Float,
+        profile: PurrProfile,
+        singleChunkOnly: Boolean
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
         resetIdleTimer()
         if (text.isBlank()) {
@@ -311,18 +327,20 @@ class OnnxRuntimeEngine(
         mutex.withLock {
             val outcome = runCatching {
                 when {
-                    cleanVoiceId.startsWith("soprano_") -> synthesizeSopranoLocked(text)
-                    cleanVoiceId.startsWith("neutts_") -> synthesizeNeuTtsLocked(text, cleanVoiceId, profile)
-                    cleanVoiceId.startsWith("phonon_") -> synthesizePhononLocked(text, cleanVoiceId)
+                    cleanVoiceId.startsWith("soprano_") -> synthesizeSopranoLocked(text, singleChunkOnly)
+                    cleanVoiceId.startsWith("neutts_") -> synthesizeNeuTtsLocked(text, cleanVoiceId, profile, singleChunkOnly)
+                    cleanVoiceId.startsWith("phonon_") -> synthesizePhononLocked(text, cleanVoiceId, singleChunkOnly)
                     clonedCb != null -> synthesizeChatterboxLocked(
                         text = text,
                         refWavFile = File(clonedCb.referenceWavPath),
-                        voiceLabel = clonedCb.displayName
+                        voiceLabel = clonedCb.displayName,
+                        singleChunkOnly = singleChunkOnly
                     )
                     cleanVoiceId.startsWith("chatterbox_") -> synthesizeChatterboxLocked(
                         text = text,
                         refWavFile = File(nativeDir(SPEC_CHATTERBOX), "emily_neutral.wav"),
-                        voiceLabel = "Emily Studio"
+                        voiceLabel = "Emily Studio",
+                        singleChunkOnly = singleChunkOnly
                     )
                     else -> SynthesisOutcome(
                         pcmFloat24k = FloatArray(0),
@@ -501,7 +519,7 @@ class OnnxRuntimeEngine(
         return true
     }
 
-    private fun synthesizeSopranoLocked(text: String): SynthesisOutcome {
+    private fun synthesizeSopranoLocked(text: String, singleChunkOnly: Boolean = false): SynthesisOutcome {
         if (!ensureSopranoLoadedLocked()) {
             return SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.IDLE, "Soprano-80M cartridge not installed", true)
         }
@@ -543,7 +561,11 @@ class OnnxRuntimeEngine(
         val generatedTokenHistory = ArrayList<Int>(128)
         var stepIds = promptIds
         var posStart = 0L
-        val maxNewTokens = (text.length * 4 + 90).coerceIn(120, 360)
+        val maxNewTokens = if (singleChunkOnly) {
+            (text.length * 5 + 120).coerceIn(140, 1400)
+        } else {
+            (text.length * 4 + 90).coerceIn(120, 360)
+        }
 
         for (step in 0 until maxNewTokens) {
             val seqLen = stepIds.size.toLong()
@@ -720,7 +742,8 @@ class OnnxRuntimeEngine(
     private fun synthesizeNeuTtsLocked(
         text: String,
         cleanVoiceId: String,
-        profile: PurrProfile
+        profile: PurrProfile,
+        singleChunkOnly: Boolean = false
     ): SynthesisOutcome {
         if (!ensureNeuTtsLoadedLocked()) {
             return SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.IDLE, "NeuTTS-2E cartridge not installed", true)
@@ -795,7 +818,11 @@ class OnnxRuntimeEngine(
         var stepIds = promptIds
         var posStart = 0L
         val minNewTokens = 25
-        val maxNewTokens = (normInput.length * 5 + 140).coerceIn(150, 480)
+        val maxNewTokens = if (singleChunkOnly) {
+            (normInput.length * 6 + 160).coerceIn(160, 1400)
+        } else {
+            (normInput.length * 5 + 140).coerceIn(150, 480)
+        }
 
         for (step in 0 until maxNewTokens) {
             val seqLen = stepIds.size.toLong()
@@ -1003,7 +1030,8 @@ class OnnxRuntimeEngine(
     private fun synthesizeChatterboxLocked(
         text: String,
         refWavFile: File,
-        voiceLabel: String
+        voiceLabel: String,
+        singleChunkOnly: Boolean = false
     ): SynthesisOutcome {
         if (!ensureChatterboxLoadedLocked()) {
             return SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.IDLE, "Chatterbox-Turbo cartridge not installed", true)
@@ -1047,7 +1075,11 @@ class OnnxRuntimeEngine(
         val penaltyTokens = HashSet<Int>()
         var currentInputIds = textIds
         var posStart = 0L
-        val maxNewTokens = (text.length * 6 + 150).coerceIn(160, 650)
+        val maxNewTokens = if (singleChunkOnly) {
+            (text.length * 7 + 160).coerceIn(180, 1600)
+        } else {
+            (text.length * 6 + 150).coerceIn(160, 650)
+        }
 
         for (step in 0 until maxNewTokens) {
             var stepEmbedPayload = runChatterboxEmbed(embedTokens, embedInName, currentInputIds)
@@ -1518,7 +1550,7 @@ class OnnxRuntimeEngine(
         return transposed to (transposed.size / 512)
     }
 
-    private fun synthesizePhononLocked(text: String, cleanVoiceId: String): SynthesisOutcome {
+    private fun synthesizePhononLocked(text: String, cleanVoiceId: String, singleChunkOnly: Boolean = false): SynthesisOutcome {
         if (!ensurePhononLoadedLocked()) {
             return SynthesisOutcome(
                 pcmFloat24k = FloatArray(0),
@@ -1543,7 +1575,10 @@ class OnnxRuntimeEngine(
             )
         }
 
-        val chunks = tokenizer.splitIntoChunks(text, maxTokens = 48)
+        val chunks = tokenizer.splitIntoChunks(
+            text = text,
+            maxTokens = if (singleChunkOnly) 512 else 48
+        )
         if (chunks.isEmpty()) {
             return SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.CPU_NEON, "Empty Phonon input")
         }
@@ -1574,7 +1609,7 @@ class OnnxRuntimeEngine(
         for ((chunkIdx, chunkPair) in chunks.withIndex()) {
             val (chunkIds, wordCount) = chunkPair
             val textLen = chunkIds.size
-            val maxBlocks = (((textLen / 3.0 + 2.5) * 12.5) / 8.0).toInt().coerceIn(3, 40)
+            val maxBlocks = (((textLen / 3.0 + 2.5) * 12.5) / 8.0).toInt().coerceIn(3, if (singleChunkOnly) 220 else 40)
             val framesAfterEos = if (wordCount <= 4) 3 else 1
             var pastSeqLen = 0L
             var pastAudioLatents = TensorPayload(FloatArray(0), null, null, longArrayOf(1L, 0L, 32L), OnnxJavaType.FLOAT)

@@ -318,7 +318,7 @@ class LiteRtKokoroEngine(
             val inputBufs = model.createInputBuffers()
             val outputBufs = model.createOutputBuffers()
             try {
-                val encoded = text.lowercase().take(128).map { it.code }.toIntArray()
+                val encoded = text.lowercase().take(512).map { it.code }.toIntArray()
                 if (inputBufs.isNotEmpty()) {
                     inputBufs[0].writeInt(encoded)
                     model.run(inputBufs, outputBufs)

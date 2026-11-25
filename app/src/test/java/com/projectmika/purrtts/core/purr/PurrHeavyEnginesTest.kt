@@ -302,6 +302,35 @@ class PurrHeavyEnginesTest {
             assertTrue("tool_voice_benchmark" in repo.state.value.slottedCartridges)
             assertTrue("tool_srt_batch_studio" in repo.state.value.slottedCartridges)
             assertTrue("tool_manga_dub_studio" in repo.state.value.slottedCartridges)
+            // TOOL-12 remains disabled by default across state upgrades
+            assertFalse("tool_openai_vision_api" in repo.state.value.slottedCartridges)
+
+            repo.upsertOpenAiVisionEngine(
+                SavedOpenAiVisionEngine(
+                    id = "eng_or_1",
+                    name = "OpenRouter Gemma",
+                    provider = OpenAiVisionProviderPreset.OPENROUTER,
+                    endpointUrl = OpenAiVisionProviderPreset.OPENROUTER.defaultEndpointUrl,
+                    apiKey = "sk-test-1234",
+                    modelId = "google/gemma-3-27b-it"
+                )
+            )
+            assertEquals(1, repo.state.value.savedOpenAiVisionEngines.size)
+            repo.upsertOpenAiVisionEngine(
+                SavedOpenAiVisionEngine(
+                    id = "eng_or_1",
+                    name = "OpenRouter Edited",
+                    provider = OpenAiVisionProviderPreset.OPENROUTER,
+                    endpointUrl = OpenAiVisionProviderPreset.OPENROUTER.defaultEndpointUrl,
+                    apiKey = "sk-test-9999",
+                    modelId = "google/gemini-2.5-flash"
+                )
+            )
+            assertEquals("OpenRouter Edited", repo.state.value.savedOpenAiVisionEngines.single().name)
+            val afterReload = PurrProfileRepository(repoDir)
+            assertEquals("google/gemini-2.5-flash", afterReload.state.value.savedOpenAiVisionEngines.single().modelId)
+            afterReload.deleteOpenAiVisionEngine("eng_or_1")
+            assertTrue(afterReload.state.value.savedOpenAiVisionEngines.isEmpty())
 
             repo.setCatalogSortMode(CartridgeSortMode.SIZE)
             repo.setCatalogFilterMode(CartridgeFilterMode.DOWNLOADED)

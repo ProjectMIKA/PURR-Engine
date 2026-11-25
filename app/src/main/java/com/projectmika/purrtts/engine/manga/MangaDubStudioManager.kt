@@ -11,6 +11,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaBfsPanelSlicer
+import com.projectmika.purrtts.core.manga.MangaCastConsolidator
 import com.projectmika.purrtts.core.manga.MangaCbzExtractorUtils
 import com.projectmika.purrtts.core.manga.MangaChapterEntry
 import com.projectmika.purrtts.core.manga.MangaChapterStatus
@@ -40,6 +41,7 @@ import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrProfileRepository
 import com.projectmika.purrtts.core.purr.PurrVoiceMatcher
+import com.projectmika.purrtts.core.purr.SavedOpenAiVisionEngine
 import com.projectmika.purrtts.core.purr.SegmentRole
 import com.projectmika.purrtts.core.purr.SentimentResult
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
@@ -96,6 +98,17 @@ class MangaDubStudioManager(
     )
     val selectedVisionModel: StateFlow<MangaVisionModelTier> = _selectedVisionModel.asStateFlow()
 
+    private val _selectedOpenAiVisionEngineId = MutableStateFlow(
+        prefs.getString("selected_openai_vision_engine_id", "").orEmpty()
+    )
+    val selectedOpenAiVisionEngineId: StateFlow<String> = _selectedOpenAiVisionEngineId.asStateFlow()
+
+    // 0 = AUTO, 1..24 = explicit character count baseline
+    private val _expectedCharacterCount = MutableStateFlow(
+        prefs.getInt("manga_expected_character_count", 0).coerceIn(0, 24)
+    )
+    val expectedCharacterCount: StateFlow<Int> = _expectedCharacterCount.asStateFlow()
+
     private val _selectedReadingOrder = MutableStateFlow(
         MangaReadingOrder.entries.firstOrNull {
             it.name.equals(prefs.getString("selected_reading_order", null), ignoreCase = true)
@@ -149,10 +162,36 @@ class MangaDubStudioManager(
     }
 
     fun setSelectedVisionModel(tier: MangaVisionModelTier) {
-        prefs.edit().putString("selected_vision_model", tier.name).apply()
+        prefs.edit()
+            .putString("selected_vision_model", tier.name)
+            .putString("selected_openai_vision_engine_id", "")
+            .apply()
         _selectedVisionModel.value = tier
+        _selectedOpenAiVisionEngineId.value = ""
         _activeProjectId.value?.let { pid ->
-            updateProjectConfig(pid, preferredVisionModel = tier)
+            updateProjectConfig(
+                projectId = pid,
+                preferredVisionModel = tier,
+                selectedOpenAiVisionEngineId = ""
+            )
+        }
+    }
+
+    fun setSelectedOpenAiVisionEngine(engineId: String) {
+        val clean = engineId.trim()
+        prefs.edit().putString("selected_openai_vision_engine_id", clean).apply()
+        _selectedOpenAiVisionEngineId.value = clean
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(projectId = pid, selectedOpenAiVisionEngineId = clean)
+        }
+    }
+
+    fun setExpectedCharacterCount(count: Int) {
+        val clamped = count.coerceIn(0, 24)
+        prefs.edit().putInt("manga_expected_character_count", clamped).apply()
+        _expectedCharacterCount.value = clamped
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(projectId = pid, expectedCharacterCount = clamped)
         }
     }
 
@@ -226,6 +265,15 @@ class MangaDubStudioManager(
 
     private fun customVisionPaths(): List<String> = MangaVisionModelTier.entries.mapNotNull { tier ->
         repository.state.value.modelStates[tier.specId]?.localPath
+    }
+
+    private fun resolveActiveOpenAiEngine(project: MangaSeriesProject): SavedOpenAiVisionEngine? {
+        if (!repository.isOpenAiVisionModuleActive()) return null
+        val targetId = project.selectedOpenAiVisionEngineId
+            .ifBlank { _selectedOpenAiVisionEngineId.value }
+            .trim()
+        if (targetId.isEmpty()) return null
+        return repository.state.value.savedOpenAiVisionEngines.firstOrNull { it.id == targetId }
     }
 
     private fun startTelemetryTicker(stage: MangaPipelineStage, detail: String, itemTotal: Int = 0) {
@@ -415,7 +463,7 @@ class MangaDubStudioManager(
         targetProjectId: String?,
         seriesTitleInput: String,
         readingOrder: MangaReadingOrder,
-        autoProduceMp4: Boolean = true,
+        autoProduceMp4: Boolean = false,
         pauseOnFlags: Boolean = true,
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
@@ -423,6 +471,8 @@ class MangaDubStudioManager(
         includeNonBubbleText: Boolean? = null,
         lockVoicesViaCloning: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
+        expectedCharacterCount: Int? = null,
+        selectedOpenAiVisionEngineId: String? = null,
         onComplete: (String) -> Unit
     ) {
         if (_isBusy.value) {
@@ -432,13 +482,20 @@ class MangaDubStudioManager(
         val effectiveVisionTier = preferredVisionModel ?: _selectedVisionModel.value
         val effectiveIncludeNonBubble = includeNonBubbleText ?: _includeNonBubbleText.value
         val effectiveLockVoices = lockVoicesViaCloning ?: _lockVoicesViaCloning.value
+        val effectiveCharCount = (expectedCharacterCount ?: _expectedCharacterCount.value).coerceIn(0, 24)
+        val effectiveOpenAiId = selectedOpenAiVisionEngineId ?: _selectedOpenAiVisionEngineId.value
         prefs.edit()
             .putString("selected_vision_model", effectiveVisionTier.name)
+            .putString("selected_open_ai_vision_engine_id_compat", effectiveOpenAiId)
+            .putString("selected_openai_vision_engine_id", effectiveOpenAiId)
+            .putInt("manga_expected_character_count", effectiveCharCount)
             .putString("selected_reading_order", readingOrder.name)
             .putBoolean("include_non_bubble_text", effectiveIncludeNonBubble)
             .putBoolean("lock_voices_via_cloning", effectiveLockVoices)
             .apply()
         _selectedVisionModel.value = effectiveVisionTier
+        _selectedOpenAiVisionEngineId.value = effectiveOpenAiId
+        _expectedCharacterCount.value = effectiveCharCount
         _selectedReadingOrder.value = readingOrder
         _includeNonBubbleText.value = effectiveIncludeNonBubble
         _lockVoicesViaCloning.value = effectiveLockVoices
@@ -479,6 +536,8 @@ class MangaDubStudioManager(
                     includeNonBubbleText = effectiveIncludeNonBubble,
                     lockVoicesViaCloning = lockVoicesViaCloning ?: existingProject.lockVoicesViaCloning,
                     preferredVisionModel = effectiveVisionTier,
+                    expectedCharacterCount = effectiveCharCount,
+                    selectedOpenAiVisionEngineId = effectiveOpenAiId,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
                 ) ?: MangaSeriesProject(
@@ -493,6 +552,8 @@ class MangaDubStudioManager(
                     includeNonBubbleText = effectiveIncludeNonBubble,
                     lockVoicesViaCloning = effectiveLockVoices,
                     preferredVisionModel = effectiveVisionTier,
+                    expectedCharacterCount = effectiveCharCount,
+                    selectedOpenAiVisionEngineId = effectiveOpenAiId,
                     autoCookFullMp4 = autoProduceMp4,
                     pauseOnFlaggedDecisions = pauseOnFlags
                 )
@@ -835,20 +896,41 @@ class MangaDubStudioManager(
 
         try {
             val activeVisionTier = _selectedVisionModel.value
-            if (proj.id == _activeProjectId.value && proj.preferredVisionModel != activeVisionTier) {
-                proj = proj.copy(preferredVisionModel = activeVisionTier)
+            val activeOpenAiId = _selectedOpenAiVisionEngineId.value
+            if (proj.id == _activeProjectId.value) {
+                if (proj.preferredVisionModel != activeVisionTier) {
+                    proj = proj.copy(preferredVisionModel = activeVisionTier)
+                }
+                if (proj.selectedOpenAiVisionEngineId != activeOpenAiId) {
+                    proj = proj.copy(selectedOpenAiVisionEngineId = activeOpenAiId)
+                }
+                val activeExpected = _expectedCharacterCount.value
+                if (proj.expectedCharacterCount != activeExpected && activeExpected > 0 && proj.expectedCharacterCount == 0) {
+                    proj = proj.copy(expectedCharacterCount = activeExpected)
+                }
+            }
+            val expectedCharCount = proj.expectedCharacterCount.coerceIn(0, 24)
+            val openAiEngine = resolveActiveOpenAiEngine(proj)
+            if (openAiEngine != null) {
+                appendLog("🌐 Using OpenAI Vision Engine: ${openAiEngine.name} (${openAiEngine.modelId})")
+            } else if (proj.selectedOpenAiVisionEngineId.isNotBlank() && !repository.isOpenAiVisionModuleActive()) {
+                appendLog("ℹ️ TOOL-12 ejected — using local VLM (${proj.preferredVisionModel.shortLabel})")
+            }
+            if (expectedCharCount > 0) {
+                appendLog("🎭 Character count baseline: $expectedCharCount speaking character(s) (excl. NARRATOR)")
             }
             val effectiveIncludeNonBubble = proj.includeNonBubbleText
 
-            // Step 2A: Fast Storyboard Context Pass across chapter pages before zoomed panel OCR
+            // Step 2A: Multi-sheet Storyboard Context Pass across chapter pages before zoomed panel OCR
             val pageFiles = ch.pages.mapNotNull { pg ->
                 File(pg.localImagePath).takeIf { it.isFile }
             }
             var pageSynopses = emptyMap<Int, String>()
             if (pageFiles.isNotEmpty()) {
+                val activeLabel = openAiEngine?.name ?: proj.preferredVisionModel.shortLabel
                 reportTelemetry(
                     stage = MangaPipelineStage.VISION_SCAN,
-                    detail = "🗺️ ${proj.preferredVisionModel.shortLabel} BUILDING CHAPTER STORYBOARD CONTEXT (${pageFiles.size} pg)...",
+                    detail = "🗺️ $activeLabel BUILDING CHAPTER STORYBOARD CONTEXT (${pageFiles.size} pg)...",
                     progress = progressOffset + storyboardSpan * 0.35f,
                     itemCurrent = 0,
                     itemTotal = ch.pages.size,
@@ -862,6 +944,8 @@ class MangaDubStudioManager(
                     powerUserVisionUrl = proj.powerUserVisionUrl,
                     preferredVisionModel = proj.preferredVisionModel,
                     customModelPaths = modelPaths,
+                    expectedCharacterCount = expectedCharCount,
+                    openAiEngine = openAiEngine,
                     onLog = { msg -> appendLog(msg) }
                 )
                 if (bible != null) {
@@ -918,7 +1002,7 @@ class MangaDubStudioManager(
 
             for ((pageIdx, page) in ch.pages.withIndex()) {
                 if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
-                val tierNote = proj.preferredVisionModel.shortLabel
+                val tierNote = openAiEngine?.name ?: proj.preferredVisionModel.shortLabel
                 reportTelemetry(
                     stage = MangaPipelineStage.VISION_SCAN,
                     detail = "🧠 $tierNote SCANNING PAGE ${pageIdx + 1}/${ch.pages.size} (${ch.readingOrder.shortLabel})...",
@@ -944,6 +1028,8 @@ class MangaDubStudioManager(
                         pageSynopsis = pageSynopses[pageIdx].orEmpty(),
                         includeNonBubbleText = effectiveIncludeNonBubble,
                         kvCacheEnabled = _mangaKvCacheEnabled.value,
+                        expectedCharacterCount = expectedCharCount,
+                        openAiEngine = openAiEngine,
                         onLog = { msg -> appendLog(msg) },
                         onPanelProgress = { panDone, panTotal, bubbleNote ->
                             val panFrac = (pageIdx.toFloat() + (panDone.toFloat() / panTotal.coerceAtLeast(1).toFloat())) / ch.pages.size.coerceAtLeast(1).toFloat()
@@ -1053,11 +1139,64 @@ class MangaDubStudioManager(
                 }
             }
 
+            // Step 2A-Post: Cohesive Chapter Story & Cast Consolidation Pass (bridges page boundaries)
+            if (roster.isNotEmpty() && updatedPages.isNotEmpty()) {
+                reportTelemetry(
+                    stage = MangaPipelineStage.VOICE_CASTING,
+                    detail = "🧩 CONSOLIDATING CHAPTER STORY, GENDERS & CAST ACROSS PAGES...",
+                    progress = castingOffset + castingSpan * 0.12f,
+                    itemCurrent = 0,
+                    itemTotal = roster.size,
+                    addLog = true
+                )
+                val preMerged = recomputeCharacterLineCounts(roster, ch.copy(pages = updatedPages), proj.chapters.filter { it.id != chapterId })
+                val consolidation = visionEngine.consolidateChapterStoryAndCast(
+                    seriesTitle = proj.seriesTitle,
+                    currentStorySummary = proj.storyContextSummary,
+                    roster = preMerged,
+                    pages = updatedPages,
+                    expectedCharacterCount = expectedCharCount,
+                    preferredVisionModel = proj.preferredVisionModel,
+                    powerUserVisionUrl = proj.powerUserVisionUrl,
+                    openAiEngine = openAiEngine,
+                    customModelPaths = modelPaths,
+                    onLog = { msg -> appendLog(msg) }
+                )
+                if (consolidation != null && consolidation.cohesiveStorySummary.isNotBlank()) {
+                    proj = proj.copy(storyContextSummary = consolidation.cohesiveStorySummary)
+                    appendLog("📖 Consolidated story: ${consolidation.cohesiveStorySummary.take(96)}")
+                }
+                val (mergedRoster, mergedPages) = MangaCastConsolidator.consolidateChapterCastAndLines(
+                    roster = preMerged,
+                    pages = updatedPages,
+                    consolidation = consolidation,
+                    expectedCharacterCount = expectedCharCount
+                )
+                if (mergedRoster.size != preMerged.size || consolidation != null) {
+                    appendLog("🎭 Consolidated cast: ${preMerged.size} -> ${mergedRoster.size} canonical speaker(s)")
+                }
+                roster.clear()
+                roster.addAll(mergedRoster)
+                updatedPages.clear()
+                updatedPages.addAll(mergedPages)
+                sampleLinesBySpeaker.clear()
+                for (pg in updatedPages) {
+                    for (pan in pg.panels) {
+                        for (ln in pan.lines) {
+                            val txt = ln.sanitizedText.ifBlank { ln.rawText }.trim()
+                            if (txt.isNotEmpty() && !MangaTextBender.isNarratorName(ln.speakerName)) {
+                                sampleLinesBySpeaker.getOrPut(ln.speakerName) { mutableListOf() } += txt
+                            }
+                        }
+                    }
+                }
+            }
+
             if (roster.isNotEmpty()) {
                 reportTelemetry(
                     stage = MangaPipelineStage.VOICE_CASTING,
-                    detail = "🎭 GEMMA 4 DESIGNING QWEN3 1.7B VOICES FOR ${roster.size} CHARACTER(S)...",
-                    progress = castingOffset + castingSpan * 0.2f,
+                    detail = "🎭 DESIGNING QWEN3 1.7B VOICES FOR ${roster.size} CHARACTER(S)...",
+                    progress = castingOffset + castingSpan * 0.30f,
                     itemCurrent = 0,
                     itemTotal = roster.size,
                     addLog = true
@@ -1069,6 +1208,7 @@ class MangaDubStudioManager(
                     sampleLinesBySpeaker = sampleLinesBySpeaker,
                     preferredVisionModel = proj.preferredVisionModel,
                     powerUserVisionUrl = proj.powerUserVisionUrl,
+                    openAiEngine = openAiEngine,
                     customModelPaths = modelPaths,
                     onLog = { msg -> appendLog(msg) }
                 )
@@ -1174,6 +1314,83 @@ class MangaDubStudioManager(
                         pitchScale = pitchScale ?: ch.pitchScale
                     )
                 }
+            )
+        }
+    }
+
+    fun updateCharacterGender(
+        projectId: String,
+        characterId: String,
+        gender: VoiceGender
+    ) {
+        mutateProject(projectId) { proj ->
+            val targetName = proj.characters.firstOrNull { it.id == characterId }?.name.orEmpty()
+            val updatedChars = proj.characters.map { ch ->
+                if (ch.id != characterId) ch
+                else ch.copy(
+                    gender = gender,
+                    voiceDesignPrompt = if (ch.voiceDesignPrompt.isBlank()) {
+                        MangaTextBender.genericRoleVoicePrompt(gender)
+                    } else ch.voiceDesignPrompt
+                )
+            }
+            val updatedChapters = proj.chapters.map { ch ->
+                ch.copy(
+                    pages = ch.pages.map { pg ->
+                        pg.copy(
+                            panels = pg.panels.map { pan ->
+                                pan.copy(
+                                    lines = pan.lines.map { ln ->
+                                        val isMatch = ln.speakerId == characterId ||
+                                            (targetName.isNotBlank() && ln.speakerName.equals(targetName, ignoreCase = true))
+                                        if (isMatch) ln.copy(genderHint = gender) else ln
+                                    }
+                                )
+                            }
+                        )
+                    }
+                )
+            }
+            proj.copy(
+                updatedAtEpochMs = System.currentTimeMillis(),
+                characters = updatedChars,
+                chapters = updatedChapters
+            )
+        }
+    }
+
+    fun updateStorySummary(projectId: String, storySummary: String) {
+        mutateProject(projectId) { proj ->
+            proj.copy(
+                updatedAtEpochMs = System.currentTimeMillis(),
+                storyContextSummary = storySummary.trim()
+            )
+        }
+    }
+
+    fun applyCharacterCountBaselineNow(projectId: String, chapterId: String, expectedCount: Int) {
+        val clamped = expectedCount.coerceIn(0, 24)
+        setExpectedCharacterCount(clamped)
+        mutateProject(projectId) { proj ->
+            val ch = proj.chapters.firstOrNull { it.id == chapterId }
+                ?: return@mutateProject proj.copy(expectedCharacterCount = clamped)
+            val (mergedRoster, mergedPages) = MangaCastConsolidator.consolidateChapterCastAndLines(
+                roster = proj.characters,
+                pages = ch.pages,
+                consolidation = null,
+                expectedCharacterCount = clamped
+            )
+            val updatedChapters = proj.chapters.map { if (it.id == chapterId) it.copy(pages = mergedPages) else it }
+            val synced = recomputeCharacterLineCounts(
+                mergedRoster,
+                updatedChapters.firstOrNull { it.id == chapterId },
+                updatedChapters.filter { it.id != chapterId }
+            )
+            proj.copy(
+                updatedAtEpochMs = System.currentTimeMillis(),
+                expectedCharacterCount = clamped,
+                characters = synced,
+                chapters = updatedChapters
             )
         }
     }
@@ -1355,6 +1572,8 @@ class MangaDubStudioManager(
         lockVoicesViaCloning: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
+        expectedCharacterCount: Int? = null,
+        selectedOpenAiVisionEngineId: String? = null,
         autoCookFullMp4: Boolean? = null,
         pauseOnFlaggedDecisions: Boolean? = null
     ) {
@@ -1410,6 +1629,8 @@ class MangaDubStudioManager(
                 lockVoicesViaCloning = lockVoicesViaCloning ?: proj.lockVoicesViaCloning,
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
                 preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
+                expectedCharacterCount = expectedCharacterCount?.coerceIn(0, 24) ?: proj.expectedCharacterCount,
+                selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId ?: proj.selectedOpenAiVisionEngineId,
                 autoCookFullMp4 = autoCookFullMp4 ?: proj.autoCookFullMp4,
                 pauseOnFlaggedDecisions = pauseOnFlaggedDecisions ?: proj.pauseOnFlaggedDecisions,
                 chapters = updatedChapters
@@ -1626,27 +1847,38 @@ class MangaDubStudioManager(
                         isNarrator = isNarratorLine,
                         genderHint = line.genderHint
                     )
+                    val bubbleSpeechText = MangaTextBender.prepareSingleBubbleSpeechText(textToSpeak)
+                    if (bubbleSpeechText.isEmpty()) {
+                        renderedLines += line
+                        continue
+                    }
                     val outcome = backendRouter.synthesizeSpeechChunk(
                         chunk = PurrChunk.Speech(
-                            text = textToSpeak,
+                            text = bubbleSpeechText,
                             role = if (line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
                             targetVoiceId = synthProfile.primaryVoiceId,
                             speakingRate = synthProfile.baseSpeed,
                             pitch = synthProfile.basePitch,
                             volumeGain = 1.0f,
-                            sentiment = SentimentResult()
+                            sentiment = SentimentResult(),
+                            singleChunkOnly = true
                         ),
                         profile = synthProfile
                     )
 
                     val wavFile = File(audioDir, "${line.id}.wav")
-                    val pcmFloat = outcome.pcmFloat24k
+                    val rawPcmFloat = outcome.pcmFloat24k
+                    val pcmFloat = if (rawPcmFloat.isNotEmpty()) {
+                        PurrDspProcessor.conditionDubClipOnset(rawPcmFloat, sampleRate)
+                    } else {
+                        rawPcmFloat
+                    }
                     val durMs = if (pcmFloat.isNotEmpty()) {
                         val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
                         writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
                         ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
                     } else {
-                        maxOf(1400L, textToSpeak.length * 60L)
+                        maxOf(1400L, bubbleSpeechText.length * 60L)
                     }
                     renderedLines += line.copy(
                         renderedWavPath = if (pcmFloat.isNotEmpty()) wavFile.absolutePath else "",
@@ -1837,14 +2069,19 @@ class MangaDubStudioManager(
                 profile = designProfile
             )
             synthesizedAnySeed = true
-            val pcmFloat = outcome.pcmFloat24k
-            if (pcmFloat.isEmpty()) {
+            val rawSeedPcm = outcome.pcmFloat24k
+            if (rawSeedPcm.isEmpty()) {
                 appendLog("⚠️ Seed clip empty for [${ch.name}]; keeping direct VoiceDesign fallback")
                 continue
             }
+            val cleanSeedPcm = PurrDspProcessor.prepareCleanCloneSeedPcm(
+                samples = rawSeedPcm,
+                sampleRate = PurrDspProcessor.SAMPLE_RATE_HZ,
+                tailSilenceMs = 120
+            )
 
             val seedFile = File(seedDir, "${sanitizeSlug(ch.id)}_${promptHash}.wav")
-            val pcm16 = PurrDspProcessor.float32ToPcm16Le(pcmFloat)
+            val pcm16 = PurrDspProcessor.float32ToPcm16Le(cleanSeedPcm)
             writePcm16MonoWav(seedFile, pcm16, pcm16.size, PurrDspProcessor.SAMPLE_RATE_HZ)
 
             // NOTE: `family` is only consumed by the Sherpa clone lanes (Pocket/ZipVoice asset
@@ -1876,7 +2113,7 @@ class MangaDubStudioManager(
             )
             appendLog(
                 "🔒 Locked [${ch.name}] seed -> $targetCloneEngineId " +
-                    "(${pcmFloat.size / PurrDspProcessor.SAMPLE_RATE_HZ}s) seed=\"${seedTranscript.take(44)}…\""
+                    "(${cleanSeedPcm.size / PurrDspProcessor.SAMPLE_RATE_HZ}s) seed=\"${seedTranscript.take(44)}…\""
             )
         }
 

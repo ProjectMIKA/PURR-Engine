@@ -40,6 +40,8 @@ import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.MikaStopConfig
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
+import com.projectmika.purrtts.core.purr.OpenAiEndpointUtils
+import com.projectmika.purrtts.core.purr.OpenAiVisionProviderPreset
 import com.projectmika.purrtts.core.purr.PhoneticRule
 import com.projectmika.purrtts.core.purr.PurrChunk
 import com.projectmika.purrtts.core.purr.PurrCloneAudioCleaner
@@ -54,6 +56,7 @@ import com.projectmika.purrtts.core.purr.PurrTextProcessor
 import com.projectmika.purrtts.core.purr.PurrThemeConfig
 import com.projectmika.purrtts.core.purr.PurrUpdateChecker
 import com.projectmika.purrtts.core.purr.RuleCategory
+import com.projectmika.purrtts.core.purr.SavedOpenAiVisionEngine
 import com.projectmika.purrtts.core.purr.SavedVoiceDesign
 import com.projectmika.purrtts.core.purr.SegmentRole
 import com.projectmika.purrtts.core.purr.SentimentResult
@@ -1811,6 +1814,12 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val selectedMangaVisionModel: StateFlow<MangaVisionModelTier>
         get() = mangaDubManager.selectedVisionModel
 
+    val selectedMangaOpenAiEngineId: StateFlow<String>
+        get() = mangaDubManager.selectedOpenAiVisionEngineId
+
+    val mangaExpectedCharacterCount: StateFlow<Int>
+        get() = mangaDubManager.expectedCharacterCount
+
     val selectedMangaReadingOrder: StateFlow<MangaReadingOrder>
         get() = mangaDubManager.selectedReadingOrder
 
@@ -1825,6 +1834,60 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
 
     fun selectMangaVisionModel(tier: MangaVisionModelTier) {
         mangaDubManager.setSelectedVisionModel(tier)
+    }
+
+    fun selectMangaOpenAiVisionEngine(engineId: String) {
+        mangaDubManager.setSelectedOpenAiVisionEngine(engineId)
+    }
+
+    fun setMangaExpectedCharacterCount(count: Int) {
+        mangaDubManager.setExpectedCharacterCount(count)
+    }
+
+    fun saveOpenAiVisionEngine(
+        existingId: String?,
+        name: String,
+        provider: OpenAiVisionProviderPreset,
+        endpointUrl: String,
+        apiKey: String,
+        modelId: String
+    ) {
+        val now = System.currentTimeMillis()
+        val id = existingId?.takeIf { it.isNotBlank() } ?: "oai_${now}_${name.hashCode().toUInt()}"
+        val prev = repository.state.value.savedOpenAiVisionEngines.firstOrNull { it.id == id }
+        val normalizedUrl = OpenAiEndpointUtils.normalizeChatCompletionsUrl(endpointUrl)
+        val entry = SavedOpenAiVisionEngine(
+            id = id,
+            name = name.trim(),
+            provider = provider,
+            endpointUrl = normalizedUrl,
+            apiKey = apiKey.trim(),
+            modelId = modelId.trim(),
+            createdAtEpochMs = prev?.createdAtEpochMs ?: now,
+            updatedAtEpochMs = now
+        )
+        repository.upsertOpenAiVisionEngine(entry)
+        showToast(if (existingId.isNullOrBlank()) "Saved OpenAI Vision engine: ${entry.name}" else "Updated engine: ${entry.name}")
+    }
+
+    fun deleteOpenAiVisionEngine(engineId: String) {
+        repository.deleteOpenAiVisionEngine(engineId)
+        if (mangaDubManager.selectedOpenAiVisionEngineId.value == engineId) {
+            mangaDubManager.setSelectedOpenAiVisionEngine("")
+        }
+        showToast("Deleted saved OpenAI Vision engine")
+    }
+
+    fun testOpenAiVisionEngine(
+        endpointUrl: String,
+        apiKey: String,
+        modelId: String,
+        onResult: (Result<String>) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = mangaDubManager.visionEngine.testOpenAiEndpointConnection(endpointUrl, apiKey, modelId)
+            onResult(res)
+        }
     }
 
     fun selectMangaReadingOrder(order: MangaReadingOrder) {
@@ -1855,14 +1918,16 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         targetProjectId: String?,
         seriesTitleInput: String,
         readingOrder: MangaReadingOrder,
-        autoProduceMp4: Boolean = true,
+        autoProduceMp4: Boolean = false,
         pauseOnFlags: Boolean = true,
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
         includeNonBubbleText: Boolean? = null,
         lockVoicesViaCloning: Boolean? = null,
-        preferredVisionModel: MangaVisionModelTier? = null
+        preferredVisionModel: MangaVisionModelTier? = null,
+        expectedCharacterCount: Int? = null,
+        selectedOpenAiVisionEngineId: String? = null
     ) {
         mangaDubManager.importCbzChapter(
             uri = uri,
@@ -1876,7 +1941,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             videoQuality = videoQuality,
             includeNonBubbleText = includeNonBubbleText,
             lockVoicesViaCloning = lockVoicesViaCloning,
-            preferredVisionModel = preferredVisionModel
+            preferredVisionModel = preferredVisionModel,
+            expectedCharacterCount = expectedCharacterCount,
+            selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId
         ) { msg ->
             showToast(msg)
         }
@@ -1963,6 +2030,29 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         cameraEffect: MangaPanelCameraEffect
     ) = mangaDubManager.updatePanelCameraEffect(projectId, chapterId, pageIndex, panelId, cameraEffect)
 
+    fun updateMangaCharacterGender(
+        projectId: String,
+        characterId: String,
+        gender: VoiceGender
+    ) = mangaDubManager.updateCharacterGender(projectId, characterId, gender)
+
+    fun updateMangaStorySummary(
+        projectId: String,
+        storySummary: String
+    ) = mangaDubManager.updateStorySummary(projectId, storySummary)
+
+    fun applyMangaCharacterCountBaseline(
+        projectId: String,
+        chapterId: String,
+        expectedCount: Int
+    ) {
+        mangaDubManager.applyCharacterCountBaselineNow(projectId, chapterId, expectedCount)
+        showToast(
+            if (expectedCount <= 0) "Character count set to AUTO"
+            else "Applied character count baseline ($expectedCount)"
+        )
+    }
+
     fun updateMangaProjectConfig(
         projectId: String,
         readingOrder: MangaReadingOrder? = null,
@@ -1974,6 +2064,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         lockVoicesViaCloning: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
+        expectedCharacterCount: Int? = null,
+        selectedOpenAiVisionEngineId: String? = null,
         autoCookFullMp4: Boolean? = null,
         pauseOnFlaggedDecisions: Boolean? = null
     ) = mangaDubManager.updateProjectConfig(
@@ -1987,6 +2079,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         lockVoicesViaCloning = lockVoicesViaCloning,
         powerUserVisionUrl = powerUserVisionUrl,
         preferredVisionModel = preferredVisionModel,
+        expectedCharacterCount = expectedCharacterCount,
+        selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId,
         autoCookFullMp4 = autoCookFullMp4,
         pauseOnFlaggedDecisions = pauseOnFlaggedDecisions
     )
@@ -2023,32 +2117,31 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             character = character,
             availableVoices = voices
         )
-        val voiceDesc = voices.firstOrNull { it.id == resolved.primaryVoiceId }
-        val sampleLine = "Listen closely! This is ${character.name} checking in for manga dub pre-production."
-        if (voiceDesc != null) {
-            auditionText(text = sampleLine, overrideVoice = voiceDesc)
-        } else {
-            viewModelScope.launch(Dispatchers.IO) {
-                val out = backendRouter.synthesizeSpeechChunk(
-                    chunk = PurrChunk.Speech(
-                        text = sampleLine,
-                        role = SegmentRole.DIALOGUE,
-                        targetVoiceId = resolved.primaryVoiceId,
-                        speakingRate = resolved.baseSpeed,
-                        pitch = resolved.basePitch,
-                        volumeGain = 1.0f,
-                        sentiment = SentimentResult()
-                    ),
-                    profile = resolved
-                )
-                if (out.pcmFloat24k.isNotEmpty()) {
-                    val tempWav = File(app.cacheDir, "manga_char_audition.wav")
-                    val pcm = PurrDspProcessor.float32ToPcm16Le(out.pcmFloat24k)
-                    writePcm16MonoWav(tempWav, pcm, pcm.size, PurrDspProcessor.SAMPLE_RATE_HZ)
-                    playWavFileInternal(tempWav, "[MANGA] ${character.name}", out.engineSummary)
-                } else {
-                    showToast("No voice engine produced audio for ${character.name} — install a TTS/Clone cartridge!")
-                }
+        val sampleLine = MangaTextBender.prepareSingleBubbleSpeechText(
+            "Listen closely! This is ${character.name} checking in for manga dub pre-production."
+        )
+        viewModelScope.launch(Dispatchers.IO) {
+            val out = backendRouter.synthesizeSpeechChunk(
+                chunk = PurrChunk.Speech(
+                    text = sampleLine,
+                    role = SegmentRole.DIALOGUE,
+                    targetVoiceId = resolved.primaryVoiceId,
+                    speakingRate = resolved.baseSpeed,
+                    pitch = resolved.basePitch,
+                    volumeGain = 1.0f,
+                    sentiment = SentimentResult(),
+                    singleChunkOnly = true
+                ),
+                profile = resolved
+            )
+            if (out.pcmFloat24k.isNotEmpty()) {
+                val conditioned = PurrDspProcessor.conditionDubClipOnset(out.pcmFloat24k, PurrDspProcessor.SAMPLE_RATE_HZ)
+                val tempWav = File(app.cacheDir, "manga_char_audition.wav")
+                val pcm = PurrDspProcessor.float32ToPcm16Le(conditioned)
+                writePcm16MonoWav(tempWav, pcm, pcm.size, PurrDspProcessor.SAMPLE_RATE_HZ)
+                playWavFileInternal(tempWav, "[MANGA] ${character.name}", out.engineSummary)
+            } else {
+                showToast("No voice engine produced audio for ${character.name} — install a TTS/Clone cartridge!")
             }
         }
     }

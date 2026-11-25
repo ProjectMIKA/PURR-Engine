@@ -292,7 +292,7 @@ class PurrTextProcessorTest {
         assertEquals(8, narratorSubs.count { it.id.startsWith("sub_piper_") })
         assertEquals(8, voices.count { it.requiredSubCartridgeId?.startsWith("sub_piper_") == true })
 
-        val expectedTools = setOf(
+        val defaultSlottedTools = setOf(
             "tool_purr_engine",
             "tool_dsp_rack",
             "tool_symbol_shield",
@@ -305,9 +305,11 @@ class PurrTextProcessorTest {
             "tool_srt_batch_studio",
             "tool_manga_dub_studio"
         )
+        val expectedTools = defaultSlottedTools + "tool_openai_vision_api"
         val tools = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
-        assertTrue(expectedTools.all { it in defaultState.slottedCartridges })
+        assertTrue(defaultSlottedTools.all { it in defaultState.slottedCartridges })
+        assertFalse("tool_openai_vision_api" in defaultState.slottedCartridges)
 
         val cloning = catalog.filter { it.category == CartridgeCategory.CLONING && !it.isSubCartridge }
         assertEquals(

@@ -151,7 +151,8 @@ class TtsBackendRouter(
                     voiceId = voiceId,
                     speakingRate = effectiveRate,
                     pitch = effectivePitch,
-                    profile = profile
+                    profile = profile,
+                    singleChunkOnly = chunk.singleChunkOnly
                 )
             }
             BackendType.QWEN3_NATIVE -> {

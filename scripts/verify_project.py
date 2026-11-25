@@ -84,6 +84,7 @@ REQUIRED_FILES = [
     "app/src/main/java/com/projectmika/purrtts/ui/forge/VoiceBenchmarkModuleWindow.kt",
     "app/src/main/java/com/projectmika/purrtts/ui/forge/SrtBatchStudioModuleWindow.kt",
     "app/src/main/java/com/projectmika/purrtts/ui/forge/MangaDubStudioModuleWindow.kt",
+    "app/src/main/java/com/projectmika/purrtts/ui/forge/OpenAiVisionModuleWindow.kt",
     "app/src/test/java/com/projectmika/purrtts/core/purr/PurrTextProcessorTest.kt",
     "app/src/test/java/com/projectmika/purrtts/core/purr/PurrThemeEngineTest.kt",
     "app/src/test/java/com/projectmika/purrtts/core/purr/PurrHeavyEnginesTest.kt",

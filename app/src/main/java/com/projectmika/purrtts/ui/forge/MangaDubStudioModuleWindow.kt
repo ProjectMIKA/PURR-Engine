@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
@@ -50,6 +51,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -73,6 +75,7 @@ import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.ModelBundleState
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProfile
+import com.projectmika.purrtts.core.purr.SavedOpenAiVisionEngine
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.engine.manga.LiteRtGemmaVisionEngine
@@ -93,6 +96,11 @@ private enum class MangaPreProdTab(val label: String) {
     DECISIONS("DECISIONS"),
     CAST("CAST ROSTER"),
     STORYBOARD("STORYBOARD")
+}
+
+private sealed interface MangaVisionLlmChoice {
+    data class LocalTier(val tier: MangaVisionModelTier) : MangaVisionLlmChoice
+    data class SavedApiEngine(val engine: SavedOpenAiVisionEngine) : MangaVisionLlmChoice
 }
 
 /**
@@ -146,6 +154,14 @@ fun MangaDubStudioModuleWindowBody(
         mutableStateOf(activeProject?.videoQuality ?: MangaVideoQuality.HD_720P)
     }
     val selectedVisionTier by viewModel.selectedMangaVisionModel.collectAsState()
+    val selectedOpenAiEngineId by viewModel.selectedMangaOpenAiEngineId.collectAsState()
+    val globalExpectedCharCount by viewModel.mangaExpectedCharacterCount.collectAsState()
+    var expectedCharCount by remember(activeProject?.id, activeProject?.expectedCharacterCount, globalExpectedCharCount) {
+        mutableIntStateOf(activeProject?.expectedCharacterCount ?: globalExpectedCharCount)
+    }
+    var charCountFieldText by remember(expectedCharCount) {
+        mutableStateOf(if (expectedCharCount > 0) expectedCharCount.toString() else "")
+    }
     val globalIncludeNonBubbleText by viewModel.includeMangaNonBubbleText.collectAsState()
     val includeNonBubbleText = activeProject?.includeNonBubbleText ?: globalIncludeNonBubbleText
     val globalLockVoicesViaCloning by viewModel.lockMangaVoicesViaCloning.collectAsState()
@@ -153,7 +169,7 @@ fun MangaDubStudioModuleWindowBody(
     val globalMangaMaxPanelsPerPage by viewModel.mangaMaxPanelsPerPage.collectAsState()
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     var autoCookFullMp4 by remember(activeProject?.id) {
-        mutableStateOf(activeProject?.autoCookFullMp4 ?: true)
+        mutableStateOf(activeProject?.autoCookFullMp4 ?: false)
     }
     var pauseOnFlags by remember(activeProject?.id) {
         mutableStateOf(activeProject?.pauseOnFlaggedDecisions ?: true)
@@ -182,8 +198,26 @@ fun MangaDubStudioModuleWindowBody(
     }
     val qwenDesignState = forgeState.modelStates[Qwen3TtsEngine.SPEC_DESIGN_17B]
 
-    val hasAnyVisionModel = visionStatesByTier.values.any { it?.state == DownloadState.INSTALLED }
-    val selectedVisionInstalled = visionStatesByTier[selectedVisionTier]?.state == DownloadState.INSTALLED
+    val isOpenAiToolActive = "tool_openai_vision_api" in forgeState.slottedCartridges
+    val enabledOpenAiEngines = remember(isOpenAiToolActive, forgeState.savedOpenAiVisionEngines) {
+        if (isOpenAiToolActive) forgeState.savedOpenAiVisionEngines else emptyList()
+    }
+    val visionLlmOptions = remember(enabledOpenAiEngines) {
+        MangaVisionModelTier.entries.map { MangaVisionLlmChoice.LocalTier(it) } +
+            enabledOpenAiEngines.map { MangaVisionLlmChoice.SavedApiEngine(it) }
+    }
+    val activeOpenAiId = (activeProject?.selectedOpenAiVisionEngineId?.takeIf { it.isNotBlank() } ?: selectedOpenAiEngineId)
+    val selectedOpenAiEngine = enabledOpenAiEngines.firstOrNull { it.id == activeOpenAiId }
+    val selectedVisionChoice: MangaVisionLlmChoice = remember(selectedVisionTier, selectedOpenAiEngine, visionLlmOptions) {
+        if (selectedOpenAiEngine != null) {
+            MangaVisionLlmChoice.SavedApiEngine(selectedOpenAiEngine)
+        } else {
+            MangaVisionLlmChoice.LocalTier(selectedVisionTier)
+        }
+    }
+
+    val hasAnyVisionModel = visionStatesByTier.values.any { it?.state == DownloadState.INSTALLED } || selectedOpenAiEngine != null
+    val selectedVisionInstalled = selectedOpenAiEngine != null || visionStatesByTier[selectedVisionTier]?.state == DownloadState.INSTALLED
     val hasQwenDesign = qwenDesignState?.state == DownloadState.INSTALLED
     var expandEngineDeck by remember(hasAnyVisionModel) {
         mutableStateOf(!hasAnyVisionModel)
@@ -206,7 +240,9 @@ fun MangaDubStudioModuleWindowBody(
                 videoQuality = selectedVideoQuality,
                 includeNonBubbleText = includeNonBubbleText,
                 lockVoicesViaCloning = lockVoicesViaCloning,
-                preferredVisionModel = selectedVisionTier
+                preferredVisionModel = selectedVisionTier,
+                expectedCharacterCount = expectedCharCount,
+                selectedOpenAiVisionEngineId = selectedOpenAiEngine?.id ?: ""
             )
         }
     }
@@ -327,7 +363,33 @@ fun MangaDubStudioModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(8.dp))
 
-        // Compact AI Readiness Strip (expandable to switch Vision LLMs & install VoiceDesign)
+        // Vision LLM Selection Dropdown (Local VLMs + saved TOOL-12 OpenAI Vision engines when active)
+        CyberDropdown(
+            label = "> VISION_LLM_ENGINE",
+            options = visionLlmOptions,
+            selectedOption = selectedVisionChoice,
+            optionLabel = { choice ->
+                when (choice) {
+                    is MangaVisionLlmChoice.LocalTier -> {
+                        val readyTag = if (visionStatesByTier[choice.tier]?.state == DownloadState.INSTALLED) "READY" else "INSTALL BELOW"
+                        "LOCAL // ${choice.tier.shortLabel} [$readyTag]"
+                    }
+                    is MangaVisionLlmChoice.SavedApiEngine -> {
+                        "API (${choice.engine.provider.label}) // ${choice.engine.name} [${choice.engine.modelId}]"
+                    }
+                }
+            },
+            onSelect = { chosen ->
+                when (chosen) {
+                    is MangaVisionLlmChoice.LocalTier -> viewModel.selectMangaVisionModel(chosen.tier)
+                    is MangaVisionLlmChoice.SavedApiEngine -> viewModel.selectMangaOpenAiVisionEngine(chosen.engine.id)
+                }
+            },
+            accent = if (selectedVisionInstalled) MikaColors.TerminalGreen else MikaColors.NeonCyan
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // Compact AI Readiness & Local Model Installer Strip
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -348,15 +410,15 @@ fun MangaDubStudioModuleWindowBody(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                val activeBrainText = if (selectedVisionInstalled) {
-                    "${selectedVisionTier.shortLabel} [READY]"
-                } else {
-                    "${selectedVisionTier.shortLabel} [INSTALL BELOW]"
+                val activeBrainText = when {
+                    selectedOpenAiEngine != null -> "API: ${selectedOpenAiEngine.name} [READY]"
+                    selectedVisionInstalled -> "${selectedVisionTier.shortLabel} [READY]"
+                    else -> "${selectedVisionTier.shortLabel} [INSTALL BELOW]"
                 }
                 val voiceDeckText = if (hasQwenDesign) "QWEN3 1.7B DESIGN [READY]" else "VOICEDESIGN OPTIONAL"
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "VISION LLM: $activeBrainText • $voiceDeckText",
+                        text = "$activeBrainText • $voiceDeckText",
                         color = if (selectedVisionInstalled) MikaColors.TerminalGreen else MikaColors.SsrGold,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
@@ -365,10 +427,10 @@ fun MangaDubStudioModuleWindowBody(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = if (expandEngineDeck) {
-                            "Tap to collapse 6-model VLM switcher"
-                        } else {
-                            "Tap to switch across Gemma 4 E2B/E4B, Qwen 3.5 VL, LFM 2.5 VL & InternVL3"
+                        text = when {
+                            expandEngineDeck -> "Tap to collapse local VLM weights & Qwen3 1.7B installer"
+                            isOpenAiToolActive -> "TOOL-12 OpenAI Vision API active (${enabledOpenAiEngines.size} saved) • Tap to install local VLMs"
+                            else -> "Tap to install local VLMs • Slam TOOL-12 in Cartridge Bay -> TOOLS for OpenAI Vision APIs"
                         },
                         color = MikaColors.DimText,
                         fontFamily = FontFamily.Monospace,
@@ -376,7 +438,7 @@ fun MangaDubStudioModuleWindowBody(
                     )
                 }
                 MikaTagPill(
-                    label = if (expandEngineDeck) "HIDE" else "MODELS",
+                    label = if (expandEngineDeck) "HIDE" else "WEIGHTS",
                     selected = expandEngineDeck,
                     activeColor = MikaColors.NeonCyan,
                     onClick = { expandEngineDeck = !expandEngineDeck }
@@ -657,6 +719,86 @@ fun MangaDubStudioModuleWindowBody(
                     }
                 }
             }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "CAST QTY:",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.sp,
+                    modifier = Modifier.width(62.dp)
+                )
+                MikaTagPill(
+                    label = "AUTO",
+                    selected = expectedCharCount == 0,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = {
+                        expectedCharCount = 0
+                        charCountFieldText = ""
+                        viewModel.setMangaExpectedCharacterCount(0)
+                    }
+                )
+                MikaTagPill(
+                    label = "-",
+                    selected = false,
+                    activeColor = MikaColors.NeonPurple,
+                    onClick = {
+                        val next = (expectedCharCount - 1).coerceIn(0, 24)
+                        expectedCharCount = next
+                        charCountFieldText = if (next > 0) next.toString() else ""
+                        viewModel.setMangaExpectedCharacterCount(next)
+                    }
+                )
+                OutlinedTextField(
+                    value = charCountFieldText,
+                    onValueChange = { raw ->
+                        val digits = raw.filter { it.isDigit() }.take(2)
+                        charCountFieldText = digits
+                        val parsed = digits.toIntOrNull()?.coerceIn(0, 24) ?: 0
+                        expectedCharCount = parsed
+                        viewModel.setMangaExpectedCharacterCount(parsed)
+                    },
+                    placeholder = {
+                        Text("AUTO", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = MikaColors.NeonCyan)
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    textStyle = TextStyle(color = MikaColors.PrimaryText, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = MikaColors.NeonCyan,
+                        unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),
+                        focusedContainerColor = MikaColors.PanelBg,
+                        unfocusedContainerColor = MikaColors.PanelBg
+                    ),
+                    modifier = Modifier.width(74.dp).bringIntoViewWithIme()
+                )
+                MikaTagPill(
+                    label = "+",
+                    selected = false,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = {
+                        val next = (expectedCharCount + 1).coerceIn(1, 24)
+                        expectedCharCount = next
+                        charCountFieldText = next.toString()
+                        viewModel.setMangaExpectedCharacterCount(next)
+                    }
+                )
+            }
+            Text(
+                text = if (expectedCharCount == 0) {
+                    "CHARACTER COUNT: AUTO (VLM discovers recurring speaking characters across pages; MIKA narrates separately)"
+                } else {
+                    "CHARACTER COUNT BASELINE: $expectedCharCount speaker(s) (excl. MIKA Narrator) guided during storyboarding & cast consolidation"
+                },
+                color = MikaColors.CyanWhite.copy(alpha = 0.80f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 7.6.sp,
+                lineHeight = 10.5.sp
+            )
         }
         Spacer(modifier = Modifier.height(6.dp))
 
@@ -713,7 +855,7 @@ fun MangaDubStudioModuleWindowBody(
                 MikaCyberIcon(type = CyberIconType.DOWNLOAD, tint = MikaColors.NeonPink, size = 13.dp)
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = if (autoCookFullMp4) "+ IMPORT .CBZ & COOK .MP4" else "+ IMPORT .CBZ (SCAN ONLY)",
+                    text = if (autoCookFullMp4) "+ IMPORT .CBZ & COOK .MP4" else "+ IMPORT .CBZ & STORYBOARD",
                     color = MikaColors.NeonPink,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
@@ -848,6 +990,24 @@ fun MangaDubStudioModuleWindowBody(
             }
         }
 
+        // PRE-COOK SELECTIONS & CAST REVIEW EDITOR (Before rendering .MP4)
+        if (!isBusy && activeChapter.status != MangaChapterStatus.COMPLETED) {
+            MangaPreCookReviewPanel(
+                project = activeProject,
+                chapter = activeChapter,
+                isBusy = isBusy,
+                viewModel = viewModel,
+                onOpenFullCastDrawer = {
+                    expandCustomizeDrawer = true
+                    preProdTab = MangaPreProdTab.CAST
+                },
+                onOpenStoryboardDrawer = {
+                    expandCustomizeDrawer = true
+                    preProdTab = MangaPreProdTab.STORYBOARD
+                }
+            )
+        }
+
         // Manual / Resume Produce .MP4 CTA whenever not currently running
         if (!isBusy && pendingCount == 0 && activeChapter.status != MangaChapterStatus.COMPLETED) {
             MikaGlowPanel(accent = MikaColors.TerminalGreen) {
@@ -865,7 +1025,7 @@ fun MangaDubStudioModuleWindowBody(
                     MikaCyberIcon(type = CyberIconType.PLAY, tint = MikaColors.TerminalGreen, size = 14.dp)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "PRODUCE DUBBED EPISODE (.MP4)",
+                        text = "COOK DUBBED EPISODE (.MP4)",
                         color = MikaColors.TerminalGreen,
                         fontFamily = FontFamily.Monospace,
                         fontWeight = FontWeight.Black,
@@ -2051,6 +2211,254 @@ private fun MangaCharacterCastCard(
                     colors = SliderDefaults.colors(thumbColor = MikaColors.NeonCyan, activeTrackColor = MikaColors.NeonCyan)
                 )
             }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun MangaPreCookReviewPanel(
+    project: MangaSeriesProject,
+    chapter: MangaChapterEntry,
+    isBusy: Boolean,
+    viewModel: TtsForgeViewModel,
+    onOpenFullCastDrawer: () -> Unit,
+    onOpenStoryboardDrawer: () -> Unit
+) {
+    var editingStory by remember(project.id) { mutableStateOf(false) }
+    var storyDraft by remember(project.id, project.storyContextSummary) {
+        mutableStateOf(project.storyContextSummary)
+    }
+    var baselineInput by remember(project.id, project.expectedCharacterCount) {
+        mutableStateOf(if (project.expectedCharacterCount > 0) project.expectedCharacterCount.toString() else "")
+    }
+
+    MikaGlowPanel(accent = MikaColors.NeonCyan) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                MikaCyberIcon(type = CyberIconType.DUAL_MASKS, tint = MikaColors.NeonCyan, size = 14.dp)
+                Text(
+                    text = "> PRE-COOK STORY & CAST (${project.characters.size} CAST | ${chapter.totalLineCount} BUBBLES)",
+                    color = MikaColors.NeonCyan,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            MikaTagPill(
+                label = if (editingStory) "DONE" else "EDIT STORY",
+                selected = editingStory,
+                activeColor = MikaColors.NeonPurple,
+                onClick = { editingStory = !editingStory }
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+
+        // 1. Story Context Bible (View or Edit before cooking)
+        if (editingStory) {
+            OutlinedTextField(
+                value = storyDraft,
+                onValueChange = {
+                    storyDraft = it
+                    viewModel.updateMangaStorySummary(project.id, it)
+                },
+                label = { Text("STORY_SUMMARY_CONTEXT", fontSize = 8.sp, fontFamily = FontFamily.Monospace) },
+                minLines = 2,
+                maxLines = 4,
+                textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 9.5.sp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MikaColors.NeonCyan,
+                    unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),
+                    focusedContainerColor = MikaColors.DeepWellBg,
+                    unfocusedContainerColor = MikaColors.DeepWellBg
+                ),
+                modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
+            )
+        } else {
+            Text(
+                text = project.storyContextSummary.ifBlank {
+                    "No storyboard summary yet — tap RESCAN CHAPTER or EDIT STORY to describe the plot."
+                },
+                color = MikaColors.CyanWhite.copy(alpha = 0.85f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.8.sp,
+                lineHeight = 12.5.sp
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 2. Character Count Baseline Editor + Consolidation / Rescan Controls
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(6.dp))
+                .background(MikaColors.DeepWellBg)
+                .border(1.dp, MikaColors.NeonPurple.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
+                .padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            Text(
+                text = "CHAR_CAP:",
+                color = MikaColors.NeonPurple,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 8.5.sp
+            )
+            MikaTagPill(
+                label = "AUTO",
+                selected = project.expectedCharacterCount == 0,
+                activeColor = MikaColors.NeonCyan,
+                onClick = {
+                    baselineInput = ""
+                    viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, 0)
+                }
+            )
+            OutlinedTextField(
+                value = baselineInput,
+                onValueChange = { raw ->
+                    baselineInput = raw.filter { it.isDigit() }.take(2)
+                },
+                placeholder = {
+                    Text("AUTO", fontSize = 8.8.sp, fontFamily = FontFamily.Monospace, color = MikaColors.NeonCyan)
+                },
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                textStyle = TextStyle(color = MikaColors.PrimaryText, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MikaColors.NeonPurple,
+                    unfocusedBorderColor = MikaColors.NeonPurple.copy(alpha = 0.35f),
+                    focusedContainerColor = MikaColors.PanelBg,
+                    unfocusedContainerColor = MikaColors.PanelBg
+                ),
+                modifier = Modifier.width(68.dp).bringIntoViewWithIme()
+            )
+            MikaTagPill(
+                label = "APPLY CAP",
+                selected = true,
+                activeColor = MikaColors.TerminalGreen,
+                onClick = {
+                    val targetCount = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: 0
+                    viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, targetCount)
+                }
+            )
+            MikaTagPill(
+                label = "RESCAN",
+                selected = false,
+                activeColor = MikaColors.SsrGold,
+                onClick = {
+                    if (!isBusy) {
+                        val targetCount = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: 0
+                        viewModel.setMangaExpectedCharacterCount(targetCount)
+                        viewModel.reanalyzeMangaChapter(project.id, chapter.id)
+                    }
+                }
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 3. Quick Pre-Cook Cast, Gender & Effective Voice List
+        if (project.characters.isEmpty()) {
+            Text(
+                text = "No cast discovered yet — tap RESCAN above or add characters in CAST ROSTER.",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.5.sp
+            )
+        } else {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                project.characters.forEach { ch ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(5.dp))
+                            .background(MikaColors.DeepWellBg)
+                            .border(1.dp, MikaColors.SubtleBorder, RoundedCornerShape(5.dp))
+                            .padding(horizontal = 8.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "${ch.name} (${ch.lineCount}L)",
+                                color = MikaColors.PrimaryText,
+                                fontFamily = FontFamily.Monospace,
+                                fontWeight = FontWeight.Black,
+                                fontSize = 9.5.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                            Text(
+                                text = when {
+                                    ch.assignedVoiceId.isNotBlank() -> ch.assignedVoiceLabel
+                                    ch.autoCloneVoiceId.isNotBlank() -> "Qwen Clone Lock"
+                                    else -> ch.assignedVoiceLabel
+                                },
+                                color = MikaColors.NeonCyan,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 7.8.sp,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            listOf(
+                                VoiceGender.FEMALE to "F",
+                                VoiceGender.MALE to "M",
+                                VoiceGender.ANDROGYNOUS to "N"
+                            ).forEach { (g, shortTag) ->
+                                val gColor = when (g) {
+                                    VoiceGender.FEMALE -> MikaColors.NeonPink
+                                    VoiceGender.MALE -> MikaColors.NeonCyan
+                                    VoiceGender.ANDROGYNOUS -> MikaColors.SsrGold
+                                }
+                                MikaTagPill(
+                                    label = shortTag,
+                                    selected = ch.gender == g,
+                                    activeColor = gColor,
+                                    onClick = { viewModel.updateMangaCharacterGender(project.id, ch.id, g) }
+                                )
+                            }
+                            MikaTagPill(
+                                label = "",
+                                selected = true,
+                                activeColor = MikaColors.TerminalGreen,
+                                leadingIcon = CyberIconType.PLAY,
+                                onClick = { viewModel.auditionMangaCharacter(ch) }
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            MikaTagPill(
+                label = "EDIT VOICES & CLONES (${project.characters.size})",
+                selected = false,
+                activeColor = MikaColors.NeonPurple,
+                onClick = onOpenFullCastDrawer
+            )
+            MikaTagPill(
+                label = "EDIT PANELS & BUBBLES (${chapter.totalPanelCount})",
+                selected = false,
+                activeColor = MikaColors.NeonCyan,
+                onClick = onOpenStoryboardDrawer
+            )
         }
     }
 }

@@ -109,6 +109,15 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeSynthesizeCust
     lunavox_default_params(&params);
     params.n_threads = nThreads > 0 ? nThreads : 4;
     params.language_id = languageId;
+    params.temperature = 0.72f;
+    params.top_p = 0.90f;
+    if (c_text) {
+        const size_t tlen = std::strlen(c_text);
+        if (tlen > 140) {
+            const int scaled = static_cast<int>(tlen * 14);
+            params.max_audio_tokens = std::min(4096, std::max(params.max_audio_tokens, scaled));
+        }
+    }
 
     LunavoxAudio * audio = lunavox_synthesize_custom(
         engine,
@@ -147,6 +156,16 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeSynthesizeClon
     params.n_threads = nThreads > 0 ? nThreads : 4;
     params.language_id = languageId;
     params.ref_text = c_ref_txt;
+    // Moderate sampling heat vs upstream 0.9/1.0 default to curb onset breath/babble hallucinations
+    params.temperature = 0.72f;
+    params.top_p = 0.90f;
+    if (c_text) {
+        const size_t tlen = std::strlen(c_text);
+        if (tlen > 140) {
+            const int scaled = static_cast<int>(tlen * 14);
+            params.max_audio_tokens = std::min(4096, std::max(params.max_audio_tokens, scaled));
+        }
+    }
 
     LunavoxAudio * audio = lunavox_synthesize_with_voice_file(
         engine,
@@ -181,6 +200,15 @@ Java_com_projectmika_purrtts_engine_qwen3_Qwen3NativeBridge_nativeSynthesizeDesi
     lunavox_default_params(&params);
     params.n_threads = nThreads > 0 ? nThreads : 4;
     params.language_id = languageId;
+    params.temperature = 0.72f;
+    params.top_p = 0.90f;
+    if (c_text) {
+        const size_t tlen = std::strlen(c_text);
+        if (tlen > 140) {
+            const int scaled = static_cast<int>(tlen * 14);
+            params.max_audio_tokens = std::min(4096, std::max(params.max_audio_tokens, scaled));
+        }
+    }
 
     LunavoxAudio * audio = lunavox_synthesize_design(
         engine,

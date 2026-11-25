@@ -226,21 +226,35 @@ class Qwen3TtsEngine(
                             isFallbackNeuralPreview = true
                         )
                     }
+                    val rawRefText = clonedVoice.referenceTranscript.trim()
+                    val alignedRefText = if (rawRefText.isNotEmpty() && rawRefText.last() !in charArrayOf('.', '!', '?', '…')) {
+                        "$rawRefText."
+                    } else {
+                        rawRefText
+                    }
+                    // LunaVox concatenates encode(ref_text) + encode(text) directly without
+                    // inserting a separator; prefixing a single leading space prevents the first
+                    // target word from fusing onto ref_text's trailing period without a BPE space.
+                    val alignedTargetText = if (alignedRefText.isNotEmpty()) {
+                        " ${text.trimStart()}"
+                    } else {
+                        text.trim()
+                    }
                     var cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
                         handle = handle,
-                        text = text,
+                        text = alignedTargetText,
                         refWavPath = wavFile.absolutePath,
-                        refText = clonedVoice.referenceTranscript,
+                        refText = alignedRefText,
                         languageId = langId,
                         nThreads = nThreads
                     )
                     // If ICL mode (with refText) fails or emits empty audio, retry once in
                     // x-vector-only mode (empty refText) so speaker-embedding cloning still succeeds.
-                    if ((cloneAudio == null || cloneAudio.isEmpty()) && clonedVoice.referenceTranscript.isNotBlank()) {
+                    if ((cloneAudio == null || cloneAudio.isEmpty()) && alignedRefText.isNotBlank()) {
                         Log.w(TAG, "Qwen3 ICL clone returned empty for ${clonedVoice.displayName}; retrying x-vector clone mode")
                         cloneAudio = Qwen3NativeBridge.nativeSynthesizeClone(
                             handle = handle,
-                            text = text,
+                            text = text.trim(),
                             refWavPath = wavFile.absolutePath,
                             refText = "",
                             languageId = langId,

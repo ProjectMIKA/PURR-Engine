@@ -292,6 +292,85 @@ data class DspConfig(
 )
 
 @Serializable
+enum class OpenAiVisionProviderPreset(
+    val label: String,
+    val defaultEndpointUrl: String,
+    val defaultModelHint: String,
+    val isCustom: Boolean = false
+) {
+    NANOGPT(
+        label = "NanoGPT",
+        defaultEndpointUrl = "https://api.nano-gpt.com/api/v1/chat/completions",
+        defaultModelHint = "openai/gpt-4o-mini"
+    ),
+    OPENROUTER(
+        label = "OpenRouter",
+        defaultEndpointUrl = "https://openrouter.ai/api/v1/chat/completions",
+        defaultModelHint = "google/gemma-3-27b-it"
+    ),
+    CLINEPASS(
+        label = "Clinepass",
+        defaultEndpointUrl = "https://api.cline.bot/api/v1/chat/completions",
+        defaultModelHint = "google/gemini-2.5-flash"
+    ),
+    OPENAI(
+        label = "OpenAI Official",
+        defaultEndpointUrl = "https://api.openai.com/v1/chat/completions",
+        defaultModelHint = "gpt-4o-mini"
+    ),
+    TOGETHER(
+        label = "Together AI",
+        defaultEndpointUrl = "https://api.together.xyz/v1/chat/completions",
+        defaultModelHint = "Qwen/Qwen2.5-VL-72B-Instruct"
+    ),
+    GROQ(
+        label = "Groq Cloud",
+        defaultEndpointUrl = "https://api.groq.com/openai/v1/chat/completions",
+        defaultModelHint = "meta-llama/llama-4-scout-17b-16e-instruct"
+    ),
+    CUSTOM(
+        label = "Custom OpenAI Endpoint",
+        defaultEndpointUrl = "http://192.168.1.50:8080/v1/chat/completions",
+        defaultModelHint = "gemma-4-E2B-it",
+        isCustom = true
+    )
+}
+
+object OpenAiEndpointUtils {
+    /**
+     * Normalizes user-supplied OpenAI-compatible base/full URLs into a concrete `/chat/completions` endpoint.
+     */
+    fun normalizeChatCompletionsUrl(rawUrl: String): String {
+        val cleaned = rawUrl.trim().trimEnd('/')
+        if (cleaned.isEmpty()) return ""
+        val lower = cleaned.lowercase()
+        if (lower.endsWith("/chat/completions")) return cleaned
+        if (lower.endsWith("/v1") || lower.endsWith("/api/v1") || lower.endsWith("/openai/v1")) {
+            return "$cleaned/chat/completions"
+        }
+        val schemeIdx = cleaned.indexOf("://")
+        val afterScheme = if (schemeIdx >= 0) cleaned.substring(schemeIdx + 3) else cleaned
+        return if ('/' !in afterScheme) {
+            "$cleaned/v1/chat/completions"
+        } else {
+            "$cleaned/chat/completions"
+        }
+    }
+}
+
+@Serializable
+data class SavedOpenAiVisionEngine(
+    val id: String,
+    val name: String,
+    val provider: OpenAiVisionProviderPreset = OpenAiVisionProviderPreset.NANOGPT,
+    val endpointUrl: String,
+    val apiKey: String = "",
+    val modelId: String,
+    val createdAtEpochMs: Long = 0L,
+    val updatedAtEpochMs: Long = 0L
+)
+
+@Serializable
 data class ProxyEndpointConfig(
     val useOpenAiEndpoint: Boolean = false,
     val openAiBaseUrl: String = "http://192.168.1.50:8880/v1/audio/speech",
@@ -360,7 +439,8 @@ sealed interface PurrChunk {
         val speakingRate: Float,
         val pitch: Float,
         val volumeGain: Float,
-        val sentiment: SentimentResult
+        val sentiment: SentimentResult,
+        val singleChunkOnly: Boolean = false
     ) : PurrChunk
 
     data class Silence(
@@ -569,6 +649,12 @@ data class PurrForgeState(
             state = DownloadState.INSTALLED,
             sha256Verified = true,
             localPath = "builtin://tool/manga_dub_studio"
+        ),
+        "tool_openai_vision_api" to ModelBundleState(
+            specId = "tool_openai_vision_api",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/openai_vision_api"
         )
     ),
     val slottedCartridges: Set<String> = setOf(
@@ -588,6 +674,7 @@ data class PurrForgeState(
     ),
     val enabledSubCartridges: Set<String> = emptySet(),
     val savedVoiceDesigns: List<SavedVoiceDesign> = emptyList(),
+    val savedOpenAiVisionEngines: List<SavedOpenAiVisionEngine> = emptyList(),
     val knownToolCatalogVersion: Int = 5,
     // ✨ MIKA'S ACADEMY (v1.5.0): persisted tutorial-content version (0 = never seen).
     // Drives PurrUpdateGate: first-launch full walkthrough + one-time patchnotes popup per bump.
@@ -3478,6 +3565,26 @@ object PurrDefaultPresets {
             parentCartridgeId = "tool_manga_dub_studio",
             category = CartridgeCategory.TOOLS,
             releaseOrder = 17
+        ),
+        ModelBundleSpec(
+            id = "tool_openai_vision_api",
+            romCode = "TOOL-12",
+            badge = "CLOUD_VISION_API",
+            accentHex = 0xFF00E5FF,
+            name = "OPENAI_VISION_API_HUB",
+            subtitle = "Optional OpenAI Vision API Configurator • NanoGPT, OpenRouter, Clinepass & Custom",
+            description = "Optional cloud/LAN Vision LLM hub (disabled by default). Save, edit & delete named OpenAI-compatible Vision endpoints from NanoGPT, OpenRouter, Clinepass, OpenAI, Together, Groq, or a Custom OpenAI Endpoint, and select them inside Manga Dub Studio's Vision LLM dropdown.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/openai_vision_api",
+            fileName = "openai_vision_api.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "OpenAI-Compatible Vision API Hub • Disabled by Default",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: OpenAI Vision API Hub (`TOOL-12`) & saved cloud/custom Vision LLMs in Manga Dub Studio.",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 18
         )
     )
 }

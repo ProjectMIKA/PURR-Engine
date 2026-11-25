@@ -355,7 +355,12 @@ data class MangaSeriesProject(
     val lockVoicesViaCloning: Boolean = true,
     val powerUserVisionUrl: String = "",
     val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
-    val autoCookFullMp4: Boolean = true,
+    // 0 = AUTO (let storyboarding discover count), 1..24 = user-specified cast count baseline
+    val expectedCharacterCount: Int = 0,
+    // Non-blank selects a saved OpenAI-compatible Vision API engine from TOOL-12 when active
+    val selectedOpenAiVisionEngineId: String = "",
+    // Default false so users can inspect/edit Pre-Cook story, character count, genders & voices before rendering .MP4
+    val autoCookFullMp4: Boolean = false,
     val pauseOnFlaggedDecisions: Boolean = true,
     val storyContextSummary: String = "",
     val characters: List<MangaCharacterProfile> = emptyList(),
@@ -385,26 +390,38 @@ object MangaTextBender {
 
     fun sanitizeMangaDialogue(raw: String): String {
         var out = raw
+            .replace('\r', ' ')
+            .replace('\n', ' ')
             .replace(Regex("<[^>]+>"), " ")
             .replace(Regex("[*_`~#]{1,3}"), "")
+            .replace(Regex("""["“”„«»]"""), "")
+            .replace(Regex("""^[\s.,;:!?\u2014\u2013\u2026\-~•·/\\|+*()\[\]]+"""), "")
             .replace("\u2014", ", ")
             .replace("\u2013", ", ")
             .replace("--", ", ")
             .replace("\u2026", ".")
-            .replace(Regex("""["“”„«»]"""), "")
             .replace(Regex("\\s+"), " ")
+            .trim()
+            .replace(Regex("""^[\s.,;:!?\u2014\u2013\u2026\-~•·/\\|+*()\[\]]+"""), "")
             .trim()
 
         if (out.isEmpty()) return ""
 
-        // Collapse excessive manga punctuation storms cleanly
+        // Collapse excessive manga punctuation storms cleanly without creating leading artifacts
         out = out
             .replace(Regex("!{2,}"), "!")
             .replace(Regex("\\?{2,}"), "?")
             .replace(Regex("""[?!]*\?[?!]*![?!]*"""), "?!")
             .replace(Regex("""[?!]*![?!]*\?[?!]*"""), "?!")
             .replace(Regex("\\.{2,}"), ".")
+            .replace(Regex(",{2,}"), ",")
+            .replace(Regex(""",\s*\."""), ".")
+            .replace(Regex("""\.\s*,"""), ".")
             .replace(Regex("\\s+([,.!?])"), "$1")
+            .replace(Regex("""^[\s.,;:!?\u2014\u2013\u2026\-]+"""), "")
+            .trim()
+
+        if (out.isEmpty()) return ""
 
         // Acronym Assassin: lowercase 2+ uppercase runs & all-caps contractions unless whitelisted
         out = Regex("""\b([A-Z]+)(?:'([A-Z]+))?\b""").replace(out) { m ->
@@ -438,12 +455,23 @@ object MangaTextBender {
             }
         }
         out = String(chars).trim()
+            .replace(Regex("""^[\s.,;:!?\u2014\u2013\u2026\-]+"""), "")
+            .trim()
 
         if (out.isNotEmpty() && !out.last().let { it == '.' || it == '!' || it == '?' }) {
             out += "."
         }
         return out
     }
+
+    /**
+     * ✨ SINGLE-BUBBLE SPEECH NORMALIZER (v2.1.0) ✨
+     * Ensures an entire manga speech bubble ALWAYS synthesizes as ONE unbroken speech chunk
+     * (never split on punctuation or length) and starts cleanly on a spoken character with
+     * zero leading commas/dashes/periods that trigger onset neural hallucinations.
+     */
+    fun prepareSingleBubbleSpeechText(rawOrSanitized: String): String =
+        sanitizeMangaDialogue(rawOrSanitized)
 
     private val NON_DIALOGUE_SPEAKERS = setOf(
         "SFX", "SOUND", "SOUND EFFECT", "SOUND_EFFECT", "ONOMATOPOEIA",
@@ -1694,7 +1722,90 @@ object MangaVisionResponseParser {
         val pageSynopses: Map<Int, String>
     )
 
+    data class ParsedConsolidatedCharacter(
+        val canonicalName: String,
+        val mergedAliases: List<String>,
+        val gender: VoiceGender,
+        val visualDescription: String,
+        val voiceDesignPrompt: String
+    )
+
+    data class ParsedLineSpeakerFix(
+        val lineId: String,
+        val speakerName: String,
+        val gender: VoiceGender
+    )
+
+    data class ParsedCastConsolidation(
+        val cohesiveStorySummary: String,
+        val canonicalCharacters: List<ParsedConsolidatedCharacter>,
+        val lineSpeakerFixes: List<ParsedLineSpeakerFix>
+    )
+
     private val lenientJson = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun parseCastConsolidation(rawResponse: String): ParsedCastConsolidation? {
+        val cleaned = rawResponse.trim()
+            .replace(Regex("""<(?:thought|thinking)>[\s\S]*?</(?:thought|thinking)>""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""```(?:json)?\s*""", RegexOption.IGNORE_CASE), "")
+            .replace("```", "")
+            .trim()
+        val objStart = cleaned.indexOf('{')
+        val objEnd = cleaned.lastIndexOf('}')
+        if (objStart < 0 || objEnd <= objStart) return null
+        val jsonSlice = cleanupTrailingCommas(cleaned.substring(objStart, objEnd + 1))
+
+        return runCatching {
+            val root = lenientJson.parseToJsonElement(jsonSlice) as? JsonObject ?: return@runCatching null
+            val summary = ((root["cohesive_story_summary"] ?: root["story_summary"]) as? JsonPrimitive)
+                ?.contentOrNull.orEmpty().trim()
+            val charsArr = (root["canonical_characters"] ?: root["characters"]) as? JsonArray ?: JsonArray(emptyList())
+            val canonicals = charsArr.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                val cname = ((obj["canonical_name"] ?: obj["name"]) as? JsonPrimitive)
+                    ?.contentOrNull.orEmpty().trim().uppercase(Locale.ROOT)
+                if (cname.isEmpty() || cname == "UNKNOWN" || MangaTextBender.isNarratorName(cname)) {
+                    return@mapNotNull null
+                }
+                val aliases = ((obj["merged_aliases"] ?: obj["aliases"]) as? JsonArray).orEmpty()
+                    .mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.trim()?.uppercase(Locale.ROOT) }
+                    .filter { it.isNotEmpty() && !MangaTextBender.isNarratorName(it) && it != "UNKNOWN" }
+                val gStr = (obj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase(Locale.ROOT)
+                val gender = when {
+                    gStr.startsWith("f") -> VoiceGender.FEMALE
+                    gStr.startsWith("m") -> VoiceGender.MALE
+                    else -> VoiceGender.ANDROGYNOUS
+                }
+                val vis = (obj["visual_description"] as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                val vdp = ((obj["voice_design_prompt"] ?: obj["voice_prompt"]) as? JsonPrimitive)
+                    ?.contentOrNull.orEmpty().trim()
+                ParsedConsolidatedCharacter(
+                    canonicalName = cname,
+                    mergedAliases = aliases,
+                    gender = gender,
+                    visualDescription = vis,
+                    voiceDesignPrompt = vdp
+                )
+            }
+            val fixesArr = (root["line_fixes"] ?: root["line_speaker_fixes"]) as? JsonArray ?: JsonArray(emptyList())
+            val fixes = fixesArr.mapNotNull { elem ->
+                val obj = elem as? JsonObject ?: return@mapNotNull null
+                val lineId = ((obj["line_id"] ?: obj["id"]) as? JsonPrimitive)?.contentOrNull.orEmpty().trim()
+                val speaker = ((obj["speaker"] ?: obj["canonical_speaker"] ?: obj["character"]) as? JsonPrimitive)
+                    ?.contentOrNull.orEmpty().trim().uppercase(Locale.ROOT)
+                if (lineId.isEmpty() || speaker.isEmpty() || speaker == "UNKNOWN") return@mapNotNull null
+                val gStr = (obj["gender"] as? JsonPrimitive)?.contentOrNull.orEmpty().lowercase(Locale.ROOT)
+                val gender = when {
+                    gStr.startsWith("f") -> VoiceGender.FEMALE
+                    gStr.startsWith("m") -> VoiceGender.MALE
+                    else -> VoiceGender.ANDROGYNOUS
+                }
+                ParsedLineSpeakerFix(lineId = lineId, speakerName = speaker, gender = gender)
+            }
+            if (summary.isBlank() && canonicals.isEmpty() && fixes.isEmpty()) null
+            else ParsedCastConsolidation(summary, canonicals, fixes)
+        }.getOrNull()
+    }
 
     fun parseStoryboardPass(rawResponse: String): ParsedStoryboardBible? {
         var cleaned = rawResponse.trim()
@@ -2774,5 +2885,308 @@ object MangaCbzExtractorUtils {
                 tmpFile
             }
         }
+    }
+}
+
+/**
+ * ✨ CHAPTER STORY & CAST CONSOLIDATOR (v2.1.0) ✨
+ * Eliminates cross-page character/voice drift from local VLMs by unifying aliased role labels
+ * (e.g. `TOWEL_GIRL` + `BLONDE_WOMAN` -> `OJOU_SAMA`), locking each character's gender across
+ * the whole chapter, and honoring any user-specified `expectedCharacterCount` baseline while
+ * strictly preserving MIKA's isolated NARRATOR channel.
+ */
+object MangaCastConsolidator {
+
+    private val FEMALE_MARKERS = setOf(
+        "female", "woman", "girl", "lady", "sister", "queen", "princess", "maid",
+        "ojou", "ojousama", "heroine", "mother", "mom", "wife", "waitress",
+        "witch", "goddess", "miko", "she", "her", "hers", "daughter", "miss", "ms"
+    )
+    private val MALE_MARKERS = setOf(
+        "male", "man", "boy", "guy", "brother", "king", "prince", "butler",
+        "hero", "father", "dad", "husband", "lord", "knight", "uncle", "he",
+        "his", "him", "son", "mister", "mr", "sir", "gentleman"
+    )
+
+    fun inferGender(
+        name: String,
+        visualDescription: String,
+        voiceDesignPrompt: String = "",
+        lineHints: List<VoiceGender> = emptyList()
+    ): VoiceGender {
+        val fHints = lineHints.count { it == VoiceGender.FEMALE }
+        val mHints = lineHints.count { it == VoiceGender.MALE }
+        if (fHints > mHints) return VoiceGender.FEMALE
+        if (mHints > fHints) return VoiceGender.MALE
+
+        val tokens = "$name $visualDescription $voiceDesignPrompt"
+            .lowercase(Locale.ROOT)
+            .split(Regex("[^a-z]+"))
+            .filter { it.isNotEmpty() }
+            .toSet()
+        val fScore = tokens.count { it in FEMALE_MARKERS }
+        val mScore = tokens.count { it in MALE_MARKERS }
+        return when {
+            fScore > mScore -> VoiceGender.FEMALE
+            mScore > fScore -> VoiceGender.MALE
+            else -> VoiceGender.ANDROGYNOUS
+        }
+    }
+
+    fun consolidateChapterCastAndLines(
+        roster: List<MangaCharacterProfile>,
+        pages: List<MangaPageEntry>,
+        consolidation: MangaVisionResponseParser.ParsedCastConsolidation?,
+        expectedCharacterCount: Int = 0
+    ): Pair<List<MangaCharacterProfile>, List<MangaPageEntry>> {
+        // Strictly strip any narrator entry from the mutable character cast (Narrator Identity Law)
+        val mergedByName = LinkedHashMap<String, MangaCharacterProfile>()
+        val aliasToCanonical = LinkedHashMap<String, String>()
+
+        for (ch in roster) {
+            val upper = ch.name.trim().uppercase(Locale.ROOT)
+            if (upper.isEmpty() || upper == "UNKNOWN" || MangaTextBender.isNarratorName(upper)) continue
+            val existing = mergedByName[upper]
+            mergedByName[upper] = if (existing == null) ch.copy(name = upper) else mergeProfiles(existing, ch.copy(name = upper))
+            aliasToCanonical[upper] = upper
+        }
+
+        // Collect all line gender hints per original speaker name before consolidation
+        val hintsBySpeaker = HashMap<String, MutableList<VoiceGender>>()
+        for (pg in pages) {
+            for (pan in pg.panels) {
+                for (ln in pan.lines) {
+                    val spUpper = ln.speakerName.trim().uppercase(Locale.ROOT)
+                    if (spUpper.isNotEmpty() && !MangaTextBender.isNarratorName(spUpper) && ln.genderHint != VoiceGender.ANDROGYNOUS) {
+                        hintsBySpeaker.getOrPut(spUpper) { mutableListOf() } += ln.genderHint
+                    }
+                }
+            }
+        }
+
+        if (consolidation != null) {
+            for (spec in consolidation.canonicalCharacters) {
+                val cname = spec.canonicalName.trim().uppercase(Locale.ROOT)
+                if (cname.isEmpty() || cname == "UNKNOWN" || MangaTextBender.isNarratorName(cname)) continue
+
+                val matchingKeys = (listOf(cname) + spec.mergedAliases.map { it.trim().uppercase(Locale.ROOT) })
+                    .distinct()
+                    .filter { it.isNotEmpty() && !MangaTextBender.isNarratorName(it) && it != "UNKNOWN" }
+
+                var acc: MangaCharacterProfile? = null
+                for (key in matchingKeys) {
+                    aliasToCanonical[key] = cname
+                    val existing = mergedByName.remove(key)
+                    if (existing != null) {
+                        acc = if (acc == null) existing.copy(name = cname) else mergeProfiles(acc, existing)
+                    }
+                }
+
+                val baseProfile = acc ?: MangaCharacterProfile(
+                    id = "char_${cname.lowercase(Locale.ROOT).replace(Regex("[^a-z0-9]+"), "_")}_${mergedByName.size + 1}",
+                    name = cname,
+                    gender = spec.gender,
+                    visualDescription = spec.visualDescription,
+                    voiceDesignPrompt = spec.voiceDesignPrompt
+                )
+
+                val allHints = matchingKeys.flatMap { hintsBySpeaker[it].orEmpty() }
+                val resolvedGender = when {
+                    spec.gender != VoiceGender.ANDROGYNOUS -> spec.gender
+                    baseProfile.gender != VoiceGender.ANDROGYNOUS -> baseProfile.gender
+                    else -> inferGender(cname, spec.visualDescription.ifBlank { baseProfile.visualDescription }, spec.voiceDesignPrompt, allHints)
+                }
+
+                mergedByName[cname] = baseProfile.copy(
+                    name = cname,
+                    gender = resolvedGender,
+                    visualDescription = if (spec.visualDescription.length > baseProfile.visualDescription.length) {
+                        spec.visualDescription
+                    } else {
+                        baseProfile.visualDescription
+                    },
+                    voiceDesignPrompt = if (spec.voiceDesignPrompt.length > baseProfile.voiceDesignPrompt.length) {
+                        spec.voiceDesignPrompt
+                    } else {
+                        baseProfile.voiceDesignPrompt
+                    }
+                )
+            }
+        }
+
+        // Resolve remaining ANDROGYNOUS genders from character descriptions & line hints
+        for ((cname, prof) in mergedByName.entries.toList()) {
+            val resolvedGender = if (prof.gender != VoiceGender.ANDROGYNOUS) {
+                prof.gender
+            } else {
+                inferGender(cname, prof.visualDescription, prof.voiceDesignPrompt, hintsBySpeaker[cname].orEmpty())
+            }
+            if (resolvedGender != prof.gender) {
+                mergedByName[cname] = prof.copy(gender = resolvedGender)
+            }
+        }
+
+        val fixesByLineId = consolidation?.lineSpeakerFixes
+            ?.associateBy { it.lineId }
+            .orEmpty()
+
+        fun resolveTargetProfile(speakerUpper: String): MangaCharacterProfile? {
+            val canonicalName = aliasToCanonical[speakerUpper] ?: speakerUpper
+            return mergedByName[canonicalName]
+        }
+
+        // First remap lines via consolidation alias map + line fixes
+        var remappedPages = pages.map { pg ->
+            pg.copy(
+                panels = pg.panels.map { pan ->
+                    pan.copy(
+                        lines = pan.lines.map { ln ->
+                            if (MangaTextBender.isNarratorName(ln.speakerName)) return@map ln
+                            val fix = fixesByLineId[ln.id]
+                            val requestedSpeaker = (fix?.speakerName ?: ln.speakerName).trim().uppercase(Locale.ROOT)
+                            if (MangaTextBender.isNarratorName(requestedSpeaker)) {
+                                // Only remap to narrator if the line wasn't clearly speech from a named cast member,
+                                // and never pollute cast roster with NARRATOR
+                                return@map if (fix != null) {
+                                    ln.copy(
+                                        speakerId = "char_narrator",
+                                        speakerName = "NARRATOR",
+                                        needsUserDecision = false,
+                                        decisionReason = ""
+                                    )
+                                } else ln
+                            }
+                            if (requestedSpeaker == "UNKNOWN" || requestedSpeaker.isEmpty()) return@map ln
+
+                            val target = resolveTargetProfile(requestedSpeaker)
+                            if (target != null) {
+                                val nextHint = when {
+                                    target.gender != VoiceGender.ANDROGYNOUS -> target.gender
+                                    fix != null && fix.gender != VoiceGender.ANDROGYNOUS -> fix.gender
+                                    else -> ln.genderHint
+                                }
+                                ln.copy(
+                                    speakerId = target.id,
+                                    speakerName = target.name,
+                                    genderHint = nextHint,
+                                    needsUserDecision = if (fix != null) false else ln.needsUserDecision,
+                                    decisionReason = if (fix != null) "" else ln.decisionReason
+                                )
+                            } else {
+                                ln
+                            }
+                        }
+                    )
+                }
+            )
+        }
+
+        // Enforce explicit user Character Count baseline (> 0) if active non-narrator cast exceeds cap
+        val cappedList: List<MangaCharacterProfile>
+        if (expectedCharacterCount > 0 && mergedByName.size > expectedCharacterCount) {
+            val lineCounts = HashMap<String, Int>()
+            for (pg in remappedPages) {
+                for (pan in pg.panels) {
+                    for (ln in pan.lines) {
+                        if (!MangaTextBender.isNarratorName(ln.speakerName) && ln.speakerName != "UNKNOWN") {
+                            lineCounts[ln.speakerName.uppercase(Locale.ROOT)] =
+                                (lineCounts[ln.speakerName.uppercase(Locale.ROOT)] ?: 0) + 1
+                        }
+                    }
+                }
+            }
+            val prioritized = mergedByName.values.sortedWith(
+                compareByDescending<MangaCharacterProfile> { it.assignedVoiceId.isNotBlank() || it.autoCloneVoiceId.isNotBlank() }
+                    .thenByDescending { lineCounts[it.name] ?: it.lineCount }
+            )
+            val keepList = prioritized.take(expectedCharacterCount).toMutableList()
+            val surplus = prioritized.drop(expectedCharacterCount)
+            val surplusRemap = HashMap<String, MangaCharacterProfile>()
+
+            for (extra in surplus) {
+                val targetIdx = keepList.indexOfFirst { it.gender == extra.gender }
+                    .takeIf { it >= 0 }
+                    ?: 0
+                val keeper = keepList[targetIdx]
+                keepList[targetIdx] = mergeProfiles(keeper, extra)
+                surplusRemap[extra.name.uppercase(Locale.ROOT)] = keepList[targetIdx]
+                surplusRemap[extra.id] = keepList[targetIdx]
+            }
+
+            remappedPages = remappedPages.map { pg ->
+                pg.copy(
+                    panels = pg.panels.map { pan ->
+                        pan.copy(
+                            lines = pan.lines.map { ln ->
+                                if (MangaTextBender.isNarratorName(ln.speakerName)) return@map ln
+                                val target = surplusRemap[ln.speakerName.uppercase(Locale.ROOT)]
+                                    ?: surplusRemap[ln.speakerId]
+                                if (target != null) {
+                                    ln.copy(
+                                        speakerId = target.id,
+                                        speakerName = target.name,
+                                        genderHint = if (target.gender != VoiceGender.ANDROGYNOUS) target.gender else ln.genderHint
+                                    )
+                                } else {
+                                    ln
+                                }
+                            }
+                        )
+                    }
+                )
+            }
+            cappedList = keepList
+        } else {
+            cappedList = mergedByName.values.toList()
+        }
+
+        // Final pass: sync line counts accurately across consolidated cast
+        val finalCounts = HashMap<String, Int>()
+        for (pg in remappedPages) {
+            for (pan in pg.panels) {
+                for (ln in pan.lines) {
+                    if (!MangaTextBender.isNarratorName(ln.speakerName) && ln.speakerName != "UNKNOWN") {
+                        finalCounts[ln.speakerId] = (finalCounts[ln.speakerId] ?: 0) + 1
+                    }
+                }
+            }
+        }
+        val finalRoster = cappedList.map { ch ->
+            ch.copy(lineCount = finalCounts[ch.id] ?: ch.lineCount)
+        }
+        return finalRoster to remappedPages
+    }
+
+    private fun mergeProfiles(
+        primary: MangaCharacterProfile,
+        secondary: MangaCharacterProfile
+    ): MangaCharacterProfile {
+        val mergedGender = when {
+            primary.gender != VoiceGender.ANDROGYNOUS -> primary.gender
+            secondary.gender != VoiceGender.ANDROGYNOUS -> secondary.gender
+            else -> VoiceGender.ANDROGYNOUS
+        }
+        val useSecondaryVoice = primary.assignedVoiceId.isBlank() && secondary.assignedVoiceId.isNotBlank()
+        val useSecondaryClone = primary.autoCloneVoiceId.isBlank() && secondary.autoCloneVoiceId.isNotBlank()
+        return primary.copy(
+            gender = mergedGender,
+            visualDescription = if (secondary.visualDescription.length > primary.visualDescription.length) {
+                secondary.visualDescription
+            } else {
+                primary.visualDescription
+            },
+            avatarCropPath = primary.avatarCropPath.ifBlank { secondary.avatarCropPath },
+            voiceDesignPrompt = if (secondary.voiceDesignPrompt.length > primary.voiceDesignPrompt.length) {
+                secondary.voiceDesignPrompt
+            } else {
+                primary.voiceDesignPrompt
+            },
+            assignedVoiceId = if (useSecondaryVoice) secondary.assignedVoiceId else primary.assignedVoiceId,
+            assignedVoiceLabel = if (useSecondaryVoice) secondary.assignedVoiceLabel else primary.assignedVoiceLabel,
+            autoCloneVoiceId = if (useSecondaryClone) secondary.autoCloneVoiceId else primary.autoCloneVoiceId,
+            autoCloneSeedWavPath = if (useSecondaryClone) secondary.autoCloneSeedWavPath else primary.autoCloneSeedWavPath,
+            autoClonePromptHash = if (useSecondaryClone) secondary.autoClonePromptHash else primary.autoClonePromptHash,
+            lineCount = primary.lineCount + secondary.lineCount
+        )
     }
 }

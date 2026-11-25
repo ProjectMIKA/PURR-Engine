@@ -42,16 +42,17 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `tools category hosts TOOL-01 through TOOL-11 plus Gemma 4 E2B Recommended and E4B Vision sub-cartridges`() {
-        assertEquals(11, toolsModules.size)
+    fun `tools category hosts TOOL-01 through TOOL-12 with TOOL-12 disabled by default plus Vision sub-cartridges`() {
+        assertEquals(12, toolsModules.size)
         assertEquals(
-            (1..11).map { idx -> "TOOL-%02d".format(idx) },
+            (1..12).map { idx -> "TOOL-%02d".format(idx) },
             toolsModules.map { it.romCode }
         )
+        val defaultState = PurrForgeState()
         val themeTool = toolsModules.first { it.id == "tool_theme_engine" }
         assertTrue(themeTool.isBuiltInOsCartridge)
         assertEquals(CartridgeCategory.TOOLS, themeTool.category)
-        assertTrue("tool_theme_engine" in PurrForgeState().slottedCartridges)
+        assertTrue("tool_theme_engine" in defaultState.slottedCartridges)
 
         val studioIds = setOf(
             "tool_script_studio",
@@ -63,8 +64,24 @@ class PurrPremiumCatalogTest {
             val mod = toolsModules.first { it.id == id }
             assertTrue(mod.isBuiltInOsCartridge)
             assertEquals(CartridgeCategory.TOOLS, mod.category)
-            assertTrue(id in PurrForgeState().slottedCartridges)
+            assertTrue(id in defaultState.slottedCartridges)
         }
+
+        // TOOL-12 OpenAI Vision API Hub is built-in/installed, optional, and DISABLED by default
+        val openAiTool = toolsModules.first { it.id == "tool_openai_vision_api" }
+        assertTrue(openAiTool.isBuiltInOsCartridge)
+        assertEquals(CartridgeCategory.TOOLS, openAiTool.category)
+        assertEquals("TOOL-12", openAiTool.romCode)
+        assertEquals(DownloadState.INSTALLED, defaultState.modelStates["tool_openai_vision_api"]?.state)
+        assertFalse("tool_openai_vision_api" in defaultState.slottedCartridges)
+
+        // Pre-configured providers include NanoGPT, OpenRouter, Clinepass + Custom at the bottom
+        val providers = OpenAiVisionProviderPreset.entries
+        assertTrue(OpenAiVisionProviderPreset.NANOGPT in providers)
+        assertTrue(OpenAiVisionProviderPreset.OPENROUTER in providers)
+        assertTrue(OpenAiVisionProviderPreset.CLINEPASS in providers)
+        assertEquals(OpenAiVisionProviderPreset.CUSTOM, providers.last())
+        assertTrue(providers.last().isCustom)
 
         val gemmaE2b = catalog.first { it.id == "sub_gemma4_e2b_vision" }
         assertTrue(gemmaE2b.isSubCartridge)

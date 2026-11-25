@@ -1718,7 +1718,8 @@ enum class OsModuleIconType {
     SCRIPT_STUDIO,
     VOICE_BENCHMARK,
     SRT_BATCH_STUDIO,
-    MANGA_DUB_STUDIO
+    MANGA_DUB_STUDIO,
+    OPENAI_VISION_HUB
 }
 
 /**
@@ -2088,6 +2089,39 @@ fun MikaOsModuleIcon(
                     }
                     drawPath(playTri, color = MikaColors.TerminalGreen.copy(alpha = activeAlpha))
                     drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = (3.0f * s).dp.toPx(), center = Offset(w * 0.72f, h * 0.67f))
+                }
+
+                OsModuleIconType.OPENAI_VISION_HUB -> {
+                    // Cybernetic API Vision Iris Lens + 3 Cloud API Circuit Nodes
+                    val topEye = Path().apply {
+                        moveTo(w * 0.10f, h * 0.52f)
+                        quadraticTo(w * 0.50f, h * 0.18f, w * 0.90f, h * 0.52f)
+                    }
+                    val botEye = Path().apply {
+                        moveTo(w * 0.10f, h * 0.52f)
+                        quadraticTo(w * 0.50f, h * 0.86f, w * 0.90f, h * 0.52f)
+                    }
+                    drawPath(topEye, color = drawColor, style = stroke)
+                    drawPath(botEye, color = drawColor, style = stroke)
+                    drawCircle(
+                        color = MikaColors.NeonCyan.copy(alpha = activeAlpha),
+                        radius = w * 0.17f,
+                        center = Offset(w * 0.50f, h * 0.52f),
+                        style = thinStroke
+                    )
+                    drawCircle(
+                        color = MikaColors.NeonPink.copy(alpha = activeAlpha),
+                        radius = (3.2f * s).dp.toPx(),
+                        center = Offset(w * 0.50f, h * 0.52f)
+                    )
+                    // 3 API Uplink Nodes above eye arc
+                    val nr = (2.4f * s).dp.toPx()
+                    drawLine(drawColor.copy(alpha = 0.6f), Offset(w * 0.50f, h * 0.14f), Offset(w * 0.50f, h * 0.28f), strokeWidth = (1.5f * s).dp.toPx())
+                    drawLine(drawColor.copy(alpha = 0.6f), Offset(w * 0.24f, h * 0.22f), Offset(w * 0.34f, h * 0.34f), strokeWidth = (1.5f * s).dp.toPx())
+                    drawLine(drawColor.copy(alpha = 0.6f), Offset(w * 0.76f, h * 0.22f), Offset(w * 0.66f, h * 0.34f), strokeWidth = (1.5f * s).dp.toPx())
+                    drawCircle(MikaColors.TerminalGreen.copy(alpha = activeAlpha), radius = nr, center = Offset(w * 0.50f, h * 0.14f))
+                    drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = nr, center = Offset(w * 0.24f, h * 0.22f))
+                    drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = nr, center = Offset(w * 0.76f, h * 0.22f))
                 }
             }
         }

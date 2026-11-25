@@ -93,9 +93,9 @@ app/src/main/java/com/projectmika/purrtts/
    - **PURR Rulebook:** Live phonetic override editor, `MIKASTOP` ms sliders, and sentiment/DSP sliders.
    - **Model & Voice Catalog:** Resumable Hugging Face / GitHub downloader with SHA-256 verification and 5-second Voice Clone Studio.
 
-4. **Manga Dub Studio (`engine/manga/`)**
-   - **Vision pass:** a LiteRT Gemma vision model slices pages (XY-cut), reads the bubbles, and proposes the cast with descriptive role labels — placeholder-name and narrator bans are enforced in-prompt.
-   - **Casting pass:** confirmed cast members get Qwen3 VoiceDesign prompts and 5-second voice-clone locks; any speakerless line still synthesizes through a deterministic gendered Qwen fallback — the user's system voice is unreachable for dub lines.
+4. **Manga Dub Studio (`engine/manga/` + optional `TOOL-12` OpenAI Vision API)**
+   - **Vision & Storyboard pass:** multi-sheet chapter storyboarding + zoomed XY-cut panel OCR (6 local LiteRT VLMs, or optional `TOOL-12` OpenAI Vision endpoints from NanoGPT / OpenRouter / Clinepass / Custom URL — disabled by default), followed by a chapter-wide Story & Cast Consolidation pass that merges drifted labels across pages, locks genders, and honors optional character count baselines (`AUTO` or user-set).
+   - **Pre-Cook Review & Whole-Bubble Audio:** review/edit story summary, character counts, genders, and voices before cooking; every speech bubble synthesizes as one unbroken chunk with DC/onset-conditioned clean audio and locked Qwen voice clones (`no system-voice fallback`).
    - **Narration:** MIKA's voice resolves per narration line in isolation (narrator identity law) — never a roster entry, never a clone target.
 
 ## 🛠️ Build & Verification

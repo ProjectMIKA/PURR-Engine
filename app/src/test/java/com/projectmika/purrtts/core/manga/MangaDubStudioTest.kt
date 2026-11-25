@@ -1,10 +1,15 @@
 package com.projectmika.purrtts.core.manga
 
+import com.projectmika.purrtts.core.purr.OpenAiEndpointUtils
+import com.projectmika.purrtts.core.purr.OpenAiVisionProviderPreset
+import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.charset.Charset
 import java.nio.file.Files
+import kotlin.math.abs
+import kotlin.math.sin
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.apache.commons.compress.archivers.zip.ZipArchiveEntry
@@ -1344,5 +1349,178 @@ class MangaDubStudioTest {
             maxPanels = 6
         )
         assertEquals(6, cappedPanels.size)
+    }
+
+    @Test
+    fun `single bubble sanitizer strips leading punctuation hallucinations and preserves multi-sentence bubbles unbroken`() {
+        // Leading dashes/ellipses must never become leading commas or periods before spoken words
+        assertEquals("Wait!", MangaTextBender.sanitizeMangaDialogue("--WAIT!"))
+        assertEquals("Huh?!", MangaTextBender.sanitizeMangaDialogue("...Huh?!"))
+        assertEquals("Stop right there, fool!", MangaTextBender.sanitizeMangaDialogue("— — STOP RIGHT THERE, FOOL!!"))
+        assertEquals("No way, seriously?!", MangaTextBender.sanitizeMangaDialogue("… — NO WAY... SERIOUSLY?!"))
+
+        // Very long multi-sentence speech bubble stays ONE unbroken single string
+        val longBubble = "--LISTEN TO ME CAREFULLY! " +
+            "FIRST WE SECURE THE REACTOR CORE, THEN WE HOLD THE PERIMETER, AND FINALLY WE SIGNAL THE ORBITAL FLEET BEFORE NIGHTFALL!! " +
+            "NO ONE LEAVES THIS DECK UNTIL EVERY SINGLE CITIZEN IS SAFELY INSIDE THE SHELTER."
+        val prepared = MangaTextBender.prepareSingleBubbleSpeechText(longBubble)
+        assertTrue(prepared.startsWith("Listen to me carefully!"))
+        assertTrue(prepared.contains("secure the reactor core"))
+        assertTrue(prepared.contains("safely inside the shelter."))
+        assertFalse(prepared.contains('\n'))
+    }
+
+    @Test
+    fun `onset conditioner and clone seed conditioner zero dc bias fade smoothly and append trailing silence`() {
+        val sr = PurrDspProcessor.SAMPLE_RATE_HZ
+        // Synthetic 1-second 220Hz tone + 0.12 DC offset + dead-air margin
+        val raw = FloatArray(sr) { i ->
+            0.12f + 0.45f * sin(2.0 * kotlin.math.PI * 220.0 * i / sr).toFloat()
+        }
+        val conditioned = PurrDspProcessor.conditionDubClipOnset(raw, sr)
+        assertEquals(0f, conditioned[0], 0.0001f)
+        assertTrue(abs(conditioned[1]) < 0.02f)
+
+        val seed = PurrDspProcessor.prepareCleanCloneSeedPcm(raw, sr, tailSilenceMs = 120)
+        assertEquals(0f, seed[0], 0.0001f)
+        val tailLen = (sr * 120) / 1000
+        assertTrue(seed.size > tailLen)
+        val tailSlice = seed.copyOfRange(seed.size - tailLen, seed.size)
+        assertTrue(tailSlice.all { it == 0f })
+    }
+
+    @Test
+    fun `cast consolidator merges cross-page aliases locks genders preserves narrator and honors character count baseline`() {
+        val initialRoster = listOf(
+            MangaCharacterProfile(id = "c1", name = "TOWEL_GIRL", gender = VoiceGender.ANDROGYNOUS, visualDescription = "Young girl in bath towel"),
+            MangaCharacterProfile(id = "c2", name = "BLONDE_WOMAN", gender = VoiceGender.FEMALE, visualDescription = "Blonde woman in dark suit"),
+            MangaCharacterProfile(id = "c3", name = "SEBASTIAN", gender = VoiceGender.ANDROGYNOUS, visualDescription = "Butler gentleman in coat"),
+            MangaCharacterProfile(id = "c_extra", name = "PASSERBY", gender = VoiceGender.MALE, visualDescription = "Background man")
+        )
+        val pages = listOf(
+            MangaPageEntry(
+                pageIndex = 0,
+                fileName = "p1.jpg",
+                localImagePath = "/tmp/p1.jpg",
+                widthPx = 800,
+                heightPx = 1200,
+                panels = listOf(
+                    MangaPanelNode(
+                        id = "pan_0_0",
+                        pageIndex = 0,
+                        panelIndex = 0,
+                        panelRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        cameraStartRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        cameraEndRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        lines = listOf(
+                            MangaSpeechLine("l_nar", 1, "char_narrator", "NARRATOR", "Chapter One.", "Chapter One."),
+                            MangaSpeechLine("l_1", 2, "c1", "TOWEL_GIRL", "So thirsty!", "So thirsty!", genderHint = VoiceGender.FEMALE)
+                        )
+                    )
+                )
+            ),
+            MangaPageEntry(
+                pageIndex = 1,
+                fileName = "p2.jpg",
+                localImagePath = "/tmp/p2.jpg",
+                widthPx = 800,
+                heightPx = 1200,
+                panels = listOf(
+                    MangaPanelNode(
+                        id = "pan_1_0",
+                        pageIndex = 1,
+                        panelIndex = 0,
+                        panelRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        cameraStartRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        cameraEndRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        lines = listOf(
+                            MangaSpeechLine("l_2", 1, "c2", "BLONDE_WOMAN", "Wait for me!", "Wait for me!"),
+                            MangaSpeechLine("l_3", 2, "c3", "SEBASTIAN", "Right away, my lady.", "Right away, my lady."),
+                            MangaSpeechLine("l_4", 3, "c_extra", "PASSERBY", "Look out!", "Look out!")
+                        )
+                    )
+                )
+            )
+        )
+
+        val consolidationRaw = """
+            {
+              "cohesive_story_summary": "Ojou-sama changes from a towel into her suit while Sebastian attends to her.",
+              "canonical_characters": [
+                {
+                  "canonical_name": "OJOU_SAMA",
+                  "merged_aliases": ["TOWEL_GIRL", "BLONDE_WOMAN"],
+                  "gender": "female",
+                  "visual_description": "Young woman seen in bath towel on Page 1 and dark suit on Page 2",
+                  "voice_design_prompt": "Bright haughty young anime heroine voice, close-mic studio"
+                },
+                {
+                  "canonical_name": "SEBASTIAN",
+                  "merged_aliases": [],
+                  "gender": "male",
+                  "visual_description": "Butler gentleman in coat",
+                  "voice_design_prompt": "Composed deep butler baritone, close-mic studio"
+                },
+                {
+                  "canonical_name": "PASSERBY",
+                  "merged_aliases": [],
+                  "gender": "male",
+                  "visual_description": "Background man",
+                  "voice_design_prompt": "Ordinary male bystander voice"
+                }
+              ],
+              "line_fixes": [
+                {"line_id": "l_4", "speaker": "SEBASTIAN", "gender": "male"}
+              ]
+            }
+        """.trimIndent()
+        val parsed = MangaVisionResponseParser.parseCastConsolidation(consolidationRaw)
+        assertNotNull(parsed)
+
+        // With explicit expectedCharacterCount = 2, cast unifies to OJOU_SAMA & SEBASTIAN, while NARRATOR stays untouched
+        val (mergedCast, mergedPages) = MangaCastConsolidator.consolidateChapterCastAndLines(
+            roster = initialRoster,
+            pages = pages,
+            consolidation = parsed,
+            expectedCharacterCount = 2
+        )
+        assertEquals(2, mergedCast.size)
+        assertTrue(mergedCast.none { MangaTextBender.isNarratorName(it.name) })
+        val ojou = mergedCast.first { it.name == "OJOU_SAMA" }
+        val seb = mergedCast.first { it.name == "SEBASTIAN" }
+        assertEquals(VoiceGender.FEMALE, ojou.gender)
+        assertEquals(VoiceGender.MALE, seb.gender)
+
+        val flatLines = mergedPages.flatMap { it.panels }.flatMap { it.lines }
+        assertEquals("NARRATOR", flatLines.first { it.id == "l_nar" }.speakerName)
+        assertEquals("OJOU_SAMA", flatLines.first { it.id == "l_1" }.speakerName)
+        assertEquals("OJOU_SAMA", flatLines.first { it.id == "l_2" }.speakerName)
+        assertEquals(VoiceGender.FEMALE, flatLines.first { it.id == "l_2" }.genderHint)
+        assertEquals("SEBASTIAN", flatLines.first { it.id == "l_3" }.speakerName)
+        assertEquals("SEBASTIAN", flatLines.first { it.id == "l_4" }.speakerName)
+    }
+
+    @Test
+    fun `openai vision endpoint url normalizer handles presets base urls and custom paths cleanly`() {
+        assertEquals(
+            "https://api.nano-gpt.com/api/v1/chat/completions",
+            OpenAiEndpointUtils.normalizeChatCompletionsUrl("https://api.nano-gpt.com/api/v1")
+        )
+        assertEquals(
+            "https://openrouter.ai/api/v1/chat/completions",
+            OpenAiEndpointUtils.normalizeChatCompletionsUrl("https://openrouter.ai/api/v1/")
+        )
+        assertEquals(
+            "https://api.cline.bot/api/v1/chat/completions",
+            OpenAiEndpointUtils.normalizeChatCompletionsUrl("https://api.cline.bot/api/v1/chat/completions")
+        )
+        assertEquals(
+            "http://192.168.1.50:8080/v1/chat/completions",
+            OpenAiEndpointUtils.normalizeChatCompletionsUrl("http://192.168.1.50:8080")
+        )
+        assertEquals(
+            OpenAiVisionProviderPreset.CUSTOM,
+            OpenAiVisionProviderPreset.entries.last()
+        )
     }
 }

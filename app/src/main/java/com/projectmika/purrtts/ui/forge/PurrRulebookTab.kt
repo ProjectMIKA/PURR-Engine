@@ -192,6 +192,14 @@ private enum class ActiveOsModule(
         badge = "TOOL-11",
         iconType = OsModuleIconType.MANGA_DUB_STUDIO,
         accentResolver = { MikaColors.NeonPink }
+    ),
+    OPENAI_VISION_HUB(
+        toolCartridgeId = "tool_openai_vision_api",
+        title = "OPENAI VISION API",
+        subtitle = "NanoGPT, OpenRouter, Clinepass & Custom",
+        badge = "TOOL-12",
+        iconType = OsModuleIconType.OPENAI_VISION_HUB,
+        accentResolver = { MikaColors.NeonCyan }
     );
 
     fun accentColor(): Color = accentResolver()
@@ -315,6 +323,7 @@ fun PurrRulebookTab(
                                                 ActiveOsModule.VOICE_BENCHMARK -> "A/B RTF LAB"
                                                 ActiveOsModule.SRT_BATCH_STUDIO -> ".SRT/.VTT QUEUE"
                                                 ActiveOsModule.MANGA_DUB_STUDIO -> "CBZ -> .MP4 DUB"
+                                                ActiveOsModule.OPENAI_VISION_HUB -> "${forgeState.savedOpenAiVisionEngines.size} SAVED"
                                             },
                                             onClick = { openedModule = mod }
                                         )
@@ -588,6 +597,10 @@ fun PurrRulebookTab(
                                     availableVoices = viewModel.allAvailableVoices(),
                                     viewModel = viewModel,
                                     onLaunchCloneForCharacter = onLaunchCloneForMangaCharacter
+                                )
+                                ActiveOsModule.OPENAI_VISION_HUB -> OpenAiVisionModuleWindowBody(
+                                    forgeState = forgeState,
+                                    viewModel = viewModel
                                 )
                             }
                         }

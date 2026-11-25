@@ -1,3 +1,34 @@
+# 🌌 PURR-TTS v2.1.0 // Story Cohesion, Pre-Cook Cast Studio & OpenAI Vision Hub
+
+### ✨ What's New since v2.0.0
+
+Major Manga Dub Studio & audio cleanliness release: cohesive cross-page storytelling and gender-locked casting for local VLMs, a Pre-Cook Editing & Character Count stage (`AUTO` default), onset glitch elimination, strict single-chunk bubble synthesis, and an optional OpenAI Vision API Hub (`TOOL-12`, disabled by default). 🎬📖🎙️
+
+* **🗺️ Cross-Page Story & Cast Consolidation (`LiteRtGemmaVisionEngine` / `MangaCastConsolidator`)**:
+  * **Readable Multi-Sheet Storyboarding**: Contact sheets now sample up to 8 pages across the chapter at higher resolution (up to 4 pages per `1280×1280` sheet) so local VLMs extract full chapter plot arcs, character relationships, and accurate `male`/`female` genders before detailed scanning.
+  * **Post-OCR Consolidation Pass**: Right after page OCR finishes (while the local VLM stays resident in RAM), a chapter-wide script review unifies drifted cross-page role labels (`TOWEL_GIRL` + `BLONDE_WOMAN` -> canonical cast), locks character genders onto all lines, preserves MIKA's isolated narrator channel, and updates the cohesive story summary before Qwen 1.7B VoiceDesign casting.
+* **🎛️ Pre-Cook Review & Character Count Baseline (`MangaDubStudioModuleWindow` / `MangaDubStudioManager`)**:
+  * **Character Count Baseline (`AUTO` Default)**: Set `CAST QTY` to `AUTO` or enter an explicit count (`1..24` speaking characters, excluding MIKA) so storyboarding and consolidation share a cast baseline.
+  * **Pre-Cook Story & Cast Editor**: Imports default to reviewing the storyboard summary, character count cap, per-character `F`/`M`/`N` genders, auditions, and voices right before hitting **`COOK DUBBED EPISODE (.MP4)`** (with `AUTO-COOK` toggle preserved).
+* **🔊 Start-of-Clip Audio Glitch & Hallucination Fix (`MangaTextBender` / `PurrDspProcessor` / `Qwen3TtsEngine` / `purr_qwen3_jni.cpp`)**:
+  * **Leading Punctuation Fix**: `sanitizeMangaDialogue` strips leading dashes, ellipses, commas, and periods before and after internal replacement (`"--WAIT!"` -> `"Wait!"`, `"...Huh?!"` -> `"Huh?!"`) so neural TTS models never receive `, ` or `.` at `t=0`.
+  * **Clean Clone Seeds & ICL Spacing**: 1.7B VoiceDesign seed WAVs are DC-cleaned, silence-trimmed, edge-faded, and padded with `120ms` of digital tail silence so Qwen3 0.6B Base ICL continuation starts from clean silence; ICL target text receives an explicit leading BPE space token; Qwen sampling is moderated (`temperature = 0.72`, `top_p = 0.90`); and every dubbed clip passes a `18ms` zero-anchored raised-cosine onset conditioner.
+* **💬 Strict Whole-Bubble Single-Chunk Synthesis (`PurrChunk.Speech.singleChunkOnly` / `OnnxRuntimeEngine` / `LiteRtKokoroEngine`)**:
+  * Every speech bubble (and Manga character audition) synthesizes as **one unbroken chunk** regardless of bubble length — Phonon's 48-token internal splitter is bypassed, Kokoro G2P & Qwen token ceilings scale for long monologues, and vision prompts enforce one `lines` entry per physical bubble.
+* **🌐 Optional OpenAI Vision API Hub (`TOOL-12`, Disabled by Default)**:
+  * New built-in OS module **`OPENAI_VISION_API_HUB`** (`TOOL-12`) starts **ejected/disabled by default** in Cartridge Bay → `TOOLS`.
+  * Configure, test (`Bearer` auth + dynamic model ID), save, edit, and delete named Vision LLM endpoints using pre-configured services (**NanoGPT**, **OpenRouter**, **Clinepass**, **OpenAI Official**, **Together AI**, **Groq Cloud**) or **Custom OpenAI Endpoint** at the bottom of the dropdown.
+  * Saved Vision engines appear directly inside **Manga Dub Studio's `VISION_LLM_ENGINE` dropdown** alongside all 6 local LiteRT VLMs whenever `TOOL-12` is active.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.1.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `38`).
+2. **`PURR-TTS_V2.1.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.0.0 // Universal Cast Coverage — Every Bubble Gets A QWEN Voice
 
 ### ✨ What's New since v1.9.10

@@ -152,6 +152,70 @@ object PurrDspProcessor {
         return out
     }
 
+    /**
+     * ✨ MANGA DUB ONSET CONDITIONER (v2.1.0) ✨
+     * Eliminates start-of-clip pops, clicks, and DC bias steps without altering tonal balance:
+     * removes constant DC offset and applies a zero-anchored raised-cosine onset ramp.
+     */
+    fun conditionDubClipOnset(
+        samples: FloatArray,
+        sampleRate: Int = SAMPLE_RATE_HZ,
+        fadeInMs: Int = 18
+    ): FloatArray {
+        if (samples.size < 32 || sampleRate <= 0) return samples
+        val out = PurrCloneAudioCleaner.removeDcOffset(samples).copyOf()
+        val fadeSamples = ((fadeInMs.coerceIn(4, 60) * sampleRate) / 1000)
+            .coerceAtMost(out.size / 6)
+        if (fadeSamples > 1) {
+            for (i in 0 until fadeSamples) {
+                val t = i.toDouble() / fadeSamples.toDouble()
+                val hann = (0.5 * (1.0 - cos(PI * t))).toFloat()
+                out[i] *= hann
+            }
+            out[0] = 0f
+        }
+        return out
+    }
+
+    /**
+     * ✨ CLONE-SEED BOUNDARY CONDITIONER (v2.1.0) ✨
+     * Removes DC offset and leading/trailing dead air from a 1.7B VoiceDesign seed WAV, applies
+     * clean raised-cosine edge fades, and appends 120ms of digital silence so Qwen3 0.6B Base ICL
+     * continuation begins cleanly from silence instead of bleeding seed breath into frame 0.
+     */
+    fun prepareCleanCloneSeedPcm(
+        samples: FloatArray,
+        sampleRate: Int = SAMPLE_RATE_HZ,
+        tailSilenceMs: Int = 120
+    ): FloatArray {
+        if (samples.isEmpty() || sampleRate <= 0) return samples
+        val dcClean = PurrCloneAudioCleaner.removeDcOffset(samples)
+        val trimmed = PurrCloneAudioCleaner.trimSilence(dcClean, sampleRate).let {
+            if (it.size >= (sampleRate / 4)) it else dcClean
+        }
+        val faded = trimmed.copyOf()
+        val fadeIn = min(faded.size / 5, max(1, (sampleRate * 15) / 1000))
+        for (i in 0 until fadeIn) {
+            val t = i.toDouble() / fadeIn.toDouble()
+            faded[i] *= (0.5 * (1.0 - cos(PI * t))).toFloat()
+        }
+        if (faded.isNotEmpty()) faded[0] = 0f
+        val fadeOut = min(faded.size / 5, max(1, (sampleRate * 25) / 1000))
+        for (k in 0 until fadeOut) {
+            val t = k.toDouble() / fadeOut.toDouble()
+            val idx = faded.size - fadeOut + k
+            faded[idx] *= (0.5 * (1.0 + cos(PI * t))).toFloat()
+        }
+        val tailSamples = (sampleRate * tailSilenceMs.coerceIn(0, 500)) / 1000
+        return if (tailSamples > 0) {
+            FloatArray(faded.size + tailSamples).also { out ->
+                faded.copyInto(out, 0)
+            }
+        } else {
+            faded
+        }
+    }
+
     private fun applyGlueCompressor(samples: FloatArray, sampleRate: Int): FloatArray {
         val out = FloatArray(samples.size)
         val attackCoeff = exp(-1.0 / (0.025 * sampleRate)).toFloat()
