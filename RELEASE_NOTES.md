@@ -1,3 +1,25 @@
+# 🌌 PURR-TTS v2.1.1 // OpenAI Vision Provider Hardening (Clinepass & NanoGPT) + Sleek Cast Qty
+
+### ✨ What's New since v2.1.0
+
+Quick hotfix & polish release for **`TOOL-12` (`OPENAI_VISION_API_HUB`)** and **`TOOL-11` (`MANGA_DUB_STUDIO`)**: fixes `HTTP 500: Empty response content` on **Clinepass**, eliminates false empty-content errors on **NanoGPT** & reasoning VLMs, adds live endpoint model discovery across providers, and shrinks the oversized `CAST QTY` / `CHAR_CAP` boxes into razor-sleek inline numeric pills. 🌐🎬🎙️
+
+* **🌐 Cross-Provider OpenAI Vision API Hardening (`PurrModels` / `LiteRtGemmaVisionEngine` / `OpenAiVisionModuleWindow`)**:
+  * **Clinepass Fix (`HTTP 500` & Wrapper)**: Removed the tight `max_tokens: 24` / `temperature: 0.0` cap on `TEST API` (which starved reasoning models like `cline-pass/kimi-k3` / `glm-5.3-flash` / `mimo-v2.6-flash` during thinking and triggered `500 Empty response content`), sends `X-Response-Format: openai` + unwraps `{success, data}` envelopes, and updates the Clinepass preset default to **`cline-pass/kimi-k3`**.
+  * **NanoGPT & Reasoning VLM Support**: Rescues outputs when reasoning models populate `message.reasoning` / `message.reasoning_content` / SSE deltas, sends `text` before `image_url` in multimodal requests (OpenRouter/gateway best practice), sanitizes accidental `"Bearer "` key prefixes, auto-adapts `400` temperature/token-limit rejections across GPT-5 / o-series endpoints, and retries transient `5xx` gateway hiccups once.
+  * **Live Model Discovery (`FETCH MODELS`) & Preset Chips**: `TOOL-12` now queries `/models` across NanoGPT, OpenRouter, Clinepass, OpenAI, Together, Groq, and Custom servers, surfaces vision-capable models in a dropdown alongside 1-tap preset chips, and cleanly syncs fields when switching providers.
+* **🎛️ Sleek Compact `CAST QTY` & `CHAR_CAP` Pills (`MangaDubStudioModuleWindow`)**:
+  * Replaced the tall Material3 `OutlinedTextField` boxes with a compact `42×22dp` `BasicTextField` numeric pill (`AUTO` placeholder centered inline between `-` and `+` pills) in both the Studio scan panel and Pre-Cook Review bar.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.1.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `39`).
+2. **`PURR-TTS_V2.1.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.1.0 // Story Cohesion, Pre-Cook Cast Studio & OpenAI Vision Hub
 
 ### ✨ What's New since v2.0.0

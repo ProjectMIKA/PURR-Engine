@@ -1862,7 +1862,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             name = name.trim(),
             provider = provider,
             endpointUrl = normalizedUrl,
-            apiKey = apiKey.trim(),
+            apiKey = OpenAiEndpointUtils.sanitizeBearerApiKey(apiKey),
             modelId = modelId.trim(),
             createdAtEpochMs = prev?.createdAtEpochMs ?: now,
             updatedAtEpochMs = now
@@ -1887,6 +1887,18 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     ) {
         viewModelScope.launch {
             val res = mangaDubManager.visionEngine.testOpenAiEndpointConnection(endpointUrl, apiKey, modelId)
+            onResult(res)
+        }
+    }
+
+    fun fetchOpenAiVisionModels(
+        endpointUrl: String,
+        apiKey: String,
+        provider: OpenAiVisionProviderPreset,
+        onResult: (Result<List<String>>) -> Unit
+    ) {
+        viewModelScope.launch {
+            val res = mangaDubManager.visionEngine.fetchOpenAiEndpointModels(endpointUrl, apiKey, provider)
             onResult(res)
         }
     }

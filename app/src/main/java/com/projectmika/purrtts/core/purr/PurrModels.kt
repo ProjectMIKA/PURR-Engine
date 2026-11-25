@@ -1,6 +1,12 @@
 package com.projectmika.purrtts.core.purr
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * ✨ MIKA'S P.U.R.R. ENGINE DATA MODELS ✨
@@ -296,37 +302,70 @@ enum class OpenAiVisionProviderPreset(
     val label: String,
     val defaultEndpointUrl: String,
     val defaultModelHint: String,
-    val isCustom: Boolean = false
+    val isCustom: Boolean = false,
+    val suggestedVisionModels: List<String> = emptyList()
 ) {
     NANOGPT(
         label = "NanoGPT",
         defaultEndpointUrl = "https://api.nano-gpt.com/api/v1/chat/completions",
-        defaultModelHint = "openai/gpt-4o-mini"
+        defaultModelHint = "openai/gpt-4o-mini",
+        suggestedVisionModels = listOf(
+            "openai/gpt-4o-mini",
+            "z-ai/glm-5.3-flash",
+            "xiaomi/mimo-v2.6-flash",
+            "moonshotai/kimi-k2.6"
+        )
     ),
     OPENROUTER(
         label = "OpenRouter",
         defaultEndpointUrl = "https://openrouter.ai/api/v1/chat/completions",
-        defaultModelHint = "google/gemma-3-27b-it"
+        defaultModelHint = "google/gemma-3-27b-it",
+        suggestedVisionModels = listOf(
+            "google/gemma-3-27b-it",
+            "openai/gpt-4o-mini",
+            "moonshotai/kimi-k3",
+            "xiaomi/mimo-v2.6-flash"
+        )
     ),
     CLINEPASS(
         label = "Clinepass",
         defaultEndpointUrl = "https://api.cline.bot/api/v1/chat/completions",
-        defaultModelHint = "google/gemini-2.5-flash"
+        defaultModelHint = "cline-pass/kimi-k3",
+        suggestedVisionModels = listOf(
+            "cline-pass/kimi-k3",
+            "cline-pass/glm-5.3-flash",
+            "cline-pass/mimo-v2.6-flash",
+            "cline-pass/mimo-v2.6-pro",
+            "google/gemini-2.5-flash"
+        )
     ),
     OPENAI(
         label = "OpenAI Official",
         defaultEndpointUrl = "https://api.openai.com/v1/chat/completions",
-        defaultModelHint = "gpt-4o-mini"
+        defaultModelHint = "gpt-4o-mini",
+        suggestedVisionModels = listOf(
+            "gpt-4o-mini",
+            "gpt-4o",
+            "o4-mini"
+        )
     ),
     TOGETHER(
         label = "Together AI",
         defaultEndpointUrl = "https://api.together.xyz/v1/chat/completions",
-        defaultModelHint = "Qwen/Qwen2.5-VL-72B-Instruct"
+        defaultModelHint = "Qwen/Qwen2.5-VL-72B-Instruct",
+        suggestedVisionModels = listOf(
+            "Qwen/Qwen2.5-VL-72B-Instruct",
+            "Qwen/Qwen2-VL-72B-Instruct"
+        )
     ),
     GROQ(
         label = "Groq Cloud",
         defaultEndpointUrl = "https://api.groq.com/openai/v1/chat/completions",
-        defaultModelHint = "meta-llama/llama-4-scout-17b-16e-instruct"
+        defaultModelHint = "meta-llama/llama-4-scout-17b-16e-instruct",
+        suggestedVisionModels = listOf(
+            "meta-llama/llama-4-scout-17b-16e-instruct",
+            "meta-llama/llama-4-maverick-17b-128e-instruct"
+        )
     ),
     CUSTOM(
         label = "Custom OpenAI Endpoint",
@@ -337,6 +376,13 @@ enum class OpenAiVisionProviderPreset(
 }
 
 object OpenAiEndpointUtils {
+    private val lenientParser = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    fun sanitizeBearerApiKey(rawKey: String): String =
+        rawKey.trim()
+            .replace(Regex("^bearer\\s+", RegexOption.IGNORE_CASE), "")
+            .trim()
+
     /**
      * Normalizes user-supplied OpenAI-compatible base/full URLs into a concrete `/chat/completions` endpoint.
      */
@@ -345,16 +391,233 @@ object OpenAiEndpointUtils {
         if (cleaned.isEmpty()) return ""
         val lower = cleaned.lowercase()
         if (lower.endsWith("/chat/completions")) return cleaned
-        if (lower.endsWith("/v1") || lower.endsWith("/api/v1") || lower.endsWith("/openai/v1")) {
+        if (lower.endsWith("/v1") ||
+            lower.endsWith("/api/v1") ||
+            lower.endsWith("/api/v1legacy") ||
+            lower.endsWith("/api/v1thinking") ||
+            lower.endsWith("/api/subscription/v1") ||
+            lower.endsWith("/openai/v1") ||
+            lower.endsWith("/v1beta/openai")
+        ) {
             return "$cleaned/chat/completions"
         }
         val schemeIdx = cleaned.indexOf("://")
         val afterScheme = if (schemeIdx >= 0) cleaned.substring(schemeIdx + 3) else cleaned
-        return if ('/' !in afterScheme) {
-            "$cleaned/v1/chat/completions"
-        } else {
-            "$cleaned/chat/completions"
+        if ('/' !in afterScheme) {
+            val hostLower = afterScheme.lowercase()
+            return when {
+                "openrouter.ai" in hostLower ||
+                    "api.cline.bot" in hostLower ||
+                    "nano-gpt.com" in hostLower -> "$cleaned/api/v1/chat/completions"
+                "api.groq.com" in hostLower -> "$cleaned/openai/v1/chat/completions"
+                else -> "$cleaned/v1/chat/completions"
+            }
         }
+        return "$cleaned/chat/completions"
+    }
+
+    fun deriveModelsEndpointUrl(rawOrNormalizedUrl: String): String {
+        val chatUrl = normalizeChatCompletionsUrl(rawOrNormalizedUrl)
+        if (chatUrl.isEmpty()) return ""
+        return chatUrl.replace(Regex("/chat/completions$", RegexOption.IGNORE_CASE), "/models")
+    }
+
+    fun isReasoningTemperatureLockedModel(modelId: String): Boolean {
+        val m = modelId.trim().lowercase()
+        if (m.isEmpty()) return false
+        return m.contains("gpt-5") ||
+            Regex("(^|[/:_-])o[134](-mini|-pro|-preview)?($|[/:_-])").containsMatchIn(m) ||
+            m.contains("deepseek-r1") ||
+            m.contains(":thinking") ||
+            m.contains("qwq") ||
+            m.contains("kimi-k3") ||
+            m.contains("glm-5") ||
+            m.contains("mimo-v2") ||
+            m.contains("pareto")
+    }
+
+    private fun extractJsonErrorMessage(obj: JsonObject?): String? {
+        if (obj == null) return null
+        val errElem = obj["error"]
+        when (errElem) {
+            is JsonObject -> {
+                val msg = (errElem["message"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+                val code = (errElem["code"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+                if (msg.isNotEmpty()) return if (code.isNotEmpty() && code !in msg) "$msg ($code)" else msg
+                if (code.isNotEmpty()) return code
+            }
+            is JsonPrimitive -> {
+                val msg = errElem.contentOrNull?.trim().orEmpty()
+                if (msg.isNotEmpty() && msg != "null") return msg
+            }
+            else -> Unit
+        }
+        val successFalse = (obj["success"] as? JsonPrimitive)?.contentOrNull?.equals("false", ignoreCase = true) == true
+        if (successFalse) {
+            val msg = (obj["message"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            if (msg.isNotEmpty()) return msg
+            return "Provider returned success=false"
+        }
+        return null
+    }
+
+    private fun extractContentAndReasoningFromMessage(msg: JsonObject?): Pair<String, String> {
+        if (msg == null) return "" to ""
+        var directContent = ""
+        val reasoningParts = mutableListOf<String>()
+
+        when (val contentElem = msg["content"]) {
+            is JsonPrimitive -> directContent = contentElem.contentOrNull.orEmpty()
+            is JsonArray -> {
+                val textParts = mutableListOf<String>()
+                contentElem.forEach { elem ->
+                    val partObj = elem as? JsonObject ?: return@forEach
+                    val type = (partObj["type"] as? JsonPrimitive)?.contentOrNull?.lowercase()
+                    when (type) {
+                        "thinking", "reasoning" -> {
+                            val r = (partObj["thinking"] as? JsonPrimitive)?.contentOrNull
+                                ?: (partObj["text"] as? JsonPrimitive)?.contentOrNull
+                                ?: (partObj["reasoning"] as? JsonPrimitive)?.contentOrNull
+                            if (!r.isNullOrBlank()) reasoningParts += r
+                        }
+                        null, "text", "output_text" -> {
+                            val t = (partObj["text"] as? JsonPrimitive)?.contentOrNull
+                                ?: (partObj["output_text"] as? JsonPrimitive)?.contentOrNull
+                                ?: (partObj["content"] as? JsonPrimitive)?.contentOrNull
+                            if (!t.isNullOrBlank()) textParts += t
+                        }
+                    }
+                }
+                directContent = textParts.joinToString("\n")
+            }
+            else -> Unit
+        }
+
+        val reasoningField = listOf("reasoning", "reasoning_content", "thought")
+            .firstNotNullOfOrNull { key ->
+                (msg[key] as? JsonPrimitive)?.contentOrNull?.trim()?.takeIf { it.isNotEmpty() }
+            }.orEmpty()
+        val combinedReasoning = reasoningField.ifBlank { reasoningParts.joinToString("\n").trim() }
+        return directContent.trim() to combinedReasoning
+    }
+
+    /**
+     * Extracts text across standard OpenAI payloads, ClinePass `{success, data}` envelopes,
+     * NanoGPT `reasoning` / `reasoning_content` fields, Response-API `output_text`, and SSE streams.
+     */
+    fun extractChatCompletionTextOrThrow(
+        rawBody: String,
+        allowReasoningFallback: Boolean = true
+    ): String {
+        val trimmed = rawBody.trim()
+        if (trimmed.isEmpty()) throw IllegalStateException("Endpoint returned an empty HTTP body")
+
+        if (trimmed.startsWith("data:", ignoreCase = true) || trimmed.lineSequence().any { it.trimStart().startsWith("data:") }) {
+            val contentBuf = StringBuilder()
+            val reasoningBuf = StringBuilder()
+            trimmed.lineSequence().forEach { line ->
+                val cleanLine = line.trim()
+                if (!cleanLine.startsWith("data:", ignoreCase = true)) return@forEach
+                val payload = cleanLine.substringAfter(':').trim()
+                if (payload.isEmpty() || payload == "[DONE]") return@forEach
+                val chunkObj = runCatching { lenientParser.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return@forEach
+                extractJsonErrorMessage(chunkObj)?.let { throw IllegalStateException("Stream error: $it") }
+                val unwrapped = (chunkObj["data"] as? JsonObject)?.takeIf { "choices" in it || "error" in it } ?: chunkObj
+                extractJsonErrorMessage(unwrapped)?.let { throw IllegalStateException("Stream error: $it") }
+                val deltaMsg = ((unwrapped["choices"] as? JsonArray)?.firstOrNull() as? JsonObject)
+                    ?.let { (it["delta"] as? JsonObject) ?: (it["message"] as? JsonObject) }
+                val (cPart, rPart) = extractContentAndReasoningFromMessage(deltaMsg)
+                if (cPart.isNotEmpty()) contentBuf.append(cPart)
+                if (rPart.isNotEmpty()) reasoningBuf.append(rPart)
+            }
+            val streamedContent = contentBuf.toString().trim()
+            if (streamedContent.isNotEmpty()) return streamedContent
+            val streamedReasoning = reasoningBuf.toString().trim()
+            if (allowReasoningFallback && streamedReasoning.isNotEmpty()) return streamedReasoning
+            throw IllegalStateException("Endpoint stream returned empty content")
+        }
+
+        val rawRoot = runCatching { lenientParser.parseToJsonElement(trimmed) as? JsonObject }.getOrNull()
+            ?: throw IllegalStateException("Invalid JSON response from endpoint")
+        extractJsonErrorMessage(rawRoot)?.let { throw IllegalStateException("API error: $it") }
+
+        val root = (rawRoot["data"] as? JsonObject)?.takeIf {
+            "choices" in it || "output_text" in it || "error" in it
+        } ?: rawRoot
+        extractJsonErrorMessage(root)?.let { throw IllegalStateException("API error: $it") }
+
+        val choices = root["choices"] as? JsonArray
+        if (choices == null) {
+            val topOutputText = (root["output_text"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+            if (topOutputText.isNotEmpty()) return topOutputText
+            throw IllegalStateException("Missing 'choices' in OpenAI response")
+        }
+        val first = choices.firstOrNull() as? JsonObject
+            ?: throw IllegalStateException("Empty 'choices' array")
+        val msg = (first["message"] as? JsonObject) ?: (first["delta"] as? JsonObject)
+        val (msgContent, msgReasoning) = extractContentAndReasoningFromMessage(msg)
+
+        val contentText = msgContent
+            .ifBlank { (first["text"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty() }
+            .ifBlank { (root["output_text"] as? JsonPrimitive)?.contentOrNull?.trim().orEmpty() }
+        if (contentText.isNotEmpty()) return contentText
+
+        if (allowReasoningFallback && msgReasoning.isNotEmpty()) return msgReasoning
+
+        val refusal = (msg?.get("refusal") as? JsonPrimitive)?.contentOrNull?.trim().orEmpty()
+        if (refusal.isNotEmpty()) throw IllegalStateException("Model refused request: $refusal")
+
+        val finishReason = (first["finish_reason"] as? JsonPrimitive)?.contentOrNull ?: "unknown"
+        throw IllegalStateException("Endpoint returned empty message content (finish_reason=$finishReason)")
+    }
+
+    fun parseModelsListIds(rawBody: String): List<String> {
+        val trimmed = rawBody.trim()
+        if (trimmed.isEmpty()) return emptyList()
+        val elem: JsonElement = runCatching { lenientParser.parseToJsonElement(trimmed) }.getOrNull() ?: return emptyList()
+        val items: JsonArray = when (elem) {
+            is JsonArray -> elem
+            is JsonObject -> {
+                (elem["data"] as? JsonArray)
+                    ?: ((elem["data"] as? JsonObject)?.get("models") as? JsonArray)
+                    ?: (elem["models"] as? JsonArray)
+                    ?: return emptyList()
+            }
+            else -> return emptyList()
+        }
+        val excludedTerms = listOf("embedding", "rerank", "whisper", "tts", "moderation", "dall-e", "flux", ":batch")
+        val visionKeywords = listOf(
+            "vl", "vision", "4o", "gemini", "gemma-3", "gemma-4", "kimi",
+            "glm-5", "mimo", "claude", "llama-4", "pixtral", "qwen2.5-vl", "qwen3"
+        )
+        val scored = mutableListOf<Pair<Int, String>>()
+        items.forEach { item ->
+            val obj = item as? JsonObject ?: return@forEach
+            val id = ((obj["id"] as? JsonPrimitive)?.contentOrNull
+                ?: (obj["name"] as? JsonPrimitive)?.contentOrNull)
+                ?.trim()
+                ?.takeIf { it.isNotEmpty() } ?: return@forEach
+            val lowerId = id.lowercase()
+            if (excludedTerms.any { it in lowerId }) return@forEach
+
+            val archObj = obj["architecture"] as? JsonObject
+            val inputModalities = (archObj?.get("input_modalities") as? JsonArray)
+                ?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.lowercase() }
+                .orEmpty()
+            val modality = (archObj?.get("modality") as? JsonPrimitive)?.contentOrNull?.lowercase().orEmpty()
+            val desc = (obj["description"] as? JsonPrimitive)?.contentOrNull?.lowercase().orEmpty()
+            val isVision = "image" in inputModalities ||
+                "image" in modality ||
+                visionKeywords.any { it in lowerId } ||
+                ("accepts text and images" in desc) ||
+                ("image understanding" in desc)
+            scored += (if (isVision) 0 else 1) to id
+        }
+        return scored
+            .sortedBy { it.first }
+            .map { it.second }
+            .distinct()
+            .take(120)
     }
 }
 

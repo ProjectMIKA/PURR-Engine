@@ -13,8 +13,8 @@ android {
         applicationId = "com.projectmika.purrtts"
         minSdk = 26
         targetSdk = 35
-        versionCode = 38
-        versionName = "2.1.0"
+        versionCode = 39
+        versionName = "2.1.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 

@@ -30,6 +30,7 @@ import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
 import com.projectmika.purrtts.core.manga.MangaVisionResponseParser
 import com.projectmika.purrtts.core.purr.OpenAiEndpointUtils
+import com.projectmika.purrtts.core.purr.OpenAiVisionProviderPreset
 import com.projectmika.purrtts.core.purr.SavedOpenAiVisionEngine
 import com.projectmika.purrtts.core.purr.VoiceGender
 import java.io.File
@@ -1551,7 +1552,11 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         if (openAiEngine != null && openAiEngine.endpointUrl.isNotBlank()) {
             val url = OpenAiEndpointUtils.normalizeChatCompletionsUrl(openAiEngine.endpointUrl)
             if (url.isNotBlank()) {
-                return Triple(url, openAiEngine.apiKey.trim(), openAiEngine.modelId.trim().ifBlank { "gpt-4o-mini" })
+                return Triple(
+                    url,
+                    OpenAiEndpointUtils.sanitizeBearerApiKey(openAiEngine.apiKey),
+                    openAiEngine.modelId.trim().ifBlank { "gpt-4o-mini" }
+                )
             }
         }
         val cleanedLegacy = OpenAiEndpointUtils.normalizeChatCompletionsUrl(legacyPowerUserUrl)
@@ -1570,18 +1575,61 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
             val normalizedUrl = OpenAiEndpointUtils.normalizeChatCompletionsUrl(endpointUrl)
             require(normalizedUrl.isNotBlank()) { "Endpoint URL is empty" }
             val resolvedModel = modelId.trim().ifBlank { "gpt-4o-mini" }
+            // Omit tight max_tokens & temperature locks here so reasoning models
+            // (Clinepass kimi/glm/mimo, NanoGPT :thinking, OpenAI o-series/GPT-5)
+            // never exhaust their thinking budget on a connectivity ping.
             val payload = buildJsonObject {
                 put("model", resolvedModel)
-                put("temperature", 0.0)
-                put("max_tokens", 24)
+                put("stream", false)
                 put("messages", buildJsonArray {
                     add(buildJsonObject {
                         put("role", "user")
-                        put("content", "Reply with OK")
+                        put("content", "Reply with OK.")
                     })
                 })
             }.toString()
-            executeOpenAiChatRequestOrThrow(normalizedUrl, apiKey.trim(), payload)
+            executeOpenAiChatRequestOrThrow(
+                endpointUrl = normalizedUrl,
+                apiKey = apiKey,
+                payload = payload,
+                allowReasoningFallback = true
+            )
+        }
+    }
+
+    suspend fun fetchOpenAiEndpointModels(
+        endpointUrl: String,
+        apiKey: String,
+        preset: OpenAiVisionProviderPreset
+    ): Result<List<String>> = withContext(Dispatchers.IO) {
+        runCatching {
+            val modelsUrl = OpenAiEndpointUtils.deriveModelsEndpointUrl(endpointUrl)
+            require(modelsUrl.isNotBlank()) { "Models URL could not be derived from endpoint" }
+            val cleanKey = OpenAiEndpointUtils.sanitizeBearerApiKey(apiKey)
+            val req = Request.Builder()
+                .url(modelsUrl)
+                .apply {
+                    if (cleanKey.isNotBlank()) header("Authorization", "Bearer $cleanKey")
+                    header("Accept", "application/json")
+                    header("User-Agent", "PURR-TTS/2.1.1")
+                    header("X-Response-Format", "openai")
+                    header("HTTP-Referer", "https://github.com/ProjectMIKA/PURR-Engine")
+                    header("X-Title", "PURR-TTS")
+                }
+                .get()
+                .build()
+
+            val discovered = httpClient.newCall(req).execute().use { res ->
+                val body = res.body?.string().orEmpty()
+                if (!res.isSuccessful) {
+                    throw IllegalStateException("HTTP ${res.code}: ${body.take(180).ifBlank { res.message }}")
+                }
+                OpenAiEndpointUtils.parseModelsListIds(body)
+            }
+            (preset.suggestedVisionModels + discovered)
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
         }
     }
 
@@ -1594,33 +1642,36 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         val b64 = Base64.encodeToString(annotatedJpegFile.readBytes(), Base64.NO_WRAP)
         val payload = buildJsonObject {
             put("model", modelId)
-            put("temperature", 0.2)
-            put("max_tokens", 2048)
+            put("stream", false)
+            if (!OpenAiEndpointUtils.isReasoningTemperatureLockedModel(modelId)) {
+                put("temperature", 0.2)
+            }
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "user")
                     put("content", buildJsonArray {
+                        // Text prompt first -> image_url second per OpenRouter/gateway best practice
+                        add(buildJsonObject {
+                            put("type", "text")
+                            put("text", prompt)
+                        })
                         add(buildJsonObject {
                             put("type", "image_url")
                             put("image_url", buildJsonObject {
                                 put("url", "data:image/jpeg;base64,$b64")
                             })
                         })
-                        add(buildJsonObject {
-                            put("type", "text")
-                            put("text", prompt)
-                        })
                     })
                 })
             })
         }.toString()
 
-        return runCatching { executeOpenAiChatRequestOrThrow(endpointUrl, apiKey, payload) }
-            .onFailure { err ->
-                lastEngineError = "OpenAI Vision API error: ${err.message}"
-                Log.w(TAG, "[OPENAI_VISION] Vision call failed: ${err.message}")
-            }
-            .getOrNull()
+        return runCatching {
+            executeOpenAiChatRequestOrThrow(endpointUrl, apiKey, payload, allowReasoningFallback = true)
+        }.onFailure { err ->
+            lastEngineError = "OpenAI Vision API error: ${err.message}"
+            Log.w(TAG, "[OPENAI_VISION] Vision call failed: ${err.message}")
+        }.getOrNull()
     }
 
     private fun queryOpenAiTextEndpoint(
@@ -1630,8 +1681,10 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
         val (endpointUrl, apiKey, modelId) = target
         val payload = buildJsonObject {
             put("model", modelId)
-            put("temperature", 0.35)
-            put("max_tokens", 1600)
+            put("stream", false)
+            if (!OpenAiEndpointUtils.isReasoningTemperatureLockedModel(modelId)) {
+                put("temperature", 0.35)
+            }
             put("messages", buildJsonArray {
                 add(buildJsonObject {
                     put("role", "user")
@@ -1639,53 +1692,89 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
                 })
             })
         }.toString()
-        return runCatching { executeOpenAiChatRequestOrThrow(endpointUrl, apiKey, payload) }
-            .onFailure { err ->
-                lastEngineError = "OpenAI Text API error: ${err.message}"
-                Log.w(TAG, "[OPENAI_VISION] Text call failed: ${err.message}")
-            }
-            .getOrNull()
+        return runCatching {
+            executeOpenAiChatRequestOrThrow(endpointUrl, apiKey, payload, allowReasoningFallback = true)
+        }.onFailure { err ->
+            lastEngineError = "OpenAI Text API error: ${err.message}"
+            Log.w(TAG, "[OPENAI_VISION] Text call failed: ${err.message}")
+        }.getOrNull()
+    }
+
+    private fun adaptOpenAiPayloadForBadRequest(payload: String, errorBody: String): String? {
+        val errLower = errorBody.lowercase()
+        val obj = runCatching { lenientJson.parseToJsonElement(payload) as? JsonObject }.getOrNull() ?: return null
+        return when {
+            "temperature" in errLower && "temperature" in obj -> buildJsonObject {
+                obj.forEach { (k, v) -> if (k != "temperature") put(k, v) }
+            }.toString()
+            "max_completion_tokens" in errLower && "max_completion_tokens" !in obj -> buildJsonObject {
+                obj.forEach { (k, v) -> if (k != "max_tokens") put(k, v) }
+                put("max_completion_tokens", 4096)
+            }.toString()
+            "max_tokens" in errLower && "max_tokens" !in obj -> buildJsonObject {
+                obj.forEach { (k, v) -> put(k, v) }
+                put("max_tokens", 4096)
+            }.toString()
+            else -> null
+        }
     }
 
     private fun executeOpenAiChatRequestOrThrow(
         endpointUrl: String,
         apiKey: String,
-        payload: String
+        payload: String,
+        allowReasoningFallback: Boolean = true
     ): String {
-        val req = Request.Builder()
-            .url(endpointUrl)
-            .apply {
-                if (apiKey.isNotBlank()) header("Authorization", "Bearer $apiKey")
-                header("HTTP-Referer", "https://github.com/ProjectMIKA/PURR-Engine")
-                header("X-Title", "PURR-TTS")
-            }
-            .post(payload.toRequestBody("application/json; charset=utf-8".toMediaType()))
-            .build()
+        val cleanKey = OpenAiEndpointUtils.sanitizeBearerApiKey(apiKey)
+        var currentPayload = payload
+        var lastError: Throwable? = null
 
-        httpClient.newCall(req).execute().use { res ->
-            val body = res.body?.string().orEmpty()
-            if (!res.isSuccessful) {
-                throw IllegalStateException("HTTP ${res.code}: ${body.take(180).ifBlank { res.message }}")
+        for (attempt in 0 until 2) {
+            val req = Request.Builder()
+                .url(endpointUrl)
+                .apply {
+                    if (cleanKey.isNotBlank()) header("Authorization", "Bearer $cleanKey")
+                    header("Accept", "application/json")
+                    header("User-Agent", "PURR-TTS/2.1.1")
+                    // Forces ClinePass non-streaming responses into top-level OpenAI `choices` format
+                    header("X-Response-Format", "openai")
+                    header("HTTP-Referer", "https://github.com/ProjectMIKA/PURR-Engine")
+                    header("X-Title", "PURR-TTS")
+                }
+                .post(currentPayload.toRequestBody("application/json; charset=utf-8".toMediaType()))
+                .build()
+
+            httpClient.newCall(req).execute().use { res ->
+                val body = res.body?.string().orEmpty()
+                if (res.isSuccessful) {
+                    return OpenAiEndpointUtils.extractChatCompletionTextOrThrow(
+                        rawBody = body,
+                        allowReasoningFallback = allowReasoningFallback
+                    )
+                }
+
+                if (res.code == 400 && attempt == 0) {
+                    val adapted = adaptOpenAiPayloadForBadRequest(currentPayload, body)
+                    if (adapted != null && adapted != currentPayload) {
+                        currentPayload = adapted
+                        return@use
+                    }
+                }
+                if (res.code in setOf(500, 502, 503, 504) && attempt == 0) {
+                    runCatching { Thread.sleep(650) }
+                    lastError = IllegalStateException("HTTP ${res.code}: ${body.take(200).ifBlank { res.message }}")
+                    return@use
+                }
+
+                val detail = runCatching {
+                    val errObj = lenientJson.parseToJsonElement(body) as? JsonObject
+                    ((errObj?.get("error") as? JsonObject)?.get("message") as? JsonPrimitive)?.contentOrNull
+                        ?: (errObj?.get("message") as? JsonPrimitive)?.contentOrNull
+                }.getOrNull()?.takeIf { it.isNotBlank() } ?: body.take(220).ifBlank { res.message }
+                throw IllegalStateException("HTTP ${res.code}: $detail")
             }
-            val root = lenientJson.parseToJsonElement(body) as? JsonObject
-                ?: throw IllegalStateException("Invalid JSON response from endpoint")
-            val choices = root["choices"] as? JsonArray
-                ?: throw IllegalStateException("Missing 'choices' in OpenAI response")
-            val first = choices.firstOrNull() as? JsonObject
-                ?: throw IllegalStateException("Empty 'choices' array")
-            val msg = first["message"] as? JsonObject
-                ?: throw IllegalStateException("Missing 'message' object")
-            val contentElem = msg["content"]
-            val textOut = when (contentElem) {
-                is JsonPrimitive -> contentElem.contentOrNull.orEmpty()
-                is JsonArray -> contentElem.mapNotNull { part ->
-                    ((part as? JsonObject)?.get("text") as? JsonPrimitive)?.contentOrNull
-                }.joinToString("\n")
-                else -> ""
-            }.trim()
-            if (textOut.isEmpty()) throw IllegalStateException("Endpoint returned empty message content")
-            return textOut
         }
+        throw lastError ?: IllegalStateException("OpenAI Vision endpoint request failed")
     }
 
     private fun buildOfflineHeuristicAnalysis(

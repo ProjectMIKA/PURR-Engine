@@ -72,6 +72,8 @@ fun OpenAiVisionModuleWindowBody(
 
     var isTestingConnection by remember { mutableStateOf(false) }
     var testResultBanner by remember { mutableStateOf<Pair<Boolean, String>?>(null) }
+    var isFetchingModels by remember { mutableStateOf(false) }
+    var fetchedModels by remember { mutableStateOf<List<String>>(emptyList()) }
 
     fun resetFormToProvider(preset: OpenAiVisionProviderPreset) {
         editingEngineId = null
@@ -81,6 +83,7 @@ fun OpenAiVisionModuleWindowBody(
         apiKeyInput = ""
         modelInput = preset.defaultModelHint
         testResultBanner = null
+        fetchedModels = emptyList()
     }
 
     MikaGlowPanel(accent = MikaColors.NeonCyan) {
@@ -113,21 +116,30 @@ fun OpenAiVisionModuleWindowBody(
                 if (preset.isCustom) "Custom OpenAI Endpoint" else preset.label
             },
             onSelect = { nextPreset ->
-                val prevHint = selectedProvider.defaultModelHint
+                val prevPreset = selectedProvider
                 selectedProvider = nextPreset
-                if (!nextPreset.isCustom) {
-                    endpointInput = nextPreset.defaultEndpointUrl
-                    if (modelInput.isBlank() || modelInput == prevHint) {
-                        modelInput = nextPreset.defaultModelHint
-                    }
-                    if (nameInput.isBlank()) {
-                        nameInput = "${nextPreset.label} Vision"
-                    }
-                } else {
-                    if (endpointInput.isBlank() || endpointInput == OpenAiVisionProviderPreset.NANOGPT.defaultEndpointUrl) {
+                if (editingEngineId == null) {
+                    val isKnownPresetUrl = OpenAiVisionProviderPreset.entries
+                        .any { !it.isCustom && it.defaultEndpointUrl == endpointInput }
+                    if (!nextPreset.isCustom) {
+                        endpointInput = nextPreset.defaultEndpointUrl
+                    } else if (endpointInput.isBlank() || isKnownPresetUrl) {
                         endpointInput = nextPreset.defaultEndpointUrl
                     }
+                    val isDefaultOrSuggestedModel = modelInput.isBlank() ||
+                        modelInput == prevPreset.defaultModelHint ||
+                        modelInput in prevPreset.suggestedVisionModels
+                    if (isDefaultOrSuggestedModel) {
+                        modelInput = nextPreset.defaultModelHint
+                    }
+                    val isAutoName = nameInput.isBlank() || nameInput == "${prevPreset.label} Vision"
+                    if (isAutoName) {
+                        nameInput = if (nextPreset.isCustom) "" else "${nextPreset.label} Vision"
+                    }
+                } else if (!nextPreset.isCustom) {
+                    endpointInput = nextPreset.defaultEndpointUrl
                 }
+                fetchedModels = emptyList()
                 testResultBanner = null
             },
             accent = MikaColors.NeonCyan
@@ -258,6 +270,41 @@ fun OpenAiVisionModuleWindowBody(
                     color = MikaColors.DimText
                 )
             },
+            trailingIcon = {
+                MikaTagPill(
+                    label = if (isFetchingModels) "FETCH..." else "FETCH MODELS",
+                    selected = fetchedModels.isNotEmpty(),
+                    activeColor = MikaColors.NeonPurple,
+                    onClick = {
+                        if (!isFetchingModels) {
+                            val targetUrl = if (selectedProvider.isCustom) {
+                                OpenAiEndpointUtils.normalizeChatCompletionsUrl(endpointInput)
+                            } else {
+                                selectedProvider.defaultEndpointUrl
+                            }
+                            if (targetUrl.isNotBlank()) {
+                                isFetchingModels = true
+                                testResultBanner = null
+                                viewModel.fetchOpenAiVisionModels(
+                                    endpointUrl = targetUrl,
+                                    apiKey = apiKeyInput,
+                                    provider = selectedProvider
+                                ) { res ->
+                                    isFetchingModels = false
+                                    if (res.isSuccess) {
+                                        val list = res.getOrNull().orEmpty()
+                                        fetchedModels = list
+                                        testResultBanner = true to "DISCOVERED ${list.size} MODEL(S) FOR ${selectedProvider.label.uppercase()}"
+                                    } else {
+                                        testResultBanner = false to "FETCH MODELS ERROR: ${res.exceptionOrNull()?.message ?: "Request failed"}"
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    modifier = Modifier.padding(end = 6.dp)
+                )
+            },
             singleLine = true,
             textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
             colors = OutlinedTextFieldDefaults.colors(
@@ -268,6 +315,35 @@ fun OpenAiVisionModuleWindowBody(
             ),
             modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
         )
+        if (fetchedModels.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            CyberDropdown(
+                label = "> DISCOVERED_MODELS (${fetchedModels.size})",
+                options = fetchedModels,
+                selectedOption = fetchedModels.firstOrNull { it == modelInput.trim() } ?: fetchedModels.first(),
+                optionLabel = { it },
+                onSelect = { chosen ->
+                    modelInput = chosen
+                    testResultBanner = null
+                },
+                accent = MikaColors.NeonPurple
+            )
+        } else if (selectedProvider.suggestedVisionModels.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                selectedProvider.suggestedVisionModels.forEach { presetModel ->
+                    MikaTagPill(
+                        label = presetModel,
+                        selected = modelInput.trim() == presetModel,
+                        activeColor = MikaColors.NeonPink,
+                        onClick = { modelInput = presetModel }
+                    )
+                }
+            }
+        }
         Spacer(modifier = Modifier.height(8.dp))
 
         val effectiveUrl = if (selectedProvider.isCustom) {

@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -46,12 +47,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -753,7 +756,7 @@ fun MangaDubStudioModuleWindowBody(
                         viewModel.setMangaExpectedCharacterCount(next)
                     }
                 )
-                OutlinedTextField(
+                CompactCyberQtyBox(
                     value = charCountFieldText,
                     onValueChange = { raw ->
                         val digits = raw.filter { it.isDigit() }.take(2)
@@ -762,19 +765,8 @@ fun MangaDubStudioModuleWindowBody(
                         expectedCharCount = parsed
                         viewModel.setMangaExpectedCharacterCount(parsed)
                     },
-                    placeholder = {
-                        Text("AUTO", fontSize = 9.sp, fontFamily = FontFamily.Monospace, color = MikaColors.NeonCyan)
-                    },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                    textStyle = TextStyle(color = MikaColors.PrimaryText, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = MikaColors.NeonCyan,
-                        unfocusedBorderColor = MikaColors.NeonCyan.copy(alpha = 0.35f),
-                        focusedContainerColor = MikaColors.PanelBg,
-                        unfocusedContainerColor = MikaColors.PanelBg
-                    ),
-                    modifier = Modifier.width(74.dp).bringIntoViewWithIme()
+                    accent = MikaColors.NeonCyan,
+                    modifier = Modifier.bringIntoViewWithIme()
                 )
                 MikaTagPill(
                     label = "+",
@@ -2215,6 +2207,61 @@ private fun MangaCharacterCastCard(
     }
 }
 
+@Composable
+private fun CompactCyberQtyBox(
+    value: String,
+    onValueChange: (String) -> Unit,
+    accent: Color,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .width(42.dp)
+            .height(22.dp)
+            .clip(RoundedCornerShape(4.dp))
+            .background(MikaColors.DeepWellBg)
+            .border(
+                width = 1.dp,
+                color = if (value.isNotEmpty()) accent else accent.copy(alpha = 0.42f),
+                shape = RoundedCornerShape(4.dp)
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        BasicTextField(
+            value = value,
+            onValueChange = onValueChange,
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+            cursorBrush = SolidColor(accent),
+            textStyle = TextStyle(
+                color = MikaColors.PrimaryText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.5.sp,
+                textAlign = TextAlign.Center
+            ),
+            decorationBox = { innerTextField ->
+                Box(
+                    modifier = Modifier.fillMaxWidth(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (value.isEmpty()) {
+                        Text(
+                            text = "AUTO",
+                            color = accent.copy(alpha = 0.65f),
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 7.8.sp
+                        )
+                    }
+                    innerTextField()
+                }
+            },
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 3.dp)
+        )
+    }
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MangaPreCookReviewPanel(
@@ -2298,72 +2345,93 @@ private fun MangaPreCookReviewPanel(
         Spacer(modifier = Modifier.height(8.dp))
 
         // 2. Character Count Baseline Editor + Consolidation / Rescan Controls
-        Row(
+        FlowRow(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(6.dp))
                 .background(MikaColors.DeepWellBg)
                 .border(1.dp, MikaColors.NeonPurple.copy(alpha = 0.4f), RoundedCornerShape(6.dp))
-                .padding(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                .padding(horizontal = 8.dp, vertical = 6.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            Text(
-                text = "CHAR_CAP:",
-                color = MikaColors.NeonPurple,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Black,
-                fontSize = 8.5.sp
-            )
-            MikaTagPill(
-                label = "AUTO",
-                selected = project.expectedCharacterCount == 0,
-                activeColor = MikaColors.NeonCyan,
-                onClick = {
-                    baselineInput = ""
-                    viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, 0)
-                }
-            )
-            OutlinedTextField(
-                value = baselineInput,
-                onValueChange = { raw ->
-                    baselineInput = raw.filter { it.isDigit() }.take(2)
-                },
-                placeholder = {
-                    Text("AUTO", fontSize = 8.8.sp, fontFamily = FontFamily.Monospace, color = MikaColors.NeonCyan)
-                },
-                singleLine = true,
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                textStyle = TextStyle(color = MikaColors.PrimaryText, fontFamily = FontFamily.Monospace, fontSize = 10.sp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = MikaColors.NeonPurple,
-                    unfocusedBorderColor = MikaColors.NeonPurple.copy(alpha = 0.35f),
-                    focusedContainerColor = MikaColors.PanelBg,
-                    unfocusedContainerColor = MikaColors.PanelBg
-                ),
-                modifier = Modifier.width(68.dp).bringIntoViewWithIme()
-            )
-            MikaTagPill(
-                label = "APPLY CAP",
-                selected = true,
-                activeColor = MikaColors.TerminalGreen,
-                onClick = {
-                    val targetCount = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: 0
-                    viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, targetCount)
-                }
-            )
-            MikaTagPill(
-                label = "RESCAN",
-                selected = false,
-                activeColor = MikaColors.SsrGold,
-                onClick = {
-                    if (!isBusy) {
-                        val targetCount = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: 0
-                        viewModel.setMangaExpectedCharacterCount(targetCount)
-                        viewModel.reanalyzeMangaChapter(project.id, chapter.id)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Text(
+                    text = "CHAR_CAP:",
+                    color = MikaColors.NeonPurple,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Black,
+                    fontSize = 8.2.sp
+                )
+                MikaTagPill(
+                    label = "AUTO",
+                    selected = project.expectedCharacterCount == 0,
+                    activeColor = MikaColors.NeonCyan,
+                    onClick = {
+                        baselineInput = ""
+                        viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, 0)
                     }
-                }
-            )
+                )
+                MikaTagPill(
+                    label = "-",
+                    selected = false,
+                    activeColor = MikaColors.NeonPurple,
+                    onClick = {
+                        val cur = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: project.expectedCharacterCount
+                        val next = (cur - 1).coerceIn(0, 24)
+                        baselineInput = if (next > 0) next.toString() else ""
+                        viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, next)
+                    }
+                )
+                CompactCyberQtyBox(
+                    value = baselineInput,
+                    onValueChange = { raw ->
+                        baselineInput = raw.filter { it.isDigit() }.take(2)
+                    },
+                    accent = MikaColors.NeonPurple,
+                    modifier = Modifier.bringIntoViewWithIme()
+                )
+                MikaTagPill(
+                    label = "+",
+                    selected = false,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = {
+                        val cur = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: project.expectedCharacterCount
+                        val next = (cur + 1).coerceIn(1, 24)
+                        baselineInput = next.toString()
+                        viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, next)
+                    }
+                )
+            }
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                MikaTagPill(
+                    label = "APPLY CAP",
+                    selected = true,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = {
+                        val targetCount = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: 0
+                        viewModel.applyMangaCharacterCountBaseline(project.id, chapter.id, targetCount)
+                    }
+                )
+                MikaTagPill(
+                    label = "RESCAN",
+                    selected = false,
+                    activeColor = MikaColors.SsrGold,
+                    onClick = {
+                        if (!isBusy) {
+                            val targetCount = baselineInput.toIntOrNull()?.coerceIn(0, 24) ?: 0
+                            viewModel.setMangaExpectedCharacterCount(targetCount)
+                            viewModel.reanalyzeMangaChapter(project.id, chapter.id)
+                        }
+                    }
+                )
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
 

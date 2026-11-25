@@ -1520,8 +1520,58 @@ class MangaDubStudioTest {
             OpenAiEndpointUtils.normalizeChatCompletionsUrl("http://192.168.1.50:8080")
         )
         assertEquals(
+            "https://api.cline.bot/api/v1/chat/completions",
+            OpenAiEndpointUtils.normalizeChatCompletionsUrl("https://api.cline.bot")
+        )
+        assertEquals(
+            "https://api.nano-gpt.com/api/v1/models",
+            OpenAiEndpointUtils.deriveModelsEndpointUrl("https://api.nano-gpt.com/api/v1/chat/completions")
+        )
+        assertEquals(
+            "sk-abc123",
+            OpenAiEndpointUtils.sanitizeBearerApiKey("  Bearer  sk-abc123 ")
+        )
+        assertEquals(
             OpenAiVisionProviderPreset.CUSTOM,
             OpenAiVisionProviderPreset.entries.last()
         )
+    }
+
+    @Test
+    fun `openai response extractor unwraps clinepass envelopes nanogpt reasoning fields and sse chunks`() {
+        val clinePassWrapped = """
+            {"success":true,"data":{"choices":[{"index":0,"message":{"role":"assistant","content":"OK"}}]}}
+        """.trimIndent()
+        assertEquals("OK", OpenAiEndpointUtils.extractChatCompletionTextOrThrow(clinePassWrapped))
+
+        val nanoGptReasoningOnly = """
+            {"choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","content":"","reasoning":"OK from reasoning"}}]}
+        """.trimIndent()
+        assertEquals("OK from reasoning", OpenAiEndpointUtils.extractChatCompletionTextOrThrow(nanoGptReasoningOnly))
+
+        val nanoGptLegacyReasoning = """
+            {"choices":[{"index":0,"message":{"role":"assistant","content":null,"reasoning_content":"Legacy reasoning text"}}]}
+        """.trimIndent()
+        assertEquals("Legacy reasoning text", OpenAiEndpointUtils.extractChatCompletionTextOrThrow(nanoGptLegacyReasoning))
+
+        val sseBody = """
+            data: {"choices":[{"delta":{"content":"Hel"}}]}
+            data: {"choices":[{"delta":{"content":"lo!"}}]}
+            data: [DONE]
+        """.trimIndent()
+        assertEquals("Hello!", OpenAiEndpointUtils.extractChatCompletionTextOrThrow(sseBody))
+
+        val errBody = """{"error":{"message":"Model not found","code":"404"}}"""
+        val err = runCatching { OpenAiEndpointUtils.extractChatCompletionTextOrThrow(errBody) }.exceptionOrNull()
+        assertNotNull(err)
+        assertTrue(err!!.message!!.contains("Model not found"))
+
+        val modelsJson = """
+            {"object":"list","data":[{"id":"text-embedding-3-small"},{"id":"z-ai/glm-5.3-flash","architecture":{"input_modalities":["text","image"]}},{"id":"cline-pass/kimi-k3"}]}
+        """.trimIndent()
+        val parsedModels = OpenAiEndpointUtils.parseModelsListIds(modelsJson)
+        assertFalse("text-embedding-3-small" in parsedModels)
+        assertTrue("z-ai/glm-5.3-flash" in parsedModels)
+        assertTrue("cline-pass/kimi-k3" in parsedModels)
     }
 }
