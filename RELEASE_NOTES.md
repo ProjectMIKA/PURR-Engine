@@ -1,3 +1,25 @@
+# 🌌 PURR-TTS v2.4.3 // The Fallback Protocol
+
+### ✨ What's New since v2.4.2
+
+Cloud API models conk out — refusals, censorship walls, rate limits, dead endpoints. The Manga Dub Studio now **survives them**: a new **Local LLM Fallback** setting mounts the on-device Gemma VLM the moment the API model fails during planning, so a cloud hiccup costs seconds instead of the whole dub. 🔀🛡️
+
+* **🔀 Local LLM Fallback — API auto-recovery (`LiteRtGemmaVisionEngine` / `MangaDubStudioManager`)**:
+  * New user setting (default ON) inside ADVANCED_SCAN_SETTINGS — visible whenever an API vision engine is selected.
+  * **ON**: if the API model fails or returns blank at ANY planning pass — chapter storyboard sheets, per-page panel OCR, or story & cast consolidation — the on-device Gemma VLM **mounts and takes over** that sheet/page/consolidation, then hands back to the normal pipeline.
+  * **OFF**: strict API isolation (the v2.2.2 behavior, now user-controlled) — API failures are retried up to 3 attempts, then the failing page is skipped and the dub continues.
+  * Every fallback engagement is logged: `🌐 [engine] conked out — 🔀 MOUNTING LOCAL VLM FALLBACK for Page N...`.
+  * No local .litertlm model installed? Graceful degradation with an explicit log — the deterministic consolidator and per-page skip paths still apply.
+* **📐 Fixed-Height Import Buttons (`MangaDubStudioModuleWindow`)**:
+  * The IMPORT and DEMO buttons no longer resize themselves between the DUB/STORYBOARD label variants — fixed 46dp height, single-line labels, zero layout jitter.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.4.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `48`).
+2. **`PURR-TTS_V2.4.3.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.4.2 // The Shapeshifter
 
 ### ✨ What's New since v2.4.1
