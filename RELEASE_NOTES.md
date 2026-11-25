@@ -1,3 +1,30 @@
+# 🌌 PURR-TTS v2.4.0 // The Universal Import
+
+### ✨ What's New since v2.3.0
+
+The Manga Dub Studio now opens the gates: **every image format Android can decode** is a first-class page format, **.ZIP archives are officially supported** alongside .cbz — and the voice forge finally works the way a studio should: all of a character's lines forge under one mounted voice, and every produced clip is **audited against its spoken line** and re-recorded when it sounds wrong. 📚🎙️⚖️
+
+* **📚 Universal Image Format Support (`MangaCbzExtractorUtils`, `MangaDubModels`)**:
+  * The page allowlist grew from 6 formats to everything Android's BitmapFactory decodes: JPEG family (jpg/jpeg/jpe/jfif), PNG/APNG, WebP, GIF, BMP/DIB, **HEIC/HEIF/HIF (Android 8+)** and **AVIF/AVIFS (Android 12+)**.
+  * New **ISOBMFF `ftyp` magic sniffing**: extensionless HEIC/HEIF/AVIF entries are detected by their container brand (bytes 4-7 "ftyp", brand at 8-11). MP4 video brands (isom/mp42) deliberately fall through so videos never import as pages — the extension only names the extracted file, BitmapFactory decodes by content.
+* **📦 Official .ZIP / .CBT Import (`MangaDubStudioModuleWindow`, `MangaDubStudioManager`)**:
+  * The file picker now claims `application/vnd.comicbook+zip`, `application/x-zip-compressed`, `application/x-cbt` and `application/x-tar` alongside .cbz — the import button, onboarding blurb and header all read `.CBZ/.ZIP`, and the extractor was always container-name agnostic.
+  * Formats Android cannot decode (TIFF/SVG/ICO/PSD...) are no longer silently skipped: new `KNOWN_UNDECODABLE_IMAGE_EXT` diagnostics name exactly what was skipped and how to fix it ("skipped undecodable image format(s): TIFF — convert pages to PNG/JPG/WebP").
+* **🎭 Character-Affinity Voice Forging (`MangaDubStudioManager`)**:
+  * The dub plan now groups by CHARACTER — all of character 1's lines forge contiguously under one mounted voice, then character 2, and so on. v2.1.2's engine-affinity batching only grouped by engine spec, so lines still interleaved speakers (A,B,A,B...) and every swap re-primed the neural voice context: slow, and an hallucination amplifier.
+  * Engine-mount affinity is preserved (character groups are ordered so same-spec characters stay contiguous — one native mount per spec), and reassembly stays ID-based, so the MP4 timeline still plays in strict reading order.
+* **⚖️ MangaAudioAudit — the clip quality gate (`MangaAudioAudit`, `MangaDubStudioManager`)**:
+  * The v2.3.0 verification gate proved a wav EXISTS; this audit proves it SOUNDS like the line. Deterministic DSP checks on every produced clip: **duration sanity** (rendered vs ~55ms/char expected — <0.30x = truncated generation, >4.0x = runaway/stutter), **speech span** (first-to-last audible sample; <25% of clip = mostly-silent degenerate output), **clipping** (>10% full-scale samples) and **NaN/Inf** degeneration.
+  * A failed audit triggers ONE diversified re-record (plain-words variant token stream) and the better take wins (passing > failing, then fewer failure reasons, then log-space duration deviation). Both takes failing keeps the first — a flawed clip still beats a silent subtitle.
+  * Every verdict lands in the telemetry log: `🔁 AUDIO AUDIT FAIL [CHAR]: truncated... — re-recording` → `✅ AUDIO AUDIT RETRY OK`.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.4.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `45`).
+2. **`PURR-TTS_V2.4.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.3.0 // The Verified Dub
 
 ### ✨ What's New since v2.2.2
