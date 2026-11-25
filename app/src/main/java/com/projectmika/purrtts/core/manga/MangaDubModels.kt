@@ -357,6 +357,10 @@ data class MangaSeriesProject(
     val enableAtmosphereFx: Boolean = true,
     val includeNonBubbleText: Boolean = false,
     val lockVoicesViaCloning: Boolean = true,
+    // ✨ NARRATOR TOGGLE (v2.3.0): MIKA dubs boxed narration captions by default (ON). OFF =
+    // narration boxes stay extracted & reviewable but are skipped in the dub. Default true so
+    // pre-v2.3.0 project.json files decode unchanged.
+    val narratorEnabled: Boolean = true,
     val powerUserVisionUrl: String = "",
     val preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
     // 0 = AUTO (let storyboarding discover count), 1..24 = user-specified cast count baseline

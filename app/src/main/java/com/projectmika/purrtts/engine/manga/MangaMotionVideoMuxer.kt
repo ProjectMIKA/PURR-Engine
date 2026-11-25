@@ -39,7 +39,6 @@ import com.projectmika.purrtts.core.manga.MangaPageEntry
 import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaPanelNode
 import com.projectmika.purrtts.core.manga.MangaTextBender
-import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSpeechLine
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
