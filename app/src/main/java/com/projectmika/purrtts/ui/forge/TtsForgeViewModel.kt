@@ -26,6 +26,7 @@ import com.projectmika.purrtts.core.manga.MangaJobTelemetry
 import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSeriesProject
+import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
 import com.projectmika.purrtts.core.manga.MangaVideoQuality
 import com.projectmika.purrtts.core.manga.MangaVisionModelTier
