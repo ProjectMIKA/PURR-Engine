@@ -172,7 +172,11 @@ class MangaDubStudioManager(
             updateProjectConfig(
                 projectId = pid,
                 preferredVisionModel = tier,
-                selectedOpenAiVisionEngineId = ""
+                selectedOpenAiVisionEngineId = "",
+                // ✨ v2.1.2 SOURCE PRIORITY LAW: picking a LOCAL tier must revoke the legacy
+                // power-user LAN URL — otherwise resolveOpenAiRequestTarget kept hijacking every
+                // scan back to the API endpoint (the "switched back to my API model" bug).
+                powerUserVisionUrl = ""
             )
         }
     }
@@ -1794,19 +1798,26 @@ class MangaDubStudioManager(
             addLog = true
         )
 
-        var linesDone = 0
-        val renderedPages = ArrayList<MangaPageEntry>(chapter.pages.size)
+        // ✨ v2.1.2 ENGINE-AFFINITY BATCHING: the per-line loop used to interleave characters,
+        // forcing the Qwen3 native engine to DESTROY + RELOAD its llama.cpp model on every
+        // clone<->design alternation (a full native mount per character switch). Under that
+        // churn the native synth intermittently returned empty PCM — affected lines stayed in
+        // the video as silent subtitles (the "undubbed" ghosts). Now: build the complete dub
+        // plan first, group jobs by mounted engine spec, synthesize each group contiguously
+        // (one native mount per group), then reassemble in original reading order.
+        data class DubJob(val line: MangaSpeechLine, val profile: PurrProfile, val text: String)
 
+        val dubPlan = ArrayList<DubJob>(allLinesCount)
+        val passThroughLines = HashMap<String, MangaSpeechLine>()
+        var linesDone = 0
         for (page in chapter.pages) {
-            val renderedPanels = ArrayList<MangaPanelNode>(page.panels.size)
             for (panel in page.panels) {
-                val renderedLines = ArrayList<MangaSpeechLine>(panel.lines.size)
                 for (line in panel.lines) {
                     if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
                     linesDone++
                     val textToSpeak = line.sanitizedText.ifBlank { line.rawText }.trim()
                     if (textToSpeak.isEmpty()) {
-                        renderedLines += line
+                        passThroughLines[line.id] = line
                         continue
                     }
                     if (!proj.includeNonBubbleText && MangaTextBender.isNonBubbleOrCreditNoise(
@@ -1816,17 +1827,9 @@ class MangaDubStudioManager(
                                 line.speakerName.equals("NARRATOR", ignoreCase = true)
                         )
                     ) {
+                        passThroughLines[line.id] = line
                         continue
                     }
-
-                    reportTelemetry(
-                        stage = MangaPipelineStage.VOICE_FORGE,
-                        detail = "🎙️ FORGING VOICE [${line.speakerName}] ($linesDone/$allLinesCount)...",
-                        progress = progressOffset + progressSpan * (0.05f + 0.52f * ((linesDone - 1).toFloat() / allLinesCount.toFloat())),
-                        itemCurrent = linesDone,
-                        itemTotal = allLinesCount,
-                        addLog = true
-                    )
 
                     val isNarratorLine = line.speakerName.equals("NARRATOR", ignoreCase = true)
                     // ✨ NARRATOR IDENTITY LAW (v1.9.9): MIKA's hardcoded narrator voice resolves
@@ -1849,9 +1852,61 @@ class MangaDubStudioManager(
                     )
                     val bubbleSpeechText = MangaTextBender.prepareSingleBubbleSpeechText(textToSpeak)
                     if (bubbleSpeechText.isEmpty()) {
-                        renderedLines += line
+                        passThroughLines[line.id] = line
                         continue
                     }
+                    dubPlan += DubJob(line, synthProfile, bubbleSpeechText)
+                }
+            }
+        }
+
+        // Group by the engine spec each job will mount (Qwen3: clone vs design vs custom) so
+        // native model reloads happen once per GROUP instead of once per character alternation.
+        val groupedJobs = dubPlan.groupBy { dubSpecGroupKey(it.profile) }
+
+        val renderedById = HashMap<String, MangaSpeechLine>(allLinesCount)
+        for ((groupKey, jobs) in groupedJobs) {
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "🎙️ MOUNTING ${groupKey.replace('_', ' ')} BATCH (${jobs.size} LINES)...",
+                progress = progressOffset + progressSpan * 0.05f,
+                itemCurrent = linesDone,
+                itemTotal = allLinesCount,
+                addLog = true
+            )
+            for (job in jobs) {
+                if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+                linesDone++
+                reportTelemetry(
+                    stage = MangaPipelineStage.VOICE_FORGE,
+                    detail = "🎙️ FORGING VOICE [${job.line.speakerName}] ($linesDone/$allLinesCount)...",
+                    progress = progressOffset + progressSpan * (0.05f + 0.52f * ((linesDone - 1).toFloat() / allLinesCount.toFloat())),
+                    itemCurrent = linesDone,
+                    itemTotal = allLinesCount,
+                    addLog = true
+                )
+
+                fun synthesizeOnce() = backendRouter.synthesizeSpeechChunk(
+                    chunk = PurrChunk.Speech(
+                        text = job.text,
+                        role = if (job.line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
+                        targetVoiceId = job.profile.primaryVoiceId,
+                        speakingRate = job.profile.baseSpeed,
+                        pitch = job.profile.basePitch,
+                        volumeGain = 1.0f,
+                        sentiment = SentimentResult(),
+                        singleChunkOnly = true
+                    ),
+                    profile = job.profile
+                )
+
+                var outcome = synthesizeOnce()
+                if (outcome.pcmFloat24k.isEmpty()) {
+                    // One bounded retry — transient native mount hiccups happen under memory
+                    // pressure right after the vision-phase evictions.
+                    delay(350)
+                    outcome = synthesizeOnce()
+                }
                     val outcome = backendRouter.synthesizeSpeechChunk(
                         chunk = PurrChunk.Speech(
                             text = bubbleSpeechText,
@@ -1866,7 +1921,7 @@ class MangaDubStudioManager(
                         profile = synthProfile
                     )
 
-                    val wavFile = File(audioDir, "${line.id}.wav")
+                    val wavFile = File(audioDir, "${job.line.id}.wav")
                     val rawPcmFloat = outcome.pcmFloat24k
                     val pcmFloat = if (rawPcmFloat.isNotEmpty()) {
                         PurrDspProcessor.conditionDubClipOnset(rawPcmFloat, sampleRate)
@@ -1878,22 +1933,34 @@ class MangaDubStudioManager(
                         writePcm16MonoWav(wavFile, pcm16, pcm16.size, sampleRate)
                         ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
                     } else {
-                        maxOf(1400L, bubbleSpeechText.length * 60L)
+                        // ✨ FAILURE VISIBILITY: an empty synthesis is never silent to the operator
+                        // — name the engine summary so cartridge/mount problems are diagnosable.
+                        appendLog("⚠️ EMPTY AUDIO [${job.line.speakerName}] via ${outcome.engineSummary.take(56)} — line left undubbed")
+                        maxOf(1400L, job.text.length * 60L)
                     }
-                    renderedLines += line.copy(
+                    renderedById[job.line.id] = job.line.copy(
                         renderedWavPath = if (pcmFloat.isNotEmpty()) wavFile.absolutePath else "",
                         durationMs = durMs
                     )
                     reportTelemetry(
                         stage = MangaPipelineStage.VOICE_FORGE,
-                        detail = "🎙️ VOICED [${line.speakerName}] $linesDone/$allLinesCount (${"%.1f".format(durMs / 1000f)}s via ${outcome.engineSummary.take(22)})",
+                        detail = "🎙️ VOICED [${job.line.speakerName}] $linesDone/$allLinesCount (${"%.1f".format(durMs / 1000f)}s via ${outcome.engineSummary.take(22)})",
                         progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / allLinesCount.toFloat())),
                         itemCurrent = linesDone,
                         itemTotal = allLinesCount,
                         addLog = true
                     )
                 }
-                renderedPanels += panel.copy(lines = renderedLines)
+            }
+
+        // Reassemble in original reading order (skipped lines pass through untouched).
+        val renderedPages = ArrayList<MangaPageEntry>(chapter.pages.size)
+        for (page in chapter.pages) {
+            val renderedPanels = ArrayList<MangaPanelNode>(page.panels.size)
+            for (panel in page.panels) {
+                renderedPanels += panel.copy(
+                    lines = panel.lines.map { ln -> renderedById[ln.id] ?: passThroughLines[ln.id] ?: ln }
+                )
             }
             renderedPages += page.copy(panels = renderedPanels)
         }
@@ -1955,6 +2022,27 @@ class MangaDubStudioManager(
         mutateChapter(projectId, chapterId) { finishedChapter }
 
         return renderRes.publicDownloadPath.ifBlank { renderRes.internalMp4File.name }
+    }
+
+    /**
+     * ✨ v2.1.2 ENGINE-AFFINITY BATCHING: groups dub jobs by the engine spec each will mount so
+     * the Qwen3 native engine performs ONE llama.cpp mount per group instead of a destroy+reload
+     * on every clone<->design character alternation (the churn that produced silent "undubbed"
+     * ghosts under memory pressure).
+     */
+    private fun dubSpecGroupKey(profile: PurrProfile): String = when (profile.preferredBackend) {
+        BackendType.QWEN3_NATIVE -> {
+            val clean = profile.primaryVoiceId.substringAfter(':')
+            val isClone = repository.state.value.clonedVoices.any {
+                it.id == clean && it.resolvedCloneEngineId == Qwen3TtsEngine.SPEC_BASE_CLONE_06B
+            }
+            when {
+                isClone || clean == "qwen3_base_clone_default" -> "QWEN_CLONE"
+                clean == "qwen3_design_custom" -> "QWEN_DESIGN"
+                else -> "QWEN_CUSTOM"
+            }
+        }
+        else -> "${profile.preferredBackend}|${profile.selectedCartridgeId}|${profile.primaryVoiceId}"
     }
 
     private fun resolvePreferredAutoCloneEngineId(): String? {

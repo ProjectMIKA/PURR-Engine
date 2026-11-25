@@ -1,3 +1,27 @@
+# 🌌 PURR-TTS v2.1.2 // Engine-Affinity Dub Batching & Vision Source Priority Law
+
+### ✨ What's New since v2.1.1
+
+Dub reliability hotfix: the Qwen3 voice forge no longer thrashes its native engine between characters, silent undubbed lines are now loudly diagnosed, and picking a LOCAL vision tier finally stays local. 🎙️🔧📖
+
+* **🎙️ Engine-Affinity Dub Batching (`MangaDubStudioManager`)**:
+  * **Field scar**: the per-line synthesis loop interleaved characters, forcing the Qwen3 native engine to **destroy + reload its llama.cpp model on every clone↔design character alternation** (a full native mount per switch). Under that churn — especially right after the vision-phase memory evictions — native synth intermittently returned **empty PCM**, leaving lines in the final video as silent "undubbed" subtitles (exactly the "perfectly choreographed video without any spoken dialogue" failure).
+  * Now the dub is built as a **plan first**, jobs are **grouped by mounted engine spec** (`QWEN_CLONE` / `QWEN_DESIGN` / `QWEN_CUSTOM` / per-backend groups), and each group synthesizes **contiguously — one native mount per group** — then the chapter reassembles in original reading order. Local + API vision paths both feed the same QWEN-prioritized forge.
+* **⚠️ Empty-Synthesis Visibility & Bounded Retry**:
+  * An empty PCM result is retried once after a short cool-down (transient native mount hiccups under memory pressure), and if it stays empty the cooking log now names it: `⚠️ EMPTY AUDIO [SPEAKER] via <engine summary> — line left undubbed`. Silent failures are over.
+* **🗺️ Vision Source Priority Law (`setSelectedVisionModel`)**:
+  * **Field scar**: picking a LOCAL vision tier still got hijacked back to the API — the legacy power-user LAN URL persisted in the project and `resolveOpenAiRequestTarget` kept preferring it over any local model.
+  * Selecting a local tier now **revokes the legacy LAN URL** for the active project (TOOL-12 OpenAI engines remain a deliberate, explicit selection). Local stays local; API stays a choice.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.1.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `40`).
+2. **`PURR-TTS_V2.1.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.1.1 // OpenAI Vision Provider Hardening (Clinepass & NanoGPT) + Sleek Cast Qty
 
 ### ✨ What's New since v2.1.0

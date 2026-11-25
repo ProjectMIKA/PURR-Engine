@@ -339,6 +339,18 @@ voices went flat:
   synthesizes through Qwen3 1.7B VoiceDesign with `MangaTextBender.genericRoleVoicePrompt(gender)`
   (distinct Male/Female/Androgynous expressive prompts). Branch 3 also ifBlanks blank prompts
   to the gendered role voice — QWEN-first, smart-matcher-last.
+- **Engine-affinity dub batching (v2.1.2)** (`executeProduceDubbedChapterMp4`): NEVER synthesize
+  dub lines in strict reading order — interleaved characters force the Qwen3 native engine to
+  destroy+reload its llama.cpp model on every clone↔design alternation, and under that churn
+  native synth returns EMPTY PCM (silent "undubbed" subtitle ghosts). Build the full dub plan,
+  group jobs by `dubSpecGroupKey(profile)` (QWEN_CLONE/QWEN_DESIGN/QWEN_CUSTOM/backend groups),
+  synthesize each group contiguously, retry an empty outcome once after ~350ms, and log any
+  persistently empty line as `⚠️ EMPTY AUDIO [speaker] via <engine summary>`. Reassemble in
+  original reading order afterwards.
+- **Vision source priority law (v2.1.2)** (`setSelectedVisionModel`): picking a LOCAL tier must
+  revoke the project's legacy `powerUserVisionUrl` — `resolveOpenAiRequestTarget` otherwise
+  kept preferring the stale LAN URL over any local model (the "switched back to my API model"
+  bug). TOOL-12 OpenAI engines remain an explicit, deliberate selection.
 - **Cast cards show the EFFECTIVE dub voice** (v1.9.9): the `ASSIGNED VOICE (OR CLONE)`
   dropdown fell back to `activeProfile.primaryVoiceId` — the user's system-TTS pick — which
   mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen". The fallback chain is now
