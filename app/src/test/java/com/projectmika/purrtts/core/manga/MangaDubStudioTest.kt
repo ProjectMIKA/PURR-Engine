@@ -1350,8 +1350,8 @@ class MangaDubStudioTest {
         assertEquals("Hello there.", MangaTextBender.qwenRetryTextVariant("Hello there."))
         assertEquals("", MangaTextBender.qwenRetryTextVariant("?!"))
         assertEquals("", MangaTextBender.qwenRetryTextVariant("..."))
-        // Multi-word lines keep their words in order
-        assertEquals("So you did drink them all.", MangaTextBender.qwenRetryTextVariant("So you DID drink them all."))
+        // Multi-word lines keep their words in order (case preserved — only punctuation changes)
+        assertEquals("So you DID drink them all.", MangaTextBender.qwenRetryTextVariant("So you DID drink them all."))
     }
 
     @Test
