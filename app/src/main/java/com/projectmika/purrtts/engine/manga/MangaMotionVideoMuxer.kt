@@ -962,7 +962,7 @@ object MangaMotionVideoMuxer {
         // fail loudly HERE with a real message instead of a messageless crash downstream.
         if (!finalized) {
             val why = when {
-                stopFailure != null -> "MediaMuxer.stop failed: ${stopFailure"
+                stopFailure != null -> "MediaMuxer.stop failed: $stopFailure"
                 !muxerStarted -> "encoder produced no output format (0 samples encoded)"
                 !eosSeen -> "encoder EOS was never drained (retry budget exhausted)"
                 else -> "unknown finalize failure"
