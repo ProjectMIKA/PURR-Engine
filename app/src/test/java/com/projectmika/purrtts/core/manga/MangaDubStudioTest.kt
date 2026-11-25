@@ -1341,6 +1341,20 @@ class MangaDubStudioTest {
     }
 
     @Test
+    fun `qwen retry variant rebuilds text as plain words for diversified codec retries`() {
+        // LunaVox codec occasionally emits zero audio for a specific token stream; an identical
+        // retry repeats the failure, so attempt 3 needs a genuinely different token stream.
+        assertEquals("Don't SHOUT.", MangaTextBender.qwenRetryTextVariant("Don't SHOUT!?"))
+        assertEquals("Wait what.", MangaTextBender.qwenRetryTextVariant("Wait... what?!"))
+        assertEquals("A week.", MangaTextBender.qwenRetryTextVariant("A week?!"))
+        assertEquals("Hello there.", MangaTextBender.qwenRetryTextVariant("Hello there."))
+        assertEquals("", MangaTextBender.qwenRetryTextVariant("?!"))
+        assertEquals("", MangaTextBender.qwenRetryTextVariant("..."))
+        // Multi-word lines keep their words in order
+        assertEquals("So you did drink them all.", MangaTextBender.qwenRetryTextVariant("So you DID drink them all."))
+    }
+
+    @Test
     fun `generic role voices cover every gender for universal cast coverage`() {
         val male = MangaTextBender.genericRoleVoicePrompt(VoiceGender.MALE)
         val female = MangaTextBender.genericRoleVoicePrompt(VoiceGender.FEMALE)

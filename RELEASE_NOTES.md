@@ -1,3 +1,24 @@
+# 🌌 PURR-TTS v2.2.1 // LunaVox Empty-Audio Retry Ladder
+
+### ✨ What's New since v2.2.0
+
+Voice-forge resilience hotfix: the upstream LunaVox codec occasionally emits zero audio for a specific token stream ("empty audio during speech codec decoding") — the dub forge now fights back with a diversified retry ladder and full failure diagnostics. 🔊🐾
+
+* **🔊 Diversified Empty-Audio Retry Ladder (`MangaDubStudioManager` / `MangaTextBender.qwenRetryTextVariant`)**:
+  * **Field scar**: the Qwen3 talker ran fine but the Codec24Hz vocoder stage returned zero audio for certain lines — and an *identical* retry deterministically repeats the failure when the cause is sampling degeneration.
+  * The dub forge now tries **three ways**: the prepared line as-is → an identical retry after a 350ms cool-down (transient mount hiccups) → a **diversified token stream** rebuilt as plain words (`qwenRetryTextVariant`: punctuation stripped, terminal period enforced). A stuck codec gets a genuinely different input instead of the same losing lottery ticket.
+* **🔍 Richer Failure Diagnostics**:
+  * The `⚠️ EMPTY AUDIO` cooking-console line now names the **voice id and the offending text** alongside the engine summary — LunaVox codec failures are diagnosable from the console alone, no logcat required.
+
+---
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.2.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `42`).
+2. **`PURR-TTS_V2.2.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.2.0 // MIKA's Casting Room — Adaptive Cast Refinement & Silly-Name Privilege
 
 ### ✨ What's New since v2.1.2

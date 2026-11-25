@@ -656,6 +656,23 @@ object MangaTextBender {
     }
 
     /**
+     * ✨ LUNAVOX EMPTY-AUDIO RETRY VARIANT (v2.2.1) ✨
+     * The upstream LunaVox codec occasionally emits zero audio for a given token stream
+     * ("Failed to generate ... empty audio during speech codec decoding") — and an identical
+     * retry deterministically repeats the failure when the cause is sampling degeneration.
+     * This variant rebuilds the text as plain lowercase words (punctuation stripped, terminal
+     * period enforced), producing a genuinely different token stream for the third attempt.
+     */
+    fun qwenRetryTextVariant(text: String): String {
+        val words = text
+            .replace(Regex("[^\\p{L}\\p{N}' ]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+        if (words.isEmpty() || words.none { it.isLetterOrDigit() }) return ""
+        return if (words.endsWith(".")) words else "$words."
+    }
+
+    /**
      * Fallback anchor transcript when a character has no usable transcribed lines in the chapter.
      * Three emotional beats (energetic -> soft -> warm/smug) so the Qwen3 0.6B Base Cloner anchors
      * a representative prosody range instead of a single flat neutral read.

@@ -1886,9 +1886,9 @@ class MangaDubStudioManager(
                     addLog = true
                 )
 
-                suspend fun synthesizeOnce() = backendRouter.synthesizeSpeechChunk(
+                suspend fun synthesizeOnce(speakText: String) = backendRouter.synthesizeSpeechChunk(
                     chunk = PurrChunk.Speech(
-                        text = job.text,
+                        text = speakText,
                         role = if (job.line.speakerName.equals("NARRATOR", ignoreCase = true)) SegmentRole.NARRATION else SegmentRole.DIALOGUE,
                         targetVoiceId = job.profile.primaryVoiceId,
                         speakingRate = job.profile.baseSpeed,
@@ -1900,12 +1900,22 @@ class MangaDubStudioManager(
                     profile = job.profile
                 )
 
-                var outcome = synthesizeOnce()
+                var outcome = synthesizeOnce(job.text)
                 if (outcome.pcmFloat24k.isEmpty()) {
-                    // One bounded retry — transient native mount hiccups happen under memory
-                    // pressure right after the vision-phase evictions.
+                    // Attempt 2: identical retry after a cool-down (transient native mount
+                    // hiccups under memory pressure right after the vision-phase evictions).
                     delay(350)
-                    outcome = synthesizeOnce()
+                    outcome = synthesizeOnce(job.text)
+                }
+                if (outcome.pcmFloat24k.isEmpty()) {
+                    // Attempt 3: diversified token stream — the upstream LunaVox codec
+                    // occasionally emits zero audio for a specific text ("empty audio during
+                    // speech codec decoding"), and an identical retry repeats the failure when
+                    // sampling degenerated. The variant rebuilds the line as plain words.
+                    val variant = MangaTextBender.qwenRetryTextVariant(job.text)
+                    if (variant.isNotEmpty() && variant != job.text) {
+                        outcome = synthesizeOnce(variant)
+                    }
                 }
 
                 val wavFile = File(audioDir, "${job.line.id}.wav")
@@ -1921,8 +1931,9 @@ class MangaDubStudioManager(
                         ((pcmFloat.size.toLong() * 1000L) / sampleRate.toLong()).coerceAtLeast(350L)
                     } else {
                         // ✨ FAILURE VISIBILITY: an empty synthesis is never silent to the operator
-                        // — name the engine summary so cartridge/mount problems are diagnosable.
-                        appendLog("⚠️ EMPTY AUDIO [${job.line.speakerName}] via ${outcome.engineSummary.take(56)} — line left undubbed")
+                        // — name the engine summary, the voice, and the offending text so LunaVox
+                        // codec failures are diagnosable from the cooking console alone.
+                        appendLog("⚠️ EMPTY AUDIO [${job.line.speakerName}] via ${outcome.engineSummary.take(48)} voice=${job.profile.primaryVoiceId} text=\"${job.text.take(40)}\" — line left undubbed")
                         maxOf(1400L, job.text.length * 60L)
                     }
                     renderedById[job.line.id] = job.line.copy(

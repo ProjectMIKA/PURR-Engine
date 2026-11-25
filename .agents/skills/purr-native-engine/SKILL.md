@@ -330,6 +330,13 @@ voices went flat:
   cast (everything fell back to the default system voice). Placeholder names are REAL cast
   members that merely get no subtitle label. Narrator voice is strictly on-demand: nothing
   narrator-related seeds or mounts unless a chapter contains narration lines.
+- **LunaVox empty-audio retry ladder (v2.2.1)** (`qwenRetryTextVariant` + the dub-plan
+  synthesis loop): the upstream LunaVox codec occasionally emits ZERO audio for a specific
+  token stream ("Failed to generate ... empty audio during speech codec decoding" surfaces via
+  `nativeGetLastError` → engineSummary) and an identical retry deterministically repeats it.
+  Ladder: prepared text → identical retry after 350ms → punctuation-stripped lowercase-words
+  variant (genuinely different token stream). The `⚠️ EMPTY AUDIO` log includes speaker +
+  voice id + text snippet. Never remove the failure log — it is the only LunaVox diagnostic.
 - **Universal cast coverage (v2.0.0)**: no spoken line ever falls back to the user's default
   system-TTS voice. Two layers: (1) every vision prompt instructs the VLM to NEVER output
   "UNKNOWN" — unconfirmed speakers get a descriptive ALL-CAPS **role label** from their
