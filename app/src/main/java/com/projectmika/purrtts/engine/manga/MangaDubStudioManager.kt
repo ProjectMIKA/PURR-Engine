@@ -11,6 +11,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaBfsPanelSlicer
+import com.projectmika.purrtts.core.manga.MangaAudioAudit
 import com.projectmika.purrtts.core.manga.MangaCastAssignmentEngine
 import com.projectmika.purrtts.core.manga.MangaCastConsolidator
 import com.projectmika.purrtts.core.manga.MangaCbzExtractorUtils
@@ -1952,7 +1953,20 @@ class MangaDubStudioManager(
 
         // Group by the engine spec each job will mount (Qwen3: clone vs design vs custom) so
         // native model reloads happen once per GROUP instead of once per character alternation.
-        val groupedJobs = dubPlan.groupBy { dubSpecGroupKey(it.profile) }
+        // ✨ v2.3.1 CHARACTER-AFFINITY FORGING: group the dub plan by CHARACTER (not just engine
+        // spec) so every line of a character synthesizes contiguously under one mounted voice.
+        // Interleaved reading-order synthesis forced per-line voice swaps (A,B,A,B...) — each
+        // swap re-primes the neural voice context, which was both slow and an hallucination
+        // amplifier. Engine-spec affinity is PRESERVED by ordering character groups so same-spec
+        // characters stay contiguous (one native mount per spec, one voice per character).
+        // Reassembly is ID-based, so the MP4 timeline still plays in strict reading order.
+        val characterGroups = dubPlan.groupBy { job ->
+            job.line.speakerId.ifBlank { job.line.speakerName }.trim().uppercase(Locale.ROOT)
+        }
+        val groupedJobs = LinkedHashMap<String, List<DubJob>>(characterGroups.size)
+        characterGroups.entries
+            .groupBy { dubSpecGroupKey(it.value.first().profile) }
+            .forEach { (_, charEntries) -> charEntries.forEach { entry -> groupedJobs[entry.key] = entry.value } }
         val totalDubJobs = dubPlan.size.coerceAtLeast(1)
         var linesDone = 0
         val rescueJobs = ArrayList<DubJob>()
@@ -2008,7 +2022,7 @@ class MangaDubStudioManager(
         for ((groupKey, jobs) in groupedJobs) {
             reportTelemetry(
                 stage = MangaPipelineStage.VOICE_FORGE,
-                detail = "🎙️ MOUNTING ${groupKey.replace('_', ' ')} BATCH (${jobs.size} LINES)...",
+                detail = "🎙️ CHARACTER BATCH [${jobs.firstOrNull()?.line?.speakerName ?: groupKey}] (${jobs.size} LINE(S)) — ONE VOICE MOUNT...",
                 progress = progressOffset + progressSpan * (0.05f + 0.52f * (linesDone.toFloat() / totalDubJobs.toFloat())),
                 itemCurrent = linesDone,
                 itemTotal = totalDubJobs,
@@ -2038,6 +2052,32 @@ class MangaDubStudioManager(
                     val variant = MangaTextBender.qwenRetryTextVariant(job.text)
                     if (variant.isNotEmpty() && variant != job.text) {
                         outcome = synthesizeForJob(variant, job.profile, isNarratorLine)
+                    }
+                }
+                // ✨ AUDIO AUDIT (v2.3.1): a produced wav must SOUND like the line — duration
+                // sanity vs the text (~55ms/char), speech-span, clipping, NaN degeneration. A
+                // failed audit triggers ONE diversified re-record and the better take wins;
+                // both failing still finalizes the first take (a flawed clip beats a silent
+                // subtitle — the verification gate owns missing files).
+                var audit = MangaAudioAudit.audit(outcome.pcmFloat24k, sampleRate, job.text)
+                if (outcome.pcmFloat24k.isNotEmpty() && !audit.passed) {
+                    appendLog(
+                        "🔁 AUDIO AUDIT FAIL [${job.line.speakerName}]: ${audit.failureReasons.joinToString("; ")} — re-recording"
+                    )
+                    val auditVariant = MangaTextBender.qwenRetryTextVariant(job.text)
+                    val retryText = if (auditVariant.isNotEmpty()) auditVariant else job.text
+                    val retryOutcome = synthesizeForJob(retryText, job.profile, isNarratorLine)
+                    if (retryOutcome.pcmFloat24k.isNotEmpty()) {
+                        val retryAudit = MangaAudioAudit.audit(retryOutcome.pcmFloat24k, sampleRate, retryText)
+                        if (MangaAudioAudit.isBetter(retryAudit, audit)) {
+                            outcome = retryOutcome
+                            audit = retryAudit
+                            if (retryAudit.passed) {
+                                appendLog("✅ AUDIO AUDIT RETRY OK [${job.line.speakerName}]: re-record passed")
+                            } else {
+                                appendLog("⚠️ AUDIO AUDIT RETRY [${job.line.speakerName}]: still failing — ${retryAudit.failureReasons.joinToString("; ")} (keeping best take)")
+                            }
+                        }
                     }
                 }
                 if (outcome.pcmFloat24k.isEmpty() && job.canRescueWithQwenCustom) {

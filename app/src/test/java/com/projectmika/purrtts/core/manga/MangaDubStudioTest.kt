@@ -1974,4 +1974,57 @@ class MangaDubStudioTest {
             tempRoot.deleteRecursively()
         }
     }
+
+    @Test
+    fun `audio audit gates truncated runaway silent clipped and nan generations while passing healthy speech`() {
+        val sr = 24000
+        fun sine(seconds: Float, freq: Float = 220f, amp: Float = 0.5f): FloatArray {
+            val n = (seconds * sr).toInt()
+            return FloatArray(n) { i -> (amp * sin(2.0 * Math.PI * freq * i / sr)).toFloat() }
+        }
+        val longText = "A".repeat(100) // expected duration ~5.5s at 55ms/char
+
+        // Healthy speech-length clip passes
+        val healthy = MangaAudioAudit.audit(sine(5.0f), sr, longText)
+        assertTrue(healthy.passed)
+
+        // Truncated: audio 10x shorter than the text implies
+        val truncated = MangaAudioAudit.audit(sine(0.5f), sr, longText)
+        assertFalse(truncated.passed)
+        assertTrue(truncated.failureReasons.any { it.startsWith("truncated") })
+
+        // Runaway/stutter: audio far longer than the text could plausibly take
+        val runaway = MangaAudioAudit.audit(sine(40f), sr, longText)
+        assertFalse(runaway.passed)
+        assertTrue(runaway.failureReasons.any { it.startsWith("runaway") })
+
+        // Mostly silent: one blip in a wall of digital silence
+        val silent = FloatArray((4f * sr).toInt())
+        silent[silent.size / 2] = 0.5f
+        val silentAudit = MangaAudioAudit.audit(silent, sr, "A".repeat(60))
+        assertFalse(silentAudit.passed)
+        assertTrue(silentAudit.failureReasons.any { it.contains("mostly silent") })
+
+        // Clipped: sustained full-scale samples
+        val clipped = MangaAudioAudit.audit(FloatArray((2f * sr).toInt()) { 1.0f }, sr, "A".repeat(36))
+        assertFalse(clipped.passed)
+        assertTrue(clipped.failureReasons.any { it.contains("clipped") })
+
+        // NaN degeneration
+        val nanPcm = sine(2.0f)
+        nanPcm[10] = Float.NaN
+        val nanAudit = MangaAudioAudit.audit(nanPcm, sr, "A".repeat(36))
+        assertFalse(nanAudit.passed)
+        assertTrue(nanAudit.failureReasons.any { it.contains("NaN") })
+
+        // Empty audio always fails
+        assertFalse(MangaAudioAudit.audit(FloatArray(0), sr, longText).passed)
+
+        // Take comparison: passing beats failing; failing ties compare by deviation
+        val bad = MangaAudioAudit.audit(sine(0.4f), sr, longText)
+        assertTrue(MangaAudioAudit.isBetter(healthy, bad))
+        assertFalse(MangaAudioAudit.isBetter(bad, healthy))
+        val lessBad = MangaAudioAudit.audit(sine(1.8f), sr, longText) // ratio ~0.33 — closer to 1 than 0.073
+        assertTrue(MangaAudioAudit.isBetter(lessBad, bad))
+    }
 }

@@ -3565,3 +3565,121 @@ object MangaCastAssignmentEngine {
             )
         }
 }
+
+/**
+ * ✨ MANGA AUDIO AUDIT (v2.3.1) ✨
+ *
+ * The Voice Line Verification Gate proves a wav EXISTS; this audit proves it SOUNDS like the
+ * spoken line. Deterministic DSP checks over the raw PCM before a clip is accepted as "voiced":
+ * - duration sanity: rendered length vs the text's expected speech duration (~55 ms/char — the
+ *   same model the muxer uses for its silent-line fallback). Far too short = truncated
+ *   generation; far too long = stutter/loop hallucination.
+ * - speech span: fraction of the clip between the first and last audible sample — mostly-silent
+ *   clips are degenerate generations.
+ * - clipping: sustained full-scale samples = harsh degenerate output.
+ * - NaN/Inf samples = float degeneration.
+ *
+ * A failed audit triggers ONE diversified re-record (plain-words variant text) and the better
+ * take wins ([isBetter]); both failing still finalizes the first take — a flawed clip beats a
+ * silent subtitle, and the verification gate continues to own missing files.
+ */
+object MangaAudioAudit {
+
+    data class AuditResult(
+        val durationSec: Float,
+        val expectedDurationSec: Float,
+        val durationRatio: Float,
+        val speechSpanRatio: Float,
+        val clippingRatio: Float,
+        val passed: Boolean,
+        val failureReasons: List<String>
+    ) {
+        val reasonCount: Int get() = failureReasons.size
+    }
+
+    const val EXPECTED_SECONDS_PER_CHAR = 0.055f
+    const val MIN_EXPECTED_DURATION_SEC = 0.35f
+    const val TRUNCATED_RATIO = 0.30f
+    const val RUNAWAY_RATIO = 4.0f
+    const val MIN_SPEECH_SPAN_RATIO = 0.25f
+    const val MAX_CLIPPING_RATIO = 0.10f
+
+    private const val AUDIBLE_THRESHOLD = 0.02f
+    private const val CLIP_THRESHOLD = 0.985f
+
+    fun audit(pcm: FloatArray, sampleRate: Int, text: String): AuditResult {
+        val trimmed = text.trim()
+        val expected = maxOf(MIN_EXPECTED_DURATION_SEC, trimmed.length * EXPECTED_SECONDS_PER_CHAR)
+        val durationSec = if (sampleRate > 0) pcm.size.toFloat() / sampleRate.toFloat() else 0f
+
+        if (pcm.isEmpty()) {
+            return AuditResult(0f, expected, 0f, 0f, 0f, passed = false, failureReasons = listOf("empty audio"))
+        }
+        if (durationSec <= 0f) {
+            return AuditResult(0f, expected, 0f, 0f, 0f, passed = false, failureReasons = listOf("invalid sample rate"))
+        }
+
+        val reasons = mutableListOf<String>()
+        var hasDegenerate = false
+        var clipped = 0
+        var audibleFirst = -1
+        var audibleLast = -1
+        for ((idx, s) in pcm.withIndex()) {
+            if (s.isNaN() || s.isInfinite()) {
+                hasDegenerate = true
+                continue
+            }
+            val magnitude = if (s < 0f) -s else s
+            if (magnitude >= CLIP_THRESHOLD) clipped++
+            if (magnitude > AUDIBLE_THRESHOLD) {
+                if (audibleFirst < 0) audibleFirst = idx
+                audibleLast = idx
+            }
+        }
+        if (hasDegenerate) reasons += "NaN/Inf samples (degenerate generation)"
+
+        val durationRatio = durationSec / expected
+        if (durationRatio < TRUNCATED_RATIO) {
+            reasons += "truncated (duration ${"%.2f".format(durationSec)}s vs expected ~${"%.2f".format(expected)}s)"
+        }
+        if (durationRatio > RUNAWAY_RATIO) {
+            reasons += "runaway/stutter (duration ${"%.2f".format(durationSec)}s vs expected ~${"%.2f".format(expected)}s)"
+        }
+
+        val speechSpanRatio = if (audibleFirst >= 0) {
+            (audibleLast - audibleFirst + 1).toFloat() / pcm.size.toFloat()
+        } else 0f
+        if (speechSpanRatio < MIN_SPEECH_SPAN_RATIO) {
+            reasons += "mostly silent (speech span ${(speechSpanRatio * 100).toInt()}% of clip)"
+        }
+
+        val clippingRatio = clipped.toFloat() / pcm.size.toFloat()
+        if (clippingRatio > MAX_CLIPPING_RATIO) {
+            reasons += "clipped (${(clippingRatio * 100).toInt()}% full-scale samples)"
+        }
+
+        return AuditResult(
+            durationSec = durationSec,
+            expectedDurationSec = expected,
+            durationRatio = durationRatio,
+            speechSpanRatio = speechSpanRatio,
+            clippingRatio = clippingRatio,
+            passed = reasons.isEmpty(),
+            failureReasons = reasons
+        )
+    }
+
+    /**
+     * Deterministic take comparison: a PASSING audit always beats a failing one; two failing
+     * audits compare by fewer failure reasons, then by duration ratio closest to expected
+     * (log-space so 0.5x and 2x deviations weigh equally).
+     */
+    fun isBetter(candidate: AuditResult, incumbent: AuditResult): Boolean {
+        if (candidate.passed && !incumbent.passed) return true
+        if (!candidate.passed && incumbent.passed) return false
+        if (candidate.reasonCount != incumbent.reasonCount) return candidate.reasonCount < incumbent.reasonCount
+        val candidateDeviation = Math.abs(Math.log(candidate.durationRatio.coerceAtLeast(0.01f).toDouble()))
+        val incumbentDeviation = Math.abs(Math.log(incumbent.durationRatio.coerceAtLeast(0.01f).toDouble()))
+        return candidateDeviation < incumbentDeviation
+    }
+}
