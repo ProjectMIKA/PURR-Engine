@@ -1926,6 +1926,13 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         mangaDubManager.setMangaKvCacheEnabled(enabled)
     }
 
+    val mangaLocalFallbackEnabled: StateFlow<Boolean>
+        get() = mangaDubManager.mangaLocalFallbackEnabled
+
+    fun setMangaLocalFallbackEnabled(enabled: Boolean) {
+        mangaDubManager.setMangaLocalFallbackEnabled(enabled)
+    }
+
     val mangaMaxPanelsPerPage: StateFlow<Int>
         get() = mangaDubManager.mangaMaxPanelsPerPage
 

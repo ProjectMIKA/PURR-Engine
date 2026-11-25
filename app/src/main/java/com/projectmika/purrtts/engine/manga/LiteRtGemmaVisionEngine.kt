@@ -362,6 +362,7 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
         customModelPaths: List<String> = emptyList(),
         expectedCharacterCount: Int = 0,
         openAiEngine: SavedOpenAiVisionEngine? = null,
+        localFallbackEnabled: Boolean = false,
         onLog: (String) -> Unit = {}
     ): MangaVisionResponseParser.ParsedStoryboardBible? = withContext(Dispatchers.IO) {
         if (pageFiles.isEmpty()) return@withContext null
@@ -415,6 +416,27 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
                         rawResponse = runCatching { queryOpenAiVisionEndpoint(apiTarget, sheetFile, prompt) }
                             .onFailure { onLog("$label Storyboard retry error: ${it.message}") }
                             .getOrNull()
+                    }
+                    // ✨ v2.4.3 LOCAL LLM FALLBACK: the API conked out mid-planning — mount the
+                    // on-device Gemma VLM and let it take over this storyboard sheet.
+                    if (rawResponse.isNullOrBlank() && localFallbackEnabled) {
+                        onLog("🌐 [$label] conked out — 🔀 MOUNTING LOCAL VLM FALLBACK for Storyboard Sheet ${batchIdx + 1}...")
+                        val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
+                        if (localModel != null) {
+                            val activeTier = resolveTierForFile(localModel, preferredVisionModel)
+                            rawResponse = mutex.withLock {
+                                queryLiteRtGemmaMultimodalLocked(
+                                    modelFile = localModel,
+                                    annotatedJpegFile = sheetFile,
+                                    prompt = prompt,
+                                    enableThinking = activeTier.supportsThinking,
+                                    maxTokens = activeTier.maxContextTokens,
+                                    onLog = onLog
+                                )
+                            }
+                        } else {
+                            onLog("⚠️ No local .litertlm VLM installed — storyboard sheet ${batchIdx + 1} skipped")
+                        }
                     }
                 } else {
                     val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
@@ -564,6 +586,7 @@ Output ONLY valid JSON:
         kvCacheEnabled: Boolean = false,
         expectedCharacterCount: Int = 0,
         openAiEngine: SavedOpenAiVisionEngine? = null,
+        localFallbackEnabled: Boolean = false,
         onLog: (String) -> Unit = {},
         onPanelProgress: (Int, Int, String) -> Unit = { _, _, _ -> }
     ): Pair<MangaVisionResponseParser.ParsedPageAnalysis, String> = withContext(Dispatchers.IO) {
@@ -602,6 +625,15 @@ Output ONLY valid JSON:
                         .onFailure { onLog("$apiBadge retry error: ${it.message}") }
                         .getOrNull()
                 }
+                // ✨ v2.4.3: with local fallback OFF, burn one more API attempt before the page
+                // is skipped (Master: "retry a couple times to the API and then skip the page")
+                if (rawRemote.isNullOrBlank() && !localFallbackEnabled) {
+                    delay(750)
+                    onLog("🔁 Final API retry [$apiBadge] for Page ${pageIndex + 1} (fallback OFF)...")
+                    rawRemote = runCatching { queryOpenAiVisionEndpoint(apiTarget, annotatedFile, prompt) }
+                        .onFailure { onLog("$apiBadge final-retry error: ${it.message}") }
+                        .getOrNull()
+                }
             } finally {
                 runCatching { annotatedFile.delete() }
             }
@@ -629,12 +661,17 @@ Output ONLY valid JSON:
                 }
                 return@withContext finalParsed to apiBadge
             }
-            onLog("⚠️ [$apiBadge] Page ${pageIndex + 1} returned empty response — skipping without mounting local VLM")
-            return@withContext MangaVisionResponseParser.ParsedPageAnalysis(
-                thoughtTrace = "",
-                storySummary = storySummary,
-                panels = emptyList()
-            ) to "$apiBadge (no response)"
+            if (!localFallbackEnabled) {
+                onLog("⚠️ [$apiBadge] Page ${pageIndex + 1} failed after API retries — SKIPPING PAGE (local fallback OFF)")
+                return@withContext MangaVisionResponseParser.ParsedPageAnalysis(
+                    thoughtTrace = "",
+                    storySummary = storySummary,
+                    panels = emptyList()
+                ) to "$apiBadge (no response)"
+            }
+            // ✨ v2.4.3 LOCAL LLM FALLBACK: the API conked out during planning — mount the local
+            // Gemma VLM and let it take over this page (falls through to the Tier 2 path below).
+            onLog("🌐 [$apiBadge] conked out — 🔀 MOUNTING LOCAL VLM FALLBACK for Page ${pageIndex + 1}...")
         }
 
         // Tier 2: On-Device LiteRT-LM Vision LLM — zoomed per-panel crops for sharp OCR + exact alignment
@@ -901,6 +938,7 @@ Output ONLY valid JSON:
         preferredVisionModel: MangaVisionModelTier = MangaVisionModelTier.GEMMA4_E2B,
         powerUserVisionUrl: String = "",
         openAiEngine: SavedOpenAiVisionEngine? = null,
+        localFallbackEnabled: Boolean = false,
         customModelPaths: List<String> = emptyList(),
         onLog: (String) -> Unit = {}
     ): MangaVisionResponseParser.ParsedCastConsolidation? = withContext(Dispatchers.IO) {
@@ -933,6 +971,20 @@ Output ONLY valid JSON:
                 rawOut = runCatching { queryOpenAiTextEndpoint(apiTarget, prompt) }
                     .onFailure { onLog("$label consolidation retry error: ${it.message}") }
                     .getOrNull()
+            }
+            // ✨ v2.4.3 LOCAL LLM FALLBACK: API consolidation conked out — the local VLM takes
+            // over the text pass (it sees the full chapter script with deep per-panel context).
+            if (rawOut.isNullOrBlank() && localFallbackEnabled) {
+                onLog("🌐 [$label] conked out — 🔀 MOUNTING LOCAL VLM FALLBACK for Story & Cast Consolidation...")
+                val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)
+                if (localModel != null) {
+                    val activeTier = resolveTierForFile(localModel, preferredVisionModel)
+                    rawOut = mutex.withLock {
+                        queryLiteRtGemmaTextLocked(localModel, prompt, activeTier.maxContextTokens, onLog)
+                    }
+                } else {
+                    onLog("⚠️ No local .litertlm VLM installed — consolidation skipped (deterministic consolidator takes over)")
+                }
             }
         } else {
             val localModel = resolveInstalledGemmaModelFile(preferredVisionModel, customModelPaths)

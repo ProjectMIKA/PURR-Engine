@@ -169,6 +169,7 @@ fun MangaDubStudioModuleWindowBody(
     val includeNonBubbleText = activeProject?.includeNonBubbleText ?: globalIncludeNonBubbleText
     val globalLockVoicesViaCloning by viewModel.lockMangaVoicesViaCloning.collectAsState()
     val globalMangaKvCacheEnabled by viewModel.mangaKvCacheEnabled.collectAsState()
+    val mangaLocalFallback by viewModel.mangaLocalFallbackEnabled.collectAsState()
     val globalMangaMaxPanelsPerPage by viewModel.mangaMaxPanelsPerPage.collectAsState()
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     val globalNarratorEnabled by viewModel.mangaNarratorEnabled.collectAsState()
@@ -871,6 +872,22 @@ fun MangaDubStudioModuleWindowBody(
                     activeProject?.let { viewModel.updateMangaProjectConfig(it.id, includeNonBubbleText = checked) }
                 }
             )
+            // ✨ v2.4.3 LOCAL LLM FALLBACK — only relevant (and only visible) when an API vision
+            // engine is selected; local Gemma runs never need a fallback.
+            if (selectedOpenAiEngine != null) {
+                SimplePurrToggle(
+                    title = "LOCAL LLM FALLBACK (API AUTO-RECOVERY)",
+                    subtitle = if (mangaLocalFallback) {
+                        "ON: if the API model conks out during planning (storyboard, page scan or cast consolidation), the on-device Gemma VLM mounts and takes over that page/batch."
+                    } else {
+                        "OFF: API failures are retried a couple of times, then the failing page is skipped. No local model is mounted (strict API isolation)."
+                    },
+                    checked = mangaLocalFallback,
+                    accent = MikaColors.NeonCyan,
+                    icon = CyberIconType.BUS_PLUG,
+                    onToggle = { checked -> viewModel.setMangaLocalFallbackEnabled(checked) }
+                )
+            }
         }
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -881,6 +898,7 @@ fun MangaDubStudioModuleWindowBody(
             Row(
                 modifier = Modifier
                     .weight(1.35f)
+                    .height(46.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MikaColors.NeonPink.copy(alpha = 0.22f))
                     .border(1.5.dp, MikaColors.NeonPink, RoundedCornerShape(6.dp))
@@ -893,7 +911,7 @@ fun MangaDubStudioModuleWindowBody(
                             )
                         )
                     }
-                    .padding(vertical = 11.dp),
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -904,18 +922,20 @@ fun MangaDubStudioModuleWindowBody(
                     color = MikaColors.NeonPink,
                     fontFamily = FontFamily.Monospace,
                     fontWeight = FontWeight.Black,
-                    fontSize = 9.8.sp
+                    fontSize = 9.2.sp,
+                    maxLines = 1
                 )
             }
 
             Row(
                 modifier = Modifier
                     .weight(0.75f)
+                    .height(46.dp)
                     .clip(RoundedCornerShape(6.dp))
                     .background(MikaColors.SsrGold.copy(alpha = 0.16f))
                     .border(1.5.dp, MikaColors.SsrGold, RoundedCornerShape(6.dp))
                     .clickable(enabled = !isBusy) { viewModel.createSampleMangaProject() }
-                    .padding(vertical = 11.dp),
+                    .padding(horizontal = 4.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically
             ) {

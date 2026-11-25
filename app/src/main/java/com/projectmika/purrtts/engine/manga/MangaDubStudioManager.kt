@@ -144,6 +144,24 @@ class MangaDubStudioManager(
     )
     val mangaKvCacheEnabled: StateFlow<Boolean> = _mangaKvCacheEnabled.asStateFlow()
 
+    // ✨ v2.4.3 LOCAL LLM FALLBACK: when an API vision engine conks out during planning
+    // (storyboard / page scan / cast consolidation), mount the on-device Gemma VLM and take
+    // over. Default ON. OFF = retry the API a couple of times, then skip the failing page
+    // (the v2.2.2 strict API isolation behavior, now user-controlled).
+    private val _mangaLocalFallbackEnabled = MutableStateFlow(
+        prefs.getBoolean("manga_local_fallback_enabled", true)
+    )
+    val mangaLocalFallbackEnabled: StateFlow<Boolean> = _mangaLocalFallbackEnabled.asStateFlow()
+
+    fun setMangaLocalFallbackEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("manga_local_fallback_enabled", enabled).apply()
+        _mangaLocalFallbackEnabled.value = enabled
+        appendLog(
+            if (enabled) "🔀 Local LLM fallback ON — API failures mount the local VLM mid-plan"
+            else "🔒 Local LLM fallback OFF — API failures retry, then skip the page"
+        )
+    }
+
     private val _projects = MutableStateFlow<List<MangaSeriesProject>>(emptyList())
     val projects: StateFlow<List<MangaSeriesProject>> = _projects.asStateFlow()
 
@@ -1119,6 +1137,7 @@ class MangaDubStudioManager(
                     customModelPaths = modelPaths,
                     expectedCharacterCount = expectedCharCount,
                     openAiEngine = openAiEngine,
+                    localFallbackEnabled = _mangaLocalFallbackEnabled.value,
                     onLog = { msg -> appendLog(msg) }
                 )
                 if (bible != null) {
@@ -1208,6 +1227,7 @@ class MangaDubStudioManager(
                         kvCacheEnabled = _mangaKvCacheEnabled.value,
                         expectedCharacterCount = expectedCharCount,
                         openAiEngine = openAiEngine,
+                        localFallbackEnabled = _mangaLocalFallbackEnabled.value,
                         onLog = { msg -> appendLog(msg) },
                         onPanelProgress = { panDone, panTotal, bubbleNote ->
                             val panFrac = (pageIdx.toFloat() + (panDone.toFloat() / panTotal.coerceAtLeast(1).toFloat())) / ch.pages.size.coerceAtLeast(1).toFloat()
@@ -1338,6 +1358,7 @@ class MangaDubStudioManager(
                     preferredVisionModel = proj.preferredVisionModel,
                     powerUserVisionUrl = proj.powerUserVisionUrl,
                     openAiEngine = openAiEngine,
+                    localFallbackEnabled = _mangaLocalFallbackEnabled.value,
                     customModelPaths = modelPaths,
                     onLog = { msg -> appendLog(msg) }
                 )
