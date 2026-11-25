@@ -1,3 +1,38 @@
+# 🌌 PURR-TTS v2.3.0 // The Verified Dub
+
+### ✨ What's New since v2.2.2
+
+The Manga Dub Studio gets Master's coverage law: the Cast QTY caps VOICES, never transcription — and every counted spoken line is now **verified to have actually produced audio** before the dub is declared done. Plus the MIKA Narrator toggle and the chunk-onset character filter that kills those "weird audio glitches at the beginning of chunks." 🎤⚖️🔊
+
+* **⚖️ Deterministic Weighted Cast Assignment (`MangaCastAssignmentEngine`, `MangaDubModels`)**:
+  * NEW pure engine, runs post-consolidation in both the vision scan and re-casting: every UNKNOWN / placeholder / unmatched speaker is scored against the roster with weighted evidence (VLM candidate guesses +40 > bubble tail target +30 > gender hint +25/−15 > name morphology ≤+18 > reading-order adjacency +12).
+  * A confident winner (score ≥ 30 AND margin ≥ 8; single-cast rosters fold at ≥ 0) is auto-assigned; ambiguous ties keep their Pre-Production flag but lead the candidate list so Auto-Resolve proposes the weighted best first.
+  * Nothing is ever dropped — unresolved lines still dub through Universal Cast Coverage role voices.
+  * **Test-caught overflow fix**: the single-candidate margin check computed `score − Int.MIN_VALUE` in Int arithmetic, which wraps NEGATIVE and silently blocked single-cast auto-assignment — now compared in Long space (`MangaDubStudioTest` caught it on first run; 48/48 green).
+* **🎤 Voice Line Verification Gate (`MangaDubStudioManager`)**:
+  * Before reassembly, EVERY planned spoken line is audited (rendered path + physical wav > 44-byte RIFF header); failures get a final rescue ladder through a genuinely different engine lane (first non-Qwen3 cartridge, else base retry × direct → 250ms cool-down → plain-words variant).
+  * User-pinned voices no longer skip rescue entirely.
+  * Telemetry reports `🎤 VOICE VERIFICATION PASSED: 17/17 SPOKEN LINES CONFIRMED` or `⚠️ VERIFICATION: 15/17 VOICED (2 SILENT)` with the failing lines named in the log.
+* **🗺️ Coverage-First Cast Law (all 5 VLM prompt sites)**:
+  * The Cast QTY is now a VOICE POOL, not a transcription filter — transcribe EVERY enclosed bubble; apparent surplus speakers fold into the closest roster member (same gender first) at confidence 0.45 with `candidate_speakers`; NEVER omit, NEVER output UNKNOWN, NEVER mislabel spoken dialogue as floating SFX to satisfy the count.
+  * Ends the "page 2 skipped" scar where a small VLM under contradictory constraints silently dropped whole pages of dialogue.
+* **🎙️ MIKA NARRATOR ON/OFF (`MangaSeriesProject` / `MangaDubStudioModuleWindow`)**:
+  * New toggle directly above CAST QTY (default ON): OFF = boxed narration stays extracted & reviewable but is skipped in the dub (no synthesis, no timeline slot, no subtitle) — fully reversible, character speech bubbles are never affected.
+  * Narrator voice routing now honors `NARRATION` labels via `isNarratorName`; the muxer filters true narrator lines from the timeline when narration is off.
+* **🔊 Trusted-Speaker Laugh Rescue (`MangaTextBender`)**:
+  * Elongated-SFX detection split: environmental sounds ("Shaaa", "FWOOSH") still drop regardless of speaker, but laughter ("OH HO HO HO", "HA HA HA") inside a KNOWN cast member's bubble is now VOICED dialogue — ojou-sama laughs are performed in dubs.
+* **✨ Onset-Safe Character Filter (`MangaTextBender`)**:
+  * Fixes the "weird audio glitches at the beginning of chunks": the manga path never had the chat path's Emoji Vaporizer, so ♪ (U+266A), arrows, ★☆♥, emoji, zero-width characters, fullwidth ！（ and CJK brackets 「」 could all LEAD a chunk straight into Qwen3/LunaVox → onset hallucinations.
+  * Pictographs & invisibles vaporize, fullwidth/CJK punctuation maps to ASCII speech equivalents, and a deterministic guard forces EVERY chunk to start on a spoken letter or digit (symbol-only lines dissolve and skip).
+* **💾 `tailTarget` persistence (`MangaSpeechLine`)**: the VLM's raw `tail_target` bubble-tail evidence is now persisted and weighed by the resolver instead of discarded at parse time (old projects decode cleanly).
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.3.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `44`).
+2. **`PURR-TTS_V2.3.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.2.2 // Qwen3 Dub Fix, Strict API/Local Vision Lock & Batch Counter Fix
 
 ### ✨ What's New since v2.2.1

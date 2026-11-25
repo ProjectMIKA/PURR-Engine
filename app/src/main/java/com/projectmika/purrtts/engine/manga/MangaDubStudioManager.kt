@@ -11,6 +11,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaBfsPanelSlicer
+import com.projectmika.purrtts.core.manga.MangaCastAssignmentEngine
 import com.projectmika.purrtts.core.manga.MangaCastConsolidator
 import com.projectmika.purrtts.core.manga.MangaCbzExtractorUtils
 import com.projectmika.purrtts.core.manga.MangaChapterEntry
@@ -126,6 +127,14 @@ class MangaDubStudioManager(
     )
     val lockVoicesViaCloning: StateFlow<Boolean> = _lockVoicesViaCloning.asStateFlow()
 
+    // ✨ NARRATOR TOGGLE (v2.3.0): MIKA dubs boxed narration captions by default (ON). OFF =
+    // narration boxes stay extracted & reviewable but are skipped in the dub (no voice, no
+    // subtitle). Character speech bubbles are never affected — only true narrator labels.
+    private val _mangaNarratorEnabled = MutableStateFlow(
+        prefs.getBoolean("manga_narrator_enabled", true)
+    )
+    val mangaNarratorEnabled: StateFlow<Boolean> = _mangaNarratorEnabled.asStateFlow()
+
     // ✨ v1.9.8: KV-cache panel scanning is OPT-IN — default OFF because the compact KV turn
     // prompts made small VLMs (Gemma E2B) fail the panel OCR task and parrot the schema example
     // ("Dialogue text"). Advanced-settings toggle warns about the speed/hallucination tradeoff.
@@ -220,6 +229,18 @@ class MangaDubStudioManager(
         _lockVoicesViaCloning.value = lock
         _activeProjectId.value?.let { pid ->
             updateProjectConfig(pid, lockVoicesViaCloning = lock)
+        }
+    }
+
+    fun setMangaNarratorEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean("manga_narrator_enabled", enabled).apply()
+        _mangaNarratorEnabled.value = enabled
+        appendLog(
+            if (enabled) "🎙️ MIKA Narrator ON — narration boxes are dubbed by MIKA"
+            else "🔇 MIKA Narrator OFF — narration boxes are skipped in the dub"
+        )
+        _activeProjectId.value?.let { pid ->
+            updateProjectConfig(pid, narratorEnabled = enabled)
         }
     }
 
@@ -482,6 +503,7 @@ class MangaDubStudioManager(
         videoQuality: MangaVideoQuality? = null,
         includeNonBubbleText: Boolean? = null,
         lockVoicesViaCloning: Boolean? = null,
+        narratorEnabled: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         expectedCharacterCount: Int? = null,
         selectedOpenAiVisionEngineId: String? = null,
@@ -494,6 +516,7 @@ class MangaDubStudioManager(
         val effectiveVisionTier = preferredVisionModel ?: _selectedVisionModel.value
         val effectiveIncludeNonBubble = includeNonBubbleText ?: _includeNonBubbleText.value
         val effectiveLockVoices = lockVoicesViaCloning ?: _lockVoicesViaCloning.value
+        val effectiveNarrator = narratorEnabled ?: _mangaNarratorEnabled.value
         val effectiveCharCount = (expectedCharacterCount ?: _expectedCharacterCount.value).coerceIn(0, 24)
         val effectiveOpenAiId = selectedOpenAiVisionEngineId ?: _selectedOpenAiVisionEngineId.value
         prefs.edit()
@@ -504,6 +527,7 @@ class MangaDubStudioManager(
             .putString("selected_reading_order", readingOrder.name)
             .putBoolean("include_non_bubble_text", effectiveIncludeNonBubble)
             .putBoolean("lock_voices_via_cloning", effectiveLockVoices)
+            .putBoolean("manga_narrator_enabled", effectiveNarrator)
             .apply()
         _selectedVisionModel.value = effectiveVisionTier
         _selectedOpenAiVisionEngineId.value = effectiveOpenAiId
@@ -511,6 +535,7 @@ class MangaDubStudioManager(
         _selectedReadingOrder.value = readingOrder
         _includeNonBubbleText.value = effectiveIncludeNonBubble
         _lockVoicesViaCloning.value = effectiveLockVoices
+        _mangaNarratorEnabled.value = effectiveNarrator
 
         activeJob = scope.launch {
             _isBusy.value = true
@@ -547,6 +572,7 @@ class MangaDubStudioManager(
                     videoQuality = videoQuality ?: existingProject.videoQuality,
                     includeNonBubbleText = effectiveIncludeNonBubble,
                     lockVoicesViaCloning = lockVoicesViaCloning ?: existingProject.lockVoicesViaCloning,
+                    narratorEnabled = effectiveNarrator,
                     preferredVisionModel = effectiveVisionTier,
                     expectedCharacterCount = effectiveCharCount,
                     selectedOpenAiVisionEngineId = effectiveOpenAiId,
@@ -563,6 +589,7 @@ class MangaDubStudioManager(
                     videoQuality = videoQuality ?: MangaVideoQuality.HD_720P,
                     includeNonBubbleText = effectiveIncludeNonBubble,
                     lockVoicesViaCloning = effectiveLockVoices,
+                    narratorEnabled = effectiveNarrator,
                     preferredVisionModel = effectiveVisionTier,
                     expectedCharacterCount = effectiveCharCount,
                     selectedOpenAiVisionEngineId = effectiveOpenAiId,
@@ -1133,7 +1160,8 @@ class MangaDubStudioManager(
                                     decisionReason = ls.decisionReason,
                                     candidateSpeakers = ls.candidateSpeakers,
                                     postPauseMs = MangaEmotionalPacer.computePostLinePauseMs(cleanText, ls.emotion),
-                                    genderHint = ls.gender
+                                    genderHint = ls.gender,
+                                    tailTarget = ls.tailTarget
                                 )
                             }
                             existingPanel.copy(
@@ -1196,10 +1224,21 @@ class MangaDubStudioManager(
                 if (mergedRoster.size != preMerged.size || consolidation != null) {
                     appendLog("🎭 Consolidated cast: ${preMerged.size} -> ${mergedRoster.size} canonical speaker(s)")
                 }
+                // ✨ DETERMINISTIC WEIGHTED CAST RESOLVER (v2.3.0): after the LLM consolidation,
+                // every still-unresolved speaker (UNKNOWN / placeholder / unmatched) is assigned
+                // deterministically from weighted evidence — or keeps its decision flag with the
+                // weighted best candidate first. Lines are NEVER dropped for cast-size reasons.
+                val (weightedRoster, weightedPages) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+                    roster = mergedRoster,
+                    pages = mergedPages
+                )
+                if (weightedPages != mergedPages) {
+                    appendLog("⚖️ Weighted cast resolver assigned unresolved speaker(s) deterministically")
+                }
                 roster.clear()
-                roster.addAll(mergedRoster)
+                roster.addAll(weightedRoster)
                 updatedPages.clear()
-                updatedPages.addAll(mergedPages)
+                updatedPages.addAll(weightedPages)
                 sampleLinesBySpeaker.clear()
                 for (pg in updatedPages) {
                     for (pan in pg.panels) {
@@ -1408,9 +1447,13 @@ class MangaDubStudioManager(
                 consolidation = null,
                 expectedCharacterCount = clamped
             )
-            val updatedChapters = proj.chapters.map { if (it.id == chapterId) it.copy(pages = mergedPages) else it }
+            val (weightedRoster, weightedPages) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+                roster = mergedRoster,
+                pages = mergedPages
+            )
+            val updatedChapters = proj.chapters.map { if (it.id == chapterId) it.copy(pages = weightedPages) else it }
             val synced = recomputeCharacterLineCounts(
-                mergedRoster,
+                weightedRoster,
                 updatedChapters.firstOrNull { it.id == chapterId },
                 updatedChapters.filter { it.id != chapterId }
             )
@@ -1598,6 +1641,7 @@ class MangaDubStudioManager(
         enableAtmosphereFx: Boolean? = null,
         includeNonBubbleText: Boolean? = null,
         lockVoicesViaCloning: Boolean? = null,
+        narratorEnabled: Boolean? = null,
         powerUserVisionUrl: String? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         expectedCharacterCount: Int? = null,
@@ -1655,6 +1699,7 @@ class MangaDubStudioManager(
                 enableAtmosphereFx = enableAtmosphereFx ?: proj.enableAtmosphereFx,
                 includeNonBubbleText = includeNonBubbleText ?: proj.includeNonBubbleText,
                 lockVoicesViaCloning = lockVoicesViaCloning ?: proj.lockVoicesViaCloning,
+                narratorEnabled = narratorEnabled ?: proj.narratorEnabled,
                 powerUserVisionUrl = powerUserVisionUrl ?: proj.powerUserVisionUrl,
                 preferredVisionModel = preferredVisionModel ?: proj.preferredVisionModel,
                 expectedCharacterCount = expectedCharacterCount?.coerceIn(0, 24) ?: proj.expectedCharacterCount,
@@ -1860,7 +1905,11 @@ class MangaDubStudioManager(
                         continue
                     }
 
-                    val isNarratorLine = line.speakerName.equals("NARRATOR", ignoreCase = true)
+                    val isNarratorLine = MangaTextBender.isNarratorName(line.speakerName)
+                    // ✨ NARRATOR TOGGLE (v2.3.0): with MIKA narration OFF, boxed narration lines are
+                    // never synthesized — they pass through untouched and the muxer omits them from
+                    // the timeline/subtitles entirely (reversible: toggle back ON and re-produce).
+                    if (isNarratorLine && !proj.narratorEnabled) continue
                     // ✨ NARRATOR IDENTITY LAW (v1.9.9): MIKA's hardcoded narrator voice resolves
                     // in isolation — a legacy storyboard-seeded NARRATOR roster entry can never
                     // influence narration synthesis.
@@ -1974,7 +2023,7 @@ class MangaDubStudioManager(
                     addLog = true
                 )
 
-                val isNarratorLine = job.line.speakerName.equals("NARRATOR", ignoreCase = true)
+                val isNarratorLine = MangaTextBender.isNarratorName(job.line.speakerName)
                 var outcome = synthesizeForJob(job.text, job.profile, isNarratorLine)
                 if (outcome.pcmFloat24k.isEmpty()) {
                     // Attempt 2: identical retry after a cool-down
@@ -2015,7 +2064,7 @@ class MangaDubStudioManager(
                     selectedCartridgeId = Qwen3TtsEngine.SPEC_CUSTOM_06B,
                     voiceDesignPrompt = ""
                 )
-                val isNarratorLine = job.line.speakerName.equals("NARRATOR", ignoreCase = true)
+                val isNarratorLine = MangaTextBender.isNarratorName(job.line.speakerName)
                 var rescueOutcome = synthesizeForJob(job.text, rescueProfile, isNarratorLine)
                 if (rescueOutcome.pcmFloat24k.isEmpty()) {
                     val variant = MangaTextBender.qwenRetryTextVariant(job.text)
@@ -2025,6 +2074,97 @@ class MangaDubStudioManager(
                 }
                 finalizeJobOutcome(job.copy(profile = rescueProfile), rescueOutcome)
             }
+        }
+
+        // ✨ VOICE LINE VERIFICATION GATE (v2.3.0) ✨
+        // Master's law: a counted spoken line must actually PRODUCE audio before the dub is
+        // declared done. The retry ladders above reduced empty-PCM ghosts but could not
+        // eliminate them (and user-pinned voices skipped rescue entirely). Before reassembly
+        // we audit EVERY planned spoken line, rescue the failures through a genuinely
+        // different engine lane (non-Qwen cartridge / system voice), and report the tally.
+        val missingJobs = dubPlan.filter { job ->
+            !isDubWavPresent(renderedById[job.line.id]?.renderedWavPath.orEmpty())
+        }
+        if (missingJobs.isNotEmpty()) {
+            val rescueVoice = voices.firstOrNull { it.engine != BackendType.QWEN3_NATIVE }
+            val verificationProfile = if (rescueVoice != null) {
+                baseProfile.copy(
+                    primaryVoiceId = rescueVoice.id,
+                    preferredBackend = rescueVoice.engine,
+                    selectedCartridgeId = rescueVoice.cartridgeId,
+                    sherpaFamily = rescueVoice.sherpaFamily ?: baseProfile.sherpaFamily
+                )
+            } else {
+                null
+            }
+            appendLog(
+                "🎤 VOICE VERIFICATION: ${missingJobs.size}/${dubPlan.size} spoken line(s) unvoiced — final rescue via " +
+                    (rescueVoice?.displayName ?: "base engine retry")
+            )
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "🎤 VERIFYING ${missingJobs.size} UNVOICED LINE(S) OF ${dubPlan.size} PLANNED...",
+                progress = progressOffset + progressSpan * 0.58f,
+                itemCurrent = 0,
+                itemTotal = missingJobs.size,
+                addLog = false
+            )
+            for ((idx, job) in missingJobs.withIndex()) {
+                if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+                val lineIsNarrator = MangaTextBender.isNarratorName(job.line.speakerName)
+                val laneProfile = verificationProfile ?: job.profile
+                var outcome = synthesizeForJob(job.text, laneProfile, lineIsNarrator)
+                if (outcome.pcmFloat24k.isEmpty()) {
+                    delay(250)
+                    outcome = synthesizeForJob(job.text, laneProfile, lineIsNarrator)
+                }
+                if (outcome.pcmFloat24k.isEmpty()) {
+                    val variant = MangaTextBender.qwenRetryTextVariant(job.text)
+                    if (variant.isNotEmpty() && variant != job.text) {
+                        outcome = synthesizeForJob(variant, laneProfile, lineIsNarrator)
+                    }
+                }
+                if (outcome.pcmFloat24k.isNotEmpty()) {
+                    appendLog("🎤 VERIFICATION RESCUE OK [${job.line.speakerName}] via ${outcome.engineSummary.take(80)}")
+                    finalizeJobOutcome(job, outcome)
+                }
+                reportTelemetry(
+                    stage = MangaPipelineStage.VOICE_FORGE,
+                    detail = "🎤 VERIFYING LINE ${idx + 1}/${missingJobs.size} [${job.line.speakerName}]...",
+                    progress = progressOffset + progressSpan * (0.58f + 0.01f * ((idx + 1).toFloat() / missingJobs.size.toFloat())),
+                    itemCurrent = idx + 1,
+                    itemTotal = missingJobs.size,
+                    addLog = false
+                )
+            }
+        }
+        val stillMissing = dubPlan.count { job ->
+            !isDubWavPresent(renderedById[job.line.id]?.renderedWavPath.orEmpty())
+        }
+        val voicedCount = dubPlan.size - stillMissing
+        if (stillMissing == 0) {
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "🎤 VOICE VERIFICATION PASSED: $voicedCount/$voicedCount SPOKEN LINES CONFIRMED",
+                progress = progressOffset + progressSpan * 0.59f,
+                itemCurrent = voicedCount,
+                itemTotal = voicedCount.coerceAtLeast(1),
+                addLog = true
+            )
+        } else {
+            val failureSample = dubPlan
+                .filter { job -> !isDubWavPresent(renderedById[job.line.id]?.renderedWavPath.orEmpty()) }
+                .take(3)
+                .joinToString("; ") { "[${it.line.speakerName}] \"${it.text.take(32)}\"" }
+            appendLog("⚠️ VOICE VERIFICATION: $voicedCount/${dubPlan.size} voiced — $stillMissing silent subtitle(s) remain: $failureSample")
+            reportTelemetry(
+                stage = MangaPipelineStage.VOICE_FORGE,
+                detail = "⚠️ VERIFICATION: $voicedCount/${dubPlan.size} VOICED ($stillMissing SILENT)",
+                progress = progressOffset + progressSpan * 0.59f,
+                itemCurrent = voicedCount,
+                itemTotal = dubPlan.size,
+                addLog = false
+            )
         }
 
         // Reassemble in original reading order (skipped lines pass through untouched).
@@ -2071,7 +2211,8 @@ class MangaDubStudioManager(
             burnInSubtitles = proj.burnInSubtitles,
             enableAtmosphereFx = proj.enableAtmosphereFx,
             destMp4File = outMp4File,
-            quality = proj.videoQuality
+            quality = proj.videoQuality,
+            narratorEnabled = proj.narratorEnabled
         ) { p, label ->
             val prefix = label.substringBefore('(').trim()
             val shouldLog = prefix != lastMuxStageLog
@@ -2334,6 +2475,16 @@ class MangaDubStudioManager(
         if (!descriptor.isCloned) return false
         val requiredSpecId = descriptor.requiredSubCartridgeId ?: descriptor.cartridgeId
         return repository.state.value.modelStates[requiredSpecId]?.state != DownloadState.INSTALLED
+    }
+
+    /**
+     * ✨ VOICE VERIFICATION (v2.3.0): a rendered wav counts ONLY when the file physically
+     * exists with real PCM payload bytes beyond the 44-byte RIFF header.
+     */
+    private fun isDubWavPresent(path: String): Boolean {
+        if (path.isBlank()) return false
+        val f = File(path)
+        return f.isFile && f.length() > 44L
     }
 
     fun resolveSynthesisProfileForCharacter(

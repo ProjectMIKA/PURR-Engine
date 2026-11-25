@@ -486,7 +486,7 @@ class LiteRtGemmaVisionEngine(private val context: Context) {
             existingCharacters.joinToString("\n") { "- ${it.name} (${it.gender.tag}): ${it.visualDescription}" }
         }
         val charCountRule = if (expectedCharacterCount > 0) {
-            "USER CHARACTER COUNT BASELINE: The user indicated there are $expectedCharacterCount speaking character(s) in this manga (EXCLUDING NARRATOR). Identify at most $expectedCharacterCount canonical speaking characters and reuse their exact uppercase names/role labels across all pages instead of creating duplicate role labels!"
+            "USER CAST QTY (VOICE POOL, NOT A TRANSCRIPTION FILTER): The user indicated there are $expectedCharacterCount speaking voice(s) in this manga (EXCLUDING NARRATOR). Use at most $expectedCharacterCount canonical speaking characters and reuse their exact uppercase names/role labels across all pages instead of creating duplicate role labels. If you meet an apparent ADDITIONAL speaker, DO NOT drop their dialogue and DO NOT invent an extra label: fold those lines into the closest matching character (same gender first, similar role/appearance second) and keep confidence low — full dialogue coverage beats cast purity!"
         } else {
             "CHARACTER COUNT: AUTO — determine the true recurring speaking cast across pages and reuse exact canonical uppercase names/role labels rather than inventing new labels per page."
         }
@@ -953,7 +953,7 @@ Output ONLY valid JSON:
             "[P$pgNum.$panNum ${ln.id}] ${ln.speakerName}(${ln.genderHint.tag}): \"${ln.sanitizedText.ifBlank { ln.rawText }.take(110)}\""
         }
         val baselineDirective = if (expectedCharacterCount > 0) {
-            "TARGET NON-NARRATOR CHARACTER COUNT: The user specified $expectedCharacterCount speaking character(s) (EXCLUDING NARRATOR). Merge drifted aliases so `canonical_characters` contains at most $expectedCharacterCount speaking character(s)!"
+            "TARGET NON-NARRATOR VOICE POOL: The user specified $expectedCharacterCount speaking voice(s) (EXCLUDING NARRATOR). Merge drifted aliases so `canonical_characters` contains at most $expectedCharacterCount speaking character(s). This caps VOICES only — EVERY transcribed line must still resolve: fold apparent surplus speakers into their closest canonical character (same gender first) via `line_fixes`, and never leave dialogue unassigned."
         } else {
             "CHARACTER COUNT: AUTO — merge any duplicate/drifted role labels referring to the same person across pages into ONE canonical character."
         }
@@ -1130,7 +1130,7 @@ Output ONLY valid JSON:
             if (storySummary.isNotBlank()) appendLine("CHAPTER STORYBOARD BIBLE: $storySummary")
             if (pageSynopsis.isNotBlank()) appendLine("PAGE ${pageIndex + 1} BEAT: $pageSynopsis")
             if (expectedCharacterCount > 0) {
-                appendLine("USER CHARACTER BASELINE: Expect ~$expectedCharacterCount total speaking characters (excl. NARRATOR); prefer matching an existing cast member above before inventing a new role label.")
+                appendLine("USER CAST QTY: ~$expectedCharacterCount speaking voices (excl. NARRATOR) — a VOICE POOL, not a line filter. Transcribe EVERY enclosed bubble; if a speaker seems to exceed this count, fold their lines into the closest matching roster member above (same gender first) with confidence 0.45 and candidate_speakers. NEVER omit a bubble, NEVER output UNKNOWN, and NEVER mislabel spoken dialogue as floating_sfx to satisfy the count.")
             }
         }.trim().ifEmpty { "(Scanning sequential story — keep cast identity consistent across outfit changes or duplicate comedy shots.)" }
 
@@ -1240,7 +1240,7 @@ $previousSnippet
             if (storySummary.isNotBlank()) appendLine("CHAPTER STORYBOARD BIBLE: $storySummary")
             if (pageSynopsis.isNotBlank()) appendLine("PAGE ${pageIndex + 1} BEAT: $pageSynopsis")
             if (expectedCharacterCount > 0) {
-                appendLine("USER CHARACTER BASELINE: Expect ~$expectedCharacterCount total speaking characters (excl. NARRATOR); prefer matching established cast names before inventing new labels.")
+                appendLine("USER CAST QTY: ~$expectedCharacterCount speaking voices (excl. NARRATOR) — a VOICE POOL, not a line filter. Transcribe EVERY enclosed bubble; if a speaker seems to exceed this count, fold their lines into the closest established cast member (same gender first) with confidence 0.45 and candidate_speakers. NEVER omit a bubble, NEVER output UNKNOWN, and NEVER mislabel spoken dialogue as floating_sfx to satisfy the count.")
             }
         }.trim().ifEmpty { "(Keep character identity consistent across outfit switches.)" }
 
@@ -1933,7 +1933,7 @@ Speed_scale range: 0.85..1.15. Pitch_scale range: 0.90..1.10.
             "STRICT SPEECH-BUBBLE-ONLY: Transcribe ONLY enclosed speech bubbles, thought clouds, scream bursts, and narration boxes. IGNORE floating SFX, watermarks, page numbers, scanlation credits, and signatures."
         }
         val countHint = if (expectedCharacterCount > 0) {
-            "User Character Baseline: ~$expectedCharacterCount speaking characters (excl. NARRATOR); prefer matching Known Cast above.\n"
+            "User Cast Qty: ~$expectedCharacterCount speaking voices (excl. NARRATOR) — a VOICE POOL, not a line filter: transcribe EVERY bubble; apparent extra speakers fold into the closest Known Cast member (same gender first). NEVER omit or SFX-mislabel dialogue.\n"
         } else ""
         return """
 You are MIKA's Manga Dubbing Director scanning sequential cropped panels on Page ${pageIndex + 1}.

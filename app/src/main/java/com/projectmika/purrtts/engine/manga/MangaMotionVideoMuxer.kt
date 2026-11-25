@@ -39,6 +39,7 @@ import com.projectmika.purrtts.core.manga.MangaPageEntry
 import com.projectmika.purrtts.core.manga.MangaPanelCameraEffect
 import com.projectmika.purrtts.core.manga.MangaPanelNode
 import com.projectmika.purrtts.core.manga.MangaTextBender
+import com.projectmika.purrtts.core.manga.MangaTextBender
 import com.projectmika.purrtts.core.manga.MangaReadingOrder
 import com.projectmika.purrtts.core.manga.MangaSpeechLine
 import com.projectmika.purrtts.core.manga.MangaVideoAspect
@@ -133,6 +134,7 @@ object MangaMotionVideoMuxer {
         enableAtmosphereFx: Boolean,
         destMp4File: File,
         quality: MangaVideoQuality = MangaVideoQuality.HD_720P,
+        narratorEnabled: Boolean = true,
         onProgress: (Float, String) -> Unit = { _, _ -> }
     ): RenderResult {
         if (chapter.pages.isEmpty()) {
@@ -211,13 +213,21 @@ object MangaMotionVideoMuxer {
                 cursorMs += PAN_TRANSITION_MS
 
                 val panelStartMs = cursorMs
-                val timedLines = ArrayList<TimedDialogueSpan>(panel.lines.size)
-                if (panel.lines.isEmpty()) {
+                // ✨ NARRATOR TOGGLE (v2.3.0): with MIKA narration OFF, true narrator lines are
+                // excluded from the dub timeline entirely (no speech slot, no subtitle) while
+                // panels/camera/atmosphere still see the full line list for deterministic FX.
+                val speechLines = if (narratorEnabled) {
+                    panel.lines
+                } else {
+                    panel.lines.filterNot { MangaTextBender.isNarratorName(it.speakerName) }
+                }
+                val timedLines = ArrayList<TimedDialogueSpan>(speechLines.size)
+                if (speechLines.isEmpty()) {
                     val silentHold = 750L
                     audioSpans += AudioSpan(cursorMs, silentHold, null)
                     cursorMs += silentHold
                 } else {
-                    for (line in panel.lines) {
+                    for (line in speechLines) {
                         val wav = line.renderedWavPath.takeIf { it.isNotBlank() }?.let(::File)
                             ?.takeIf { it.isFile && it.length() > 44L }
                         val speechDurMs = when {

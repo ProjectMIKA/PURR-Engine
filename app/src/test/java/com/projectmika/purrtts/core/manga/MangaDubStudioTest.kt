@@ -1739,4 +1739,166 @@ class MangaDubStudioTest {
         assertEquals("Quiet wide shot overlooking the manor.", silentSplash.storySummary)
         assertTrue(silentSplash.panels.isEmpty())
     }
+
+    @Test
+    fun `weighted cast resolver assigns unknown speakers deterministically without dropping lines`() {
+        val ojou = MangaCharacterProfile(id = "char_ojou", name = "OJOU_SAMA", gender = VoiceGender.FEMALE)
+        val sebas = MangaCharacterProfile(id = "char_sebas", name = "SEBASTIAN", gender = VoiceGender.MALE)
+        val roster = listOf(ojou, sebas)
+
+        fun pageOf(vararg lines: MangaSpeechLine): MangaPageEntry = MangaPageEntry(
+            pageIndex = 0,
+            fileName = "p.jpg",
+            localImagePath = "/tmp/p.jpg",
+            widthPx = 800,
+            heightPx = 1200,
+            panels = listOf(
+                MangaPanelNode(
+                    id = "pan_x",
+                    pageIndex = 0,
+                    panelIndex = 0,
+                    panelRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                    cameraStartRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                    cameraEndRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                    lines = lines.toList()
+                )
+            )
+        )
+
+        // 1. VLM candidate guess + gender agreement wins outright (+40 +25)
+        val candidateLine = MangaSpeechLine(
+            "l_cand", 1, "UNKNOWN", "UNKNOWN", "AHHH, THAT WAS A NICE BATH!", "Ahhh, that was a nice bath!",
+            genderHint = VoiceGender.FEMALE,
+            candidateSpeakers = listOf("SEBASTIAN", "OJOU_SAMA")
+        )
+        val (roster1, pages1) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+            roster = roster,
+            pages = listOf(pageOf(candidateLine))
+        )
+        val resolved1 = pages1[0].panels[0].lines[0]
+        assertEquals("OJOU_SAMA", resolved1.speakerName)
+        assertEquals("char_ojou", resolved1.speakerId)
+        assertFalse(resolved1.needsUserDecision)
+        assertTrue(resolved1.decisionReason.contains("Weighted cast resolver"))
+        assertEquals(1, roster1.first { it.name == "OJOU_SAMA" }.lineCount)
+
+        // 2. Tail-target evidence (+30) + gender agreement (+25) resolves candidate-less lines
+        val tailLine = MangaSpeechLine(
+            "l_tail", 2, "UNKNOWN", "UNKNOWN", "RIGHT AWAY, MY LADY.", "Right away, my lady.",
+            genderHint = VoiceGender.MALE,
+            tailTarget = "SEBASTIAN"
+        )
+        val (_, pages2) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+            roster = roster,
+            pages = listOf(pageOf(tailLine))
+        )
+        assertEquals("SEBASTIAN", pages2[0].panels[0].lines[0].speakerName)
+
+        // 3. Ambiguous tie (two same-gender candidates, no discriminating evidence) stays
+        //    UNKNOWN but the weighted best candidate now leads for Auto-Resolve.
+        val alpha = MangaCharacterProfile(id = "char_alpha", name = "ALPHA_F", gender = VoiceGender.FEMALE)
+        val beta = MangaCharacterProfile(id = "char_beta", name = "BETA_F", gender = VoiceGender.FEMALE)
+        // needsUserDecision = true mirrors the parser's ambiguous-speaker flag the engine receives
+        val tieLine = MangaSpeechLine(
+            "l_tie", 3, "UNKNOWN", "UNKNOWN", "WHO GOES THERE?", "Who goes there?",
+            genderHint = VoiceGender.FEMALE,
+            needsUserDecision = true
+        )
+        val (_, pages3) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+            roster = listOf(alpha, beta),
+            pages = listOf(pageOf(tieLine))
+        )
+        val tie = pages3[0].panels[0].lines[0]
+        assertEquals("UNKNOWN", tie.speakerName)
+        assertTrue(tie.needsUserDecision)
+        assertEquals("ALPHA_F", tie.candidateSpeakers.first())
+
+        // 4. Single-character cast: every plausible line folds into the only voice; a hard
+        //    gender mismatch stays unassigned (role-voice coverage instead of wrong gender).
+        val solo = MangaCharacterProfile(id = "char_solo", name = "HEROINE", gender = VoiceGender.FEMALE)
+        val maleLine = MangaSpeechLine("l_m", 1, "UNKNOWN", "UNKNOWN", "HMPH.", "Hmph.", genderHint = VoiceGender.MALE)
+        val femLine = MangaSpeechLine("l_f", 2, "UNKNOWN", "UNKNOWN", "HELLO?", "Hello?", genderHint = VoiceGender.FEMALE)
+        val (soloRoster, soloPages) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+            roster = listOf(solo),
+            pages = listOf(pageOf(maleLine, femLine))
+        )
+        val soloLines = soloPages[0].panels[0].lines
+        assertEquals("UNKNOWN", soloLines[0].speakerName)
+        assertEquals("HEROINE", soloLines[1].speakerName)
+        assertEquals(1, soloRoster.first().lineCount)
+
+        // 5. Narrator and already-resolved lines pass through untouched.
+        val narratorLine = MangaSpeechLine("l_n", 1, "char_narrator", "NARRATOR", "Meanwhile...", "Meanwhile...")
+        val knownLine = MangaSpeechLine("l_k", 2, "char_ojou", "OJOU_SAMA", "HELLO.", "Hello.")
+        val (_, pages5) = MangaCastAssignmentEngine.applyDeterministicCastAssignment(
+            roster = roster,
+            pages = listOf(pageOf(narratorLine, knownLine))
+        )
+        assertEquals("NARRATOR", pages5[0].panels[0].lines[0].speakerName)
+        assertEquals("OJOU_SAMA", pages5[0].panels[0].lines[1].speakerName)
+    }
+
+    @Test
+    fun `narrator strip removes only true narrator lines and keeps cast bubbles`() {
+        val pages = listOf(
+            MangaPageEntry(
+                pageIndex = 0,
+                fileName = "p.jpg",
+                localImagePath = "/tmp/p.jpg",
+                widthPx = 800,
+                heightPx = 1200,
+                panels = listOf(
+                    MangaPanelNode(
+                        id = "pan",
+                        pageIndex = 0,
+                        panelIndex = 0,
+                        panelRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        cameraStartRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        cameraEndRect = MangaNormalizedRect(0f, 0f, 1f, 1f),
+                        lines = listOf(
+                            MangaSpeechLine("l1", 1, "char_narrator", "NARRATOR", "Boxed caption.", "Boxed caption."),
+                            MangaSpeechLine("l2", 2, "c9", "NARRATION", "Second caption.", "Second caption."),
+                            MangaSpeechLine("l3", 3, "c1", "THE_WOMAN", "Real cast line.", "Real cast line."),
+                            MangaSpeechLine("l4", 4, "UNKNOWN", "UNKNOWN", "Hi.", "Hi.")
+                        )
+                    )
+                )
+            )
+        )
+        val stripped = MangaCastAssignmentEngine.stripNarratorLines(pages)
+        val ids = stripped[0].panels[0].lines.map { it.id }
+        assertEquals(listOf("l3", "l4"), ids)
+    }
+
+    @Test
+    fun `trusted speaker laugh rescue keeps known cast laughter while environmental sfx still drop`() {
+        // Ojou-sama laughter inside a KNOWN cast member's bubble is VOICED dialogue (v2.3.0)
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("OJOU_SAMA", "OH HO HO HO HO!", trustedSpeaker = true))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("TOWEL_GIRL", "HA HA HA HA", trustedSpeaker = true))
+        // Untrusted / floating laughter still drops
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "OH HO HO HO!", trustedSpeaker = false))
+        // Environmental elongated SFX drop regardless of speaker (v1.9.7 law preserved)
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "Shaaa", trustedSpeaker = true))
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "SHAAAA!", trustedSpeaker = false))
+        // 1-2 word pure-SFX tokens: untrusted drops, trusted rescued (v1.9.7)
+        assertTrue(MangaTextBender.isNonBubbleOrCreditNoise("UNKNOWN", "GULP", trustedSpeaker = false))
+        assertFalse(MangaTextBender.isNonBubbleOrCreditNoise("SEBASTIAN", "Sob...", trustedSpeaker = true))
+    }
+
+    @Test
+    fun `onset-safe character filter strips pictographs invisibles and fullwidth punctuation so chunks start spoken`() {
+        // Leading pictographs (the chat path's Emoji Vaporizer law, now manga-tuned):
+        // ♪ U+266A and → U+2192 previously led chunks straight into the neural engine.
+        assertEquals("Hello there, Sebastian!", MangaTextBender.sanitizeMangaDialogue("♪→ Hello there, Sebastian!"))
+        // Invisible / zero-width glyphs + em-dash onset
+        assertEquals("Get back here!", MangaTextBender.sanitizeMangaDialogue("\u200B\u200D—Get back here!"))
+        // Fullwidth punctuation maps to speech equivalents; CJK brackets vanish
+        assertEquals("Wait, what?!", MangaTextBender.sanitizeMangaDialogue("「Wait, what？！」"))
+        // Mid-chunk pictographs vaporize too
+        assertEquals("I am fine, honestly.", MangaTextBender.sanitizeMangaDialogue("I am fine 🙂, honestly."))
+        // Symbol-only lines dissolve to empty (skipped upstream, never dubbed)
+        assertEquals("", MangaTextBender.sanitizeMangaDialogue("\u200B\uFEFF♪→①"))
+        // Deterministic guard: ANY unenumerated non-letter still cannot start a chunk
+        assertEquals("Follow the rules.", MangaTextBender.sanitizeMangaDialogue("§ Follow the rules."))
+    }
 }

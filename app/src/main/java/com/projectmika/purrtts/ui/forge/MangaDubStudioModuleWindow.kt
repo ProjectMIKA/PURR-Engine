@@ -171,6 +171,8 @@ fun MangaDubStudioModuleWindowBody(
     val globalMangaKvCacheEnabled by viewModel.mangaKvCacheEnabled.collectAsState()
     val globalMangaMaxPanelsPerPage by viewModel.mangaMaxPanelsPerPage.collectAsState()
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
+    val globalNarratorEnabled by viewModel.mangaNarratorEnabled.collectAsState()
+    val narratorEnabled = activeProject?.narratorEnabled ?: globalNarratorEnabled
     var autoCookFullMp4 by remember(activeProject?.id) {
         mutableStateOf(activeProject?.autoCookFullMp4 ?: false)
     }
@@ -243,6 +245,7 @@ fun MangaDubStudioModuleWindowBody(
                 videoQuality = selectedVideoQuality,
                 includeNonBubbleText = includeNonBubbleText,
                 lockVoicesViaCloning = lockVoicesViaCloning,
+                narratorEnabled = narratorEnabled,
                 preferredVisionModel = selectedVisionTier,
                 expectedCharacterCount = expectedCharCount,
                 selectedOpenAiVisionEngineId = selectedOpenAiEngine?.id ?: ""
@@ -722,6 +725,17 @@ fun MangaDubStudioModuleWindowBody(
                     }
                 }
             }
+            SimplePurrToggle(
+                title = "MIKA NARRATOR (NARRATION BOXES)",
+                subtitle = "ON by default: MIKA dubs boxed narration & thought captions in her dedicated narrator voice. OFF: narration boxes stay extracted for review but are skipped in the dub (no voice, no subtitle). Character speech bubbles are never affected.",
+                checked = narratorEnabled,
+                accent = MikaColors.NeonPink,
+                icon = CyberIconType.BOOK_NARRATOR,
+                onToggle = { checked ->
+                    viewModel.setMangaNarratorEnabled(checked)
+                    activeProject?.let { viewModel.updateMangaProjectConfig(it.id, narratorEnabled = checked) }
+                }
+            )
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),

@@ -1830,6 +1830,9 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val lockMangaVoicesViaCloning: StateFlow<Boolean>
         get() = mangaDubManager.lockVoicesViaCloning
 
+    val mangaNarratorEnabled: StateFlow<Boolean>
+        get() = mangaDubManager.mangaNarratorEnabled
+
     val mangaKvCacheEnabled: StateFlow<Boolean>
         get() = mangaDubManager.mangaKvCacheEnabled
 
@@ -1915,6 +1918,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         mangaDubManager.setLockVoicesViaCloning(lock)
     }
 
+    fun setMangaNarratorEnabled(enabled: Boolean) {
+        mangaDubManager.setMangaNarratorEnabled(enabled)
+    }
+
     fun setMangaKvCacheEnabled(enabled: Boolean) {
         mangaDubManager.setMangaKvCacheEnabled(enabled)
     }
@@ -1938,6 +1945,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         videoQuality: MangaVideoQuality? = null,
         includeNonBubbleText: Boolean? = null,
         lockVoicesViaCloning: Boolean? = null,
+        narratorEnabled: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         expectedCharacterCount: Int? = null,
         selectedOpenAiVisionEngineId: String? = null
@@ -1954,6 +1962,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             videoQuality = videoQuality,
             includeNonBubbleText = includeNonBubbleText,
             lockVoicesViaCloning = lockVoicesViaCloning,
+            narratorEnabled = narratorEnabled,
             preferredVisionModel = preferredVisionModel,
             expectedCharacterCount = expectedCharacterCount,
             selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId

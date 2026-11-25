@@ -176,7 +176,11 @@ data class MangaSpeechLine(
     // ✨ UNIVERSAL CAST COVERAGE (v2.0.0): the VLM's per-line gender hint, persisted so
     // speakerless (UNKNOWN) lines can resolve a deterministic gendered Qwen role voice
     // instead of the user's default system-TTS voice.
-    val genderHint: VoiceGender = VoiceGender.ANDROGYNOUS
+    val genderHint: VoiceGender = VoiceGender.ANDROGYNOUS,
+    // ✨ WEIGHTED CAST RESOLVER (v2.3.0): the VLM's raw `tail_target` evidence (a cast name,
+    // "unclear", or "narrator_box") persisted so the deterministic assignment engine can
+    // weigh real bubble-tail pointing evidence instead of discarding it at parse time.
+    val tailTarget: String = ""
 )
 
 @Serializable
@@ -388,8 +392,49 @@ object MangaTextBender {
         "AI", "ID", "UFO", "HUD", "SSR", "RPG", "HP", "MP"
     )
 
+    // ✨ ONSET-SAFE CHARACTER FILTER (v2.3.1) ✨
+    // Neural engines (Qwen3 / LunaVox) hallucinate garbage syllables when a chunk's first
+    // tokens are non-speech glyphs. The chat PURR path has the Emoji Vaporizer + a leading
+    // garbage strip in PurrTextProcessor — the manga path had NONE: ♪ (U+266A, everywhere in
+    // manga lettering), arrows, ★☆♥, emoji, zero-width spaces, fullwidth （！and CJK brackets
+    // 「」 could all LEAD a chunk straight into the synthesizer. Pictographs & invisibles
+    // vaporize globally, fullwidth/CJK punctuation maps to ASCII speech equivalents, and a
+    // deterministic final guard forces every chunk to START on a spoken letter or digit.
+    private val MANGA_INVISIBLE_CHARS_REGEX =
+        Regex("[\u00AD\u200B-\u200F\u202A-\u202E\u2060-\u2064\u206A-\u206F\uFEFF]")
+
+    private val MANGA_PICTOGRAPH_REGEX = Regex(
+        "[\\x{1F000}-\\x{1FAFF}\\x{1FC00}-\\x{1FFFD}" +
+            "\\x{2600}-\\x{27BF}\\x{2190}-\\x{21FF}" +
+            "\\x{2400}-\\x{243F}\\x{2460}-\\x{24FF}" +
+            "\\x{2500}-\\x{257F}\\x{25A0}-\\x{25FF}" +
+            "\\x{2B00}-\\x{2BFF}\\x{FE00}-\\x{FE0F}]"
+    )
+
+    private val MANGA_CJK_QUOTE_REGEX =
+        Regex("[\\x{300C}-\\x{301F}\\x{2018}-\\x{201A}\\x{2039}\\x{203A}]")
+
+    private val MANGA_FULLWIDTH_CHAR_MAP = listOf(
+        '！' to '!', '？' to '?', '，' to ',', '。' to '.', '、' to ',',
+        '：' to ':', '；' to ';', '（' to '(', '）' to ')', '．' to '.',
+        '・' to ' ', '　' to ' '
+    )
+
+    private fun applyOnsetSafeCharFilter(text: String): String {
+        var out = text
+        // (a) invisible/zero-width control glyphs: pure hallucination bait, never speech
+        out = MANGA_INVISIBLE_CHARS_REGEX.replace(out, "")
+        // (b) pictographs & decorative symbols vaporize to a space (manga-tuned Emoji Vaporizer)
+        out = MANGA_PICTOGRAPH_REGEX.replace(out, " ")
+        // (c) fullwidth & ideographic punctuation → ASCII speech equivalents
+        for ((src, dst) in MANGA_FULLWIDTH_CHAR_MAP) out = out.replace(src, dst)
+        // (d) CJK/single quote families vanish (the ASCII double-quote pass runs later)
+        out = MANGA_CJK_QUOTE_REGEX.replace(out, "")
+        return out
+    }
+
     fun sanitizeMangaDialogue(raw: String): String {
-        var out = raw
+        var out = applyOnsetSafeCharFilter(raw)
             .replace('\r', ' ')
             .replace('\n', ' ')
             .replace(Regex("<[^>]+>"), " ")
@@ -439,6 +484,12 @@ object MangaTextBender {
 
         // Fix standalone lowercase pronoun "i" and contractions ("i'm", "i'll", "i've", "i'd")
         out = Regex("""\bi(?=('(?:m|ll|ve|d)\b|\b))""").replace(out) { "I" }
+
+        // ✨ ONSET GUARD (v2.3.1): the first character of every synthesized chunk MUST be a
+        // spoken letter or digit — any leading glyph the filters above did not enumerate is a
+        // proven neural onset-hallucination trigger. Deterministic and future-proof.
+        out = out.dropWhile { !it.isLetterOrDigit() }
+        if (out.isEmpty()) return ""
 
         // Capitalize first letter after start of string or sentence boundary (. ! ?)
         val chars = out.toCharArray()
@@ -560,12 +611,19 @@ object MangaTextBender {
             .trim()
         if (stripped.isEmpty()) return true
         val words = stripped.split(' ')
-        val isElongatedSfx = Regex("""^(?:sh+a+|f+w+o+s+h+|b+w+o+(?:\s+d+o+)?|k+r+a+k+|z+a+p+|g+r+r+|s+h+h+|oh+(?:\s+ho+){2,}|ha+(?:\s+ha+){3,})$""")
+        val isElongatedSfx = Regex("""^(?:sh+a+|f+w+o+s+h+|b+w+o+(?:\s+d+o+)?|k+r+a+k+|z+a+p+|g+r+r+|s+h+h+)$""")
+            .matches(stripped)
+        val isElongatedLaughter = Regex("""^(?:oh+(?:\s+ho+){2,}|ha+(?:\s+ha+){3,})$""")
             .matches(stripped)
         if (isElongatedSfx) return true
+        // ✨ TRUSTED-SPEAKER LAUGH RESCUE (v2.3.0): elongated laughter ("OH HO HO HO", "HA HA HA")
+        // inside a KNOWN cast member's speech bubble is real VOICED dialogue (an ojou-sama laugh
+        // is performed in a dub) — only untrusted/floating laughter still drops. Environmental
+        // elongated SFX ("Shaaa", "FWOOSH", "BWO DO") drop regardless of speaker (v1.9.7 law).
+        if (isElongatedLaughter && !trustedSpeaker) return true
         // ✨ TRUSTED-SPEAKER RESCUE (v1.9.7): a 1-2 word line from a KNOWN cast member is real
         // dialogue ("Sob...", "Hiss!", "Ring!") even when it lands in the SFX lexicon; elongated
-        // onomatopoeia ("Shaaa") and UNKNOWN speakers still drop exactly as before.
+        // environmental onomatopoeia ("Shaaa") and UNKNOWN speakers still drop exactly as before.
         if (!trustedSpeaker && words.size <= 2 && words.all { it in PURE_SFX_TOKENS }) return true
         return false
     }
@@ -1746,7 +1804,8 @@ object MangaVisionResponseParser {
         val needsUserDecision: Boolean,
         val decisionReason: String,
         val xPos: Float? = null,
-        val yPos: Float? = null
+        val yPos: Float? = null,
+        val tailTarget: String = ""
     )
 
     data class DiscoveredPanelSpec(
@@ -2217,7 +2276,8 @@ object MangaVisionResponseParser {
                 needsUserDecision = needsDecision,
                 decisionReason = reason,
                 xPos = xPos,
-                yPos = yPos
+                yPos = yPos,
+                tailTarget = tailTarget
             )
         }
         return sortLinesByReadingOrder(rawList, readingOrder)
@@ -3274,4 +3334,173 @@ object MangaCastConsolidator {
             lineCount = primary.lineCount + secondary.lineCount
         )
     }
+}
+
+/**
+ * ✨ DETERMINISTIC WEIGHTED CAST ASSIGNMENT ENGINE (v2.3.0) ✨
+ *
+ * Master's law: the user's Cast QTY caps the number of VOICES — it must NEVER act as a
+ * transcription filter. A small VLM that met an apparent (N+1)-th speaker used to resolve
+ * the contradiction ("at most N characters" vs "never merge two clearly different
+ * characters") by silently DROPPING or SFX-mislabeling the extra dialogue — whole pages
+ * went undubbed (the "page 2 skipped" scar).
+ *
+ * This engine is the deterministic post-consolidation safety net: EVERY line enters and
+ * leaves with a speaker. Known cast / NARRATOR lines pass through untouched, while UNKNOWN,
+ * placeholder-labeled, and unmatched speakers are scored against the roster with weighted
+ * evidence (VLM candidate guesses > bubble tail target > gender hint > name morphology >
+ * reading-order adjacency). A confident winner is auto-assigned; an ambiguous line KEEPS
+ * its UNKNOWN + Pre-Production decision flag with the weighted best candidate moved to the
+ * front so Auto-Resolve proposes it first. Nothing is ever dropped here — unresolved lines
+ * still dub through Universal Cast Coverage role voices instead of the system default.
+ */
+object MangaCastAssignmentEngine {
+
+    /** Minimum weighted score for an automatic assignment (ambiguous ties stay UNKNOWN). */
+    const val AUTO_ASSIGN_MIN_SCORE = 30
+
+    /** The winner must beat the runner-up by at least this margin before auto-assigning. */
+    const val AUTO_ASSIGN_MIN_MARGIN = 8
+
+    private const val WEIGHT_CANDIDATE_MATCH = 40
+    private const val WEIGHT_TAIL_TARGET_MATCH = 30
+    private const val WEIGHT_GENDER_MATCH = 25
+    private const val WEIGHT_GENDER_MISMATCH = -15
+    private const val WEIGHT_ADJACENT_CONTINUATION = 12
+    private const val WEIGHT_NAME_TOKEN_OVERLAP = 9
+    private const val MAX_NAME_TOKEN_OVERLAP_SCORE = 18
+
+    private val NAME_TOKEN_STOPWORDS = setOf("THE")
+
+    /**
+     * Rewrites every unresolved speaker in reading order. Fully deterministic: the same
+     * roster + pages always resolve to the same dub. Returns the roster with refreshed
+     * line counts and the pages with assigned lines.
+     */
+    fun applyDeterministicCastAssignment(
+        roster: List<MangaCharacterProfile>,
+        pages: List<MangaPageEntry>
+    ): Pair<List<MangaCharacterProfile>, List<MangaPageEntry>> {
+        if (roster.isEmpty()) return roster to pages
+        val castById = roster.associateBy { it.id }
+        val castByName = roster.associateBy { it.name.trim().uppercase(Locale.ROOT) }
+        val assignmentCounts = HashMap<String, Int>()
+
+        val resolvedPages = pages.map { pg ->
+            pg.copy(
+                panels = pg.panels.map { pan ->
+                    var prevResolvedId = ""
+                    val resolvedLines = pan.lines.map { ln ->
+                        if (MangaTextBender.isNarratorName(ln.speakerName)) {
+                            prevResolvedId = ""
+                            return@map ln
+                        }
+                        val known = castById[ln.speakerId]
+                            ?: castByName[ln.speakerName.trim().uppercase(Locale.ROOT)]
+                        if (known != null) {
+                            prevResolvedId = known.id
+                            assignmentCounts[known.id] = (assignmentCounts[known.id] ?: 0) + 1
+                            return@map if (ln.speakerId == known.id) {
+                                ln
+                            } else {
+                                ln.copy(speakerId = known.id, speakerName = known.name)
+                            }
+                        }
+                        val scored = roster
+                            .map { candidate -> candidate to scoreCandidate(ln, candidate, prevResolvedId) }
+                            .sortedWith(
+                                compareByDescending<Pair<MangaCharacterProfile, Int>> { it.second }
+                                    .thenBy { it.first.id }
+                            )
+                        val best = scored.first()
+                        val runnerUpScore = scored.getOrNull(1)?.second ?: Int.MIN_VALUE
+                        val minScore = if (scored.size == 1) 0 else AUTO_ASSIGN_MIN_SCORE
+                        // ✨ v2.3.1 OVERFLOW FIX (test-caught): best.second - Int.MIN_VALUE wraps
+                        // negative in Int arithmetic when the roster has a single candidate,
+                        // silently failing the margin check — compare in Long space instead.
+                        val marginOk = scored.size == 1 ||
+                            (best.second.toLong() - runnerUpScore.toLong()) >= AUTO_ASSIGN_MIN_MARGIN
+                        val confident = best.second >= minScore && marginOk
+                        if (confident) {
+                            prevResolvedId = best.first.id
+                            assignmentCounts[best.first.id] = (assignmentCounts[best.first.id] ?: 0) + 1
+                            ln.copy(
+                                speakerId = best.first.id,
+                                speakerName = best.first.name,
+                                genderHint = if (best.first.gender != VoiceGender.ANDROGYNOUS) {
+                                    best.first.gender
+                                } else {
+                                    ln.genderHint
+                                },
+                                needsUserDecision = false,
+                                decisionReason = "Weighted cast resolver: ${best.first.name} (score ${best.second})",
+                                candidateSpeakers = (listOf(best.first.name) + ln.candidateSpeakers)
+                                    .distinct()
+                                    .take(6)
+                            )
+                        } else {
+                            prevResolvedId = ""
+                            ln.copy(
+                                candidateSpeakers = (listOf(best.first.name) + ln.candidateSpeakers)
+                                    .distinct()
+                                    .take(6)
+                            )
+                        }
+                    }
+                    pan.copy(lines = resolvedLines)
+                }
+            )
+        }
+
+        val countedRoster = roster.map { ch -> ch.copy(lineCount = assignmentCounts[ch.id] ?: 0) }
+        return countedRoster to resolvedPages
+    }
+
+    private fun scoreCandidate(
+        line: MangaSpeechLine,
+        candidate: MangaCharacterProfile,
+        prevResolvedId: String
+    ): Int {
+        var score = 0
+        if (line.candidateSpeakers.any { it.trim().equals(candidate.name, ignoreCase = true) }) {
+            score += WEIGHT_CANDIDATE_MATCH
+        }
+        val tail = line.tailTarget.trim().uppercase(Locale.ROOT)
+        if (tail.isNotEmpty() && tail == candidate.name.trim().uppercase(Locale.ROOT)) {
+            score += WEIGHT_TAIL_TARGET_MATCH
+        }
+        score += when {
+            candidate.gender == VoiceGender.ANDROGYNOUS || line.genderHint == VoiceGender.ANDROGYNOUS -> 0
+            candidate.gender == line.genderHint -> WEIGHT_GENDER_MATCH
+            else -> WEIGHT_GENDER_MISMATCH
+        }
+        val sharedTokens = nameTokens(candidate.name).intersect(nameTokens(line.speakerName)).size
+        score += (sharedTokens * WEIGHT_NAME_TOKEN_OVERLAP).coerceAtMost(MAX_NAME_TOKEN_OVERLAP_SCORE)
+        if (prevResolvedId.isNotEmpty() && prevResolvedId == candidate.id) {
+            score += WEIGHT_ADJACENT_CONTINUATION
+        }
+        return score
+    }
+
+    private fun nameTokens(name: String): Set<String> =
+        name.trim().uppercase(Locale.ROOT)
+            .split(Regex("[^A-Z0-9]+"))
+            .filter { it.length >= 2 && it !in NAME_TOKEN_STOPWORDS }
+            .toSet()
+
+    /**
+     * ✨ NARRATOR TOGGLE (v2.3.0) ✨
+     * Strips ONLY true narrator labels (NARRATOR / NARRATION / blank —
+     * [MangaTextBender.isNarratorName]) from the dub timeline when the user turns MIKA
+     * narration OFF. Placeholder-named cast members (THE_WOMAN, BUNNY_BUTLER, ...) are
+     * legitimate cast and are NEVER stripped here.
+     */
+    fun stripNarratorLines(pages: List<MangaPageEntry>): List<MangaPageEntry> =
+        pages.map { pg ->
+            pg.copy(
+                panels = pg.panels.map { pan ->
+                    pan.copy(lines = pan.lines.filterNot { MangaTextBender.isNarratorName(it.speakerName) })
+                }
+            )
+        }
 }
