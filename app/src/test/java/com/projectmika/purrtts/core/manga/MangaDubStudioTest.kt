@@ -1274,7 +1274,7 @@ class MangaDubStudioTest {
         assertEquals("SIR_HOPPINGTON", parsed.canonicalCharacters[1].canonicalName)
         assertTrue(parsed.canonicalCharacters[1].mergedAliases.contains("BUNNY_BUTLER"))
         assertTrue(parsed.canonicalCharacters[1].mergedAliases.none { it.equals("NARRATOR", ignoreCase = true) })
-        assertEquals(0, parsed.lineFixes.size)
+        assertEquals(0, parsed.lineSpeakerFixes.size)
 
         // Renaming preserves identity AND the voice-clone lock (the whole point of the law split)
         val roster = listOf(
