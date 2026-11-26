@@ -1095,14 +1095,14 @@ class MangaDubStudioTest {
     }
 
     @Test
-    fun `voice casting parser compiles structured VoiceDesignBuilder prompts and clone lock defaults true`() {
+    fun `voice casting parser compiles structured VoiceDesignBuilder prompts and clone lock defaults off`() {
         val defaultProj = MangaSeriesProject(
             id = "p1",
             seriesTitle = "Test Series",
             createdAtEpochMs = 1L,
             updatedAtEpochMs = 1L
         )
-        assertTrue(defaultProj.lockVoicesViaCloning)
+        assertFalse(defaultProj.lockVoicesViaCloning)
         assertFalse(defaultProj.includeNonBubbleText)
 
         val roster = listOf(
@@ -1212,6 +1212,36 @@ class MangaDubStudioTest {
         // No usable lines -> deterministic multi-emotion fallback anchor
         assertEquals(MangaTextBender.FALLBACK_VOICE_SEED, MangaTextBender.composeVoiceSeedTranscript(emptyList()))
         assertEquals(MangaTextBender.FALLBACK_VOICE_SEED, MangaTextBender.composeVoiceSeedTranscript(listOf("", "  ")))
+    }
+
+    @Test
+    fun `standard clone seed is a studio-grade qwen reference clip`() {
+        val seed = MangaTextBender.STANDARD_CLONE_SEED_TEXT
+        // Qwen3-TTS wants 5-15s of conversational reference speech (~90-230 chars at natural pace)
+        assertTrue("seed too short/long for a reliable clone reference: ${seed.length} chars", seed.length in 120..230)
+        assertTrue("seed must end with terminal punctuation", seed.last() in setOf('.', '!', '?', '…'))
+        assertTrue("seed must be single-line", !seed.contains('\n') && !seed.contains('\r'))
+        // Prosody range: exclamation, question and a mid-clip ellipsis pause for the cloner to inherit
+        assertTrue("seed needs an exclamation for energy range", seed.contains('!'))
+        assertTrue("seed needs a question for rising intonation", seed.contains('?'))
+        assertTrue("seed needs an ellipsis pause for pacing", seed.contains("..."))
+        // No digit hazards for the cloner (numbers get mispronounced)
+        assertTrue("seed must not contain digits", seed.none { it.isDigit() })
+    }
+
+    @Test
+    fun `director notes wrap into labeled must-obey directive section`() {
+        // Blank notes = byte-identical passthrough (KV prefix untouched for non-users)
+        assertEquals("Story.", MangaTextBender.withDirectorNotes("Story.", "   "))
+        val mixed = MangaTextBender.withDirectorNotes("Story.", "The bunny dude has a deep voice")
+        assertTrue(mixed.startsWith("Story."))
+        assertTrue(mixed.contains("DIRECTOR'S NOTES"))
+        assertTrue(mixed.contains("MUST OBEY"))
+        assertTrue(mixed.contains("The bunny dude has a deep voice"))
+        // Empty base: notes alone, still labeled
+        val solo = MangaTextBender.withDirectorNotes("", "Notes only")
+        assertTrue(solo.contains("DIRECTOR'S NOTES"))
+        assertTrue(solo.contains("Notes only"))
     }
 
     @Test

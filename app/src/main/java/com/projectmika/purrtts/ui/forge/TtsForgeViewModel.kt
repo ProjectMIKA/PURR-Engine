@@ -1918,6 +1918,19 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         mangaDubManager.setLockVoicesViaCloning(lock)
     }
 
+    // ✨ v2.5.1 COOK DEFAULTS: persisted user cook settings (auto-cook ON, pause-flags OFF)
+    fun getMangaAutoCookFullMp4Default(): Boolean = mangaDubManager.getMangaAutoCookFullMp4Default()
+
+    fun setMangaAutoCookFullMp4Default(enabled: Boolean) {
+        mangaDubManager.setMangaAutoCookFullMp4Default(enabled)
+    }
+
+    fun getMangaPauseOnFlagsDefault(): Boolean = mangaDubManager.getMangaPauseOnFlagsDefault()
+
+    fun setMangaPauseOnFlagsDefault(enabled: Boolean) {
+        mangaDubManager.setMangaPauseOnFlagsDefault(enabled)
+    }
+
     fun setMangaNarratorEnabled(enabled: Boolean) {
         mangaDubManager.setMangaNarratorEnabled(enabled)
     }
@@ -1975,7 +1988,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         narratorEnabled: Boolean? = null,
         preferredVisionModel: MangaVisionModelTier? = null,
         expectedCharacterCount: Int? = null,
-        selectedOpenAiVisionEngineId: String? = null
+        selectedOpenAiVisionEngineId: String? = null,
+        directorNotes: String = ""
     ) {
         mangaDubManager.importMangaFiles(
             uris = uris,
@@ -1992,7 +2006,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             narratorEnabled = narratorEnabled,
             preferredVisionModel = preferredVisionModel,
             expectedCharacterCount = expectedCharacterCount,
-            selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId
+            selectedOpenAiVisionEngineId = selectedOpenAiVisionEngineId,
+            directorNotes = directorNotes
         ) { msg ->
             showToast(msg)
         }

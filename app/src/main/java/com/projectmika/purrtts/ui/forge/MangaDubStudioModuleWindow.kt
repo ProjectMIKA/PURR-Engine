@@ -28,6 +28,9 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -144,6 +147,11 @@ fun MangaDubStudioModuleWindowBody(
         ?: activeProject?.chapters?.lastOrNull()
 
     var seriesTitleInput by remember { mutableStateOf("") }
+    // ✨ v2.5.1 DIRECTOR'S NOTES: optional free-text LLM direction (voice/casting steering);
+    // per-project, pre-fills from the active project so re-imports edit rather than wipe.
+    var directorNotesInput by remember(activeProject?.id) {
+        mutableStateOf(activeProject?.directorNotes ?: "")
+    }
     var importIntoCurrentSeries by remember(activeProject?.id) { mutableStateOf(false) }
     val globalReadingOrder by viewModel.selectedMangaReadingOrder.collectAsState()
     val selectedReadingOrder = activeProject?.readingOrder ?: globalReadingOrder
@@ -175,11 +183,13 @@ fun MangaDubStudioModuleWindowBody(
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     val globalNarratorEnabled by viewModel.mangaNarratorEnabled.collectAsState()
     val narratorEnabled = activeProject?.narratorEnabled ?: globalNarratorEnabled
+    // ✨ v2.5.1 COOK DEFAULTS: auto-cook/pause-flags persist as user settings (prefs) and
+    // seed new projects; per-project values still win when a project is active.
     var autoCookFullMp4 by remember(activeProject?.id) {
-        mutableStateOf(activeProject?.autoCookFullMp4 ?: false)
+        mutableStateOf(activeProject?.autoCookFullMp4 ?: viewModel.getMangaAutoCookFullMp4Default())
     }
     var pauseOnFlags by remember(activeProject?.id) {
-        mutableStateOf(activeProject?.pauseOnFlaggedDecisions ?: true)
+        mutableStateOf(activeProject?.pauseOnFlaggedDecisions ?: viewModel.getMangaPauseOnFlagsDefault())
     }
     var preProdTab by remember { mutableStateOf(MangaPreProdTab.CAST) }
     var selectedPageIdx by remember(activeChapter?.id) { mutableIntStateOf(0) }
@@ -243,6 +253,7 @@ fun MangaDubStudioModuleWindowBody(
                 uris = uris,
                 targetProjectId = targetId,
                 seriesTitleInput = seriesTitleInput,
+                directorNotes = directorNotesInput,
                 readingOrder = selectedReadingOrder,
                 autoProduceMp4 = autoCookFullMp4,
                 pauseOnFlags = pauseOnFlags,
@@ -596,6 +607,23 @@ fun MangaDubStudioModuleWindowBody(
             modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
         )
         Spacer(modifier = Modifier.height(6.dp))
+        OutlinedTextField(
+            value = directorNotesInput,
+            onValueChange = { directorNotesInput = it },
+            label = { Text("DIRECTOR'S NOTES (OPTIONAL LLM DIRECTION)", fontSize = 8.5.sp, fontFamily = FontFamily.Monospace) },
+            placeholder = { Text("e.g. the bunny dude has a deep, gravelly voice", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = MikaColors.DimText) },
+            minLines = 1,
+            maxLines = 3,
+            textStyle = TextStyle(color = MikaColors.CyanWhite, fontFamily = FontFamily.Monospace, fontSize = 11.sp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MikaColors.NeonPink,
+                unfocusedBorderColor = MikaColors.NeonPink.copy(alpha = 0.35f),
+                focusedContainerColor = MikaColors.DeepWellBg,
+                unfocusedContainerColor = MikaColors.DeepWellBg
+            ),
+            modifier = Modifier.fillMaxWidth().bringIntoViewWithIme()
+        )
+        Spacer(modifier = Modifier.height(6.dp))
 
         FlowRow(
             horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -607,6 +635,7 @@ fun MangaDubStudioModuleWindowBody(
                 activeColor = MikaColors.TerminalGreen,
                 onClick = {
                     autoCookFullMp4 = !autoCookFullMp4
+                    viewModel.setMangaAutoCookFullMp4Default(autoCookFullMp4)
                     activeProject?.let { viewModel.updateMangaProjectConfig(it.id, autoCookFullMp4 = autoCookFullMp4) }
                 }
             )
@@ -616,6 +645,7 @@ fun MangaDubStudioModuleWindowBody(
                 activeColor = MikaColors.MikaAmber,
                 onClick = {
                     pauseOnFlags = !pauseOnFlags
+                    viewModel.setMangaPauseOnFlagsDefault(pauseOnFlags)
                     activeProject?.let { viewModel.updateMangaProjectConfig(it.id, pauseOnFlaggedDecisions = pauseOnFlags) }
                 }
             )
@@ -645,18 +675,59 @@ fun MangaDubStudioModuleWindowBody(
                     fontSize = 8.sp,
                     modifier = Modifier.width(62.dp)
                 )
-                FlowRow(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                    verticalArrangement = Arrangement.spacedBy(5.dp)
-                ) {
-                    MangaReadingOrder.entries.forEach { order ->
-                        MikaTagPill(
-                            label = order.shortLabel,
-                            selected = selectedReadingOrder == order,
-                            activeColor = MikaColors.NeonPink,
-                            onClick = { viewModel.selectMangaReadingOrder(order) }
+                // ✨ v2.5.1 READING DROPDOWN: the three reading orders collapsed into one slick
+                // dropdown instead of a pill row that ate horizontal space.
+                var readingMenuExpanded by remember { mutableStateOf(false) }
+                Box(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(MikaColors.DeepWellBg)
+                            .border(1.dp, MikaColors.NeonPink.copy(alpha = 0.75f), RoundedCornerShape(6.dp))
+                            .clickable { readingMenuExpanded = true }
+                            .padding(horizontal = 10.dp, vertical = 7.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = selectedReadingOrder.shortLabel,
+                            color = MikaColors.NeonPink,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Black,
+                            fontSize = 8.5.sp
                         )
+                        Text(
+                            text = "▼",
+                            color = MikaColors.DimText,
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 7.sp
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = readingMenuExpanded,
+                        onDismissRequest = { readingMenuExpanded = false },
+                        containerColor = MikaColors.DeepWellBg,
+                        border = BorderStroke(1.dp, MikaColors.NeonPink.copy(alpha = 0.5f)),
+                        shape = RoundedCornerShape(8.dp)
+                    ) {
+                        MangaReadingOrder.entries.forEach { order ->
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = if (order == selectedReadingOrder) "▸ ${order.shortLabel}" else "   ${order.shortLabel}",
+                                        color = if (order == selectedReadingOrder) MikaColors.NeonPink
+                                        else MikaColors.CyanWhite.copy(alpha = 0.85f),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 9.sp
+                                    )
+                                },
+                                onClick = {
+                                    viewModel.selectMangaReadingOrder(order)
+                                    readingMenuExpanded = false
+                                }
+                            )
+                        }
                     }
                 }
             }
@@ -891,7 +962,7 @@ fun MangaDubStudioModuleWindowBody(
         ) {
             SimplePurrToggle(
                 title = "LOCK CHARACTER VOICES VIA QWEN CLONE (ANTI-DRIFT)",
-                subtitle = "ON by default: renders 1 VoiceDesign studio seed per character & locks every line through Qwen/Pocket clone so pitch stays consistent.",
+                subtitle = "OFF by default: skips the Qwen/Pocket clone lock — faster & glitch-free. Cloning tightens pitch consistency but can introduce audio glitches on manga with lots of different text boxes. Best for simple casts.",
                 checked = lockVoicesViaCloning,
                 accent = MikaColors.TerminalGreen,
                 icon = CyberIconType.DNA_CLONE,
@@ -1250,7 +1321,7 @@ fun MangaDubStudioModuleWindowBody(
                 )
                 SimplePurrToggle(
                     title = "LOCK CHARACTER VOICES VIA QWEN CLONE (ANTI-DRIFT)",
-                    subtitle = "ON by default: uses 1 VoiceDesign seed clip -> Qwen Base / Pocket clone to eliminate vocal drift.",
+                    subtitle = "OFF by default: skips the Qwen/Pocket clone lock (can introduce audio glitches on text-box-heavy manga). Turn ON to lock every line through the clone for maximum pitch consistency.",
                     checked = activeProject.lockVoicesViaCloning,
                     accent = MikaColors.TerminalGreen,
                     icon = CyberIconType.DNA_CLONE,

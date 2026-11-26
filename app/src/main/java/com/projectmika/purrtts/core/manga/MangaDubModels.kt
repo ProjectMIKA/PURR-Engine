@@ -356,7 +356,10 @@ data class MangaSeriesProject(
     val videoQuality: MangaVideoQuality = MangaVideoQuality.HD_720P,
     val enableAtmosphereFx: Boolean = true,
     val includeNonBubbleText: Boolean = false,
-    val lockVoicesViaCloning: Boolean = true,
+    // ✨ v2.5.1 CLONE-LOCK DEFAULT OFF: the Qwen clone lock tightens pitch consistency but
+    // can introduce audio glitches on manga with many different text boxes. Cloning is now
+    // opt-in for quality-hunting users with simple casts.
+    val lockVoicesViaCloning: Boolean = false,
     // ✨ NARRATOR TOGGLE (v2.3.0): MIKA dubs boxed narration captions by default (ON). OFF =
     // narration boxes stay extracted & reviewable but are skipped in the dub. Default true so
     // pre-v2.3.0 project.json files decode unchanged.
@@ -367,10 +370,17 @@ data class MangaSeriesProject(
     val expectedCharacterCount: Int = 0,
     // Non-blank selects a saved OpenAI-compatible Vision API engine from TOOL-12 when active
     val selectedOpenAiVisionEngineId: String = "",
-    // Default false so users can inspect/edit Pre-Cook story, character count, genders & voices before rendering .MP4
-    val autoCookFullMp4: Boolean = false,
-    val pauseOnFlaggedDecisions: Boolean = true,
+    // ✨ v2.5.1 COOK DEFAULTS: auto-cook the full .MP4 (ON) and no pause on flagged decisions
+    // (OFF) — one-tap dubs with no mid-render interruptions. Pre-cook inspection stays
+    // available via the pause toggle; old project.json files carrying explicit values
+    // decode unchanged.
+    val autoCookFullMp4: Boolean = true,
+    val pauseOnFlaggedDecisions: Boolean = false,
     val storyContextSummary: String = "",
+    // ✨ v2.5.1 DIRECTOR'S NOTES: free-text user direction injected into the LLM prompt sites
+    // (page-scan cast discovery, cast consolidation, VoiceDesign crafting) so the user can steer
+    // casting & voice before cooking — e.g. "the bunny dude has a deep, gravelly voice".
+    val directorNotes: String = "",
     val characters: List<MangaCharacterProfile> = emptyList(),
     val chapters: List<MangaChapterEntry> = emptyList()
 )
@@ -743,6 +753,23 @@ object MangaTextBender {
         "I thought you'd never make it back. Heh... come closer, then, and let me hear you say it properly."
 
     /**
+     * ✨ STANDARD CLONE SEED (v2.5.1) ✨
+     * Qwen3-TTS voice cloning wants 5-15s of natural conversational reference speech with an
+     * exact transcript (full ICL mode). Dub lines make poor reference clips: short, register-
+     * whiplashy, and sometimes truncated mid-sentence, which made reference quality a lottery.
+     * This fixed seed is engineered for the cloner: exclamation -> ellipsis pause -> statements
+     * -> request + tag question, phonetically rich, zero proper nouns/numbers, terminal
+     * punctuation at the end. Every character clones from the SAME seed text — timbre identity
+     * comes from each character's VoiceDesign instruct prompt (the documented
+     * VoiceDesign->Clone pipeline), so the seed stays fair and reference quality consistently
+     * good. FALLBACK_VOICE_SEED remains the retry anchor if the standard seed fails to render.
+     */
+    const val STANDARD_CLONE_SEED_TEXT =
+        "Hey! I wasn't expecting you today of all days... but I'm really glad you came. " +
+            "There's so much I want to show you, so don't fall behind, alright? " +
+            "We should have plenty of time if we leave now."
+
+    /**
      * ✨ EXPRESSIVE CLONE-SEED COMPOSER (v1.9.7) ✨
      * The Qwen3 0.6B Base Cloner anchors timbre AND prosody to the reference clip, so v1.9.6's
      * single neutral anchor sentence flattened every dubbed line into the same calm delivery.
@@ -768,6 +795,20 @@ object MangaTextBender {
         if (picked.isEmpty()) return FALLBACK_VOICE_SEED
         val joined = picked.joinToString(" ")
         return if (joined.lastOrNull() in setOf('.', '!', '?', '…')) joined else "$joined."
+    }
+
+    /**
+     * ✨ DIRECTOR'S NOTES INJECTOR (v2.5.1) ✨
+     * Appends the user's free-text direction to an LLM story/cast context block as a labeled
+     * MUST-OBEY directive section. Blank notes pass the summary through BYTE-IDENTICAL so the
+     * KV-cached prompt prefix never changes for users who leave the box empty.
+     */
+    fun withDirectorNotes(storySummary: String, directorNotes: String): String {
+        val notes = directorNotes.trim()
+        if (notes.isEmpty()) return storySummary
+        val label = "DIRECTOR'S NOTES (USER DIRECTIVES - MUST OBEY):"
+        val base = storySummary.trim()
+        return if (base.isEmpty()) "$label\n$notes" else "$base\n\n$label\n$notes"
     }
 
     /**

@@ -125,7 +125,7 @@ class MangaDubStudioManager(
     val includeNonBubbleText: StateFlow<Boolean> = _includeNonBubbleText.asStateFlow()
 
     private val _lockVoicesViaCloning = MutableStateFlow(
-        prefs.getBoolean("lock_voices_via_cloning", true)
+        prefs.getBoolean("lock_voices_via_cloning", false)
     )
     val lockVoicesViaCloning: StateFlow<Boolean> = _lockVoicesViaCloning.asStateFlow()
 
@@ -250,6 +250,21 @@ class MangaDubStudioManager(
         _activeProjectId.value?.let { pid ->
             updateProjectConfig(pid, lockVoicesViaCloning = lock)
         }
+    }
+
+    // ✨ v2.5.1 COOK DEFAULTS: AUTO-COOK FULL .MP4 (default ON) and PAUSE IF FLAGGED (default
+    // OFF) now persist as user settings — previously they were remember{}-only and reset on
+    // every app launch. New projects seed from these; per-project values still override.
+    fun getMangaAutoCookFullMp4Default(): Boolean = prefs.getBoolean("manga_auto_cook_full_mp4", true)
+
+    fun setMangaAutoCookFullMp4Default(enabled: Boolean) {
+        prefs.edit().putBoolean("manga_auto_cook_full_mp4", enabled).apply()
+    }
+
+    fun getMangaPauseOnFlagsDefault(): Boolean = prefs.getBoolean("manga_pause_on_flags", false)
+
+    fun setMangaPauseOnFlagsDefault(enabled: Boolean) {
+        prefs.edit().putBoolean("manga_pause_on_flags", enabled).apply()
     }
 
     fun setMangaNarratorEnabled(enabled: Boolean) {
@@ -555,6 +570,7 @@ class MangaDubStudioManager(
         readingOrder: MangaReadingOrder,
         autoProduceMp4: Boolean = false,
         pauseOnFlags: Boolean = true,
+        directorNotes: String = "",
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
@@ -584,6 +600,7 @@ class MangaDubStudioManager(
                     readingOrder = readingOrder,
                     autoProduceMp4 = autoProduceMp4,
                     pauseOnFlags = pauseOnFlags,
+                    directorNotes = directorNotes,
                     videoAspect = videoAspect,
                     burnInSubtitles = burnInSubtitles,
                     videoQuality = videoQuality,
@@ -604,6 +621,7 @@ class MangaDubStudioManager(
                     readingOrder = readingOrder,
                     autoProduceMp4 = autoProduceMp4,
                     pauseOnFlags = pauseOnFlags,
+                    directorNotes = directorNotes,
                     videoAspect = videoAspect,
                     burnInSubtitles = burnInSubtitles,
                     videoQuality = videoQuality,
@@ -635,6 +653,7 @@ class MangaDubStudioManager(
         readingOrder: MangaReadingOrder,
         autoProduceMp4: Boolean = false,
         pauseOnFlags: Boolean = true,
+        directorNotes: String = "",
         videoAspect: MangaVideoAspect? = null,
         burnInSubtitles: Boolean? = null,
         videoQuality: MangaVideoQuality? = null,
@@ -754,7 +773,8 @@ class MangaDubStudioManager(
                     expectedCharacterCount = effectiveCharCount,
                     selectedOpenAiVisionEngineId = effectiveOpenAiId,
                     autoCookFullMp4 = autoProduceMp4,
-                    pauseOnFlaggedDecisions = pauseOnFlags
+                    pauseOnFlaggedDecisions = pauseOnFlags,
+                    directorNotes = directorNotes
                 ) ?: MangaSeriesProject(
                     id = projectId,
                     seriesTitle = seriesTitleInput.trim().ifEmpty { chapterTitle },
@@ -771,7 +791,8 @@ class MangaDubStudioManager(
                     expectedCharacterCount = effectiveCharCount,
                     selectedOpenAiVisionEngineId = effectiveOpenAiId,
                     autoCookFullMp4 = autoProduceMp4,
-                    pauseOnFlaggedDecisions = pauseOnFlags
+                    pauseOnFlaggedDecisions = pauseOnFlags,
+                    directorNotes = directorNotes
                 )
 
                 reportTelemetry(
@@ -1259,7 +1280,7 @@ class MangaDubStudioManager(
                         powerUserVisionUrl = proj.powerUserVisionUrl,
                         preferredVisionModel = proj.preferredVisionModel,
                         customModelPaths = modelPaths,
-                        storySummary = proj.storyContextSummary,
+                        storySummary = MangaTextBender.withDirectorNotes(proj.storyContextSummary, proj.directorNotes),
                         pageSynopsis = pageSynopses[pageIdx].orEmpty(),
                         includeNonBubbleText = effectiveIncludeNonBubble,
                         kvCacheEnabled = _mangaKvCacheEnabled.value,
@@ -1389,7 +1410,7 @@ class MangaDubStudioManager(
                 val preMerged = recomputeCharacterLineCounts(roster, ch.copy(pages = updatedPages), proj.chapters.filter { it.id != chapterId })
                 val consolidation = visionEngine.consolidateChapterStoryAndCast(
                     seriesTitle = proj.seriesTitle,
-                    currentStorySummary = proj.storyContextSummary,
+                    currentStorySummary = MangaTextBender.withDirectorNotes(proj.storyContextSummary, proj.directorNotes),
                     roster = preMerged,
                     pages = updatedPages,
                     expectedCharacterCount = expectedCharCount,
@@ -1452,7 +1473,7 @@ class MangaDubStudioManager(
                 )
                 val designedRoster = visionEngine.craftQwenVoiceDesignsForRoster(
                     seriesTitle = proj.seriesTitle,
-                    storySummary = proj.storyContextSummary,
+                    storySummary = MangaTextBender.withDirectorNotes(proj.storyContextSummary, proj.directorNotes),
                     characters = roster,
                     sampleLinesBySpeaker = sampleLinesBySpeaker,
                     preferredVisionModel = proj.preferredVisionModel,
@@ -2597,17 +2618,13 @@ class MangaDubStudioManager(
                 availableNow.any { it.id == ch.autoCloneVoiceId }
             if (existingCloneValid) continue
 
-            // ✨ EXPRESSIVE SEED LAW (v1.9.7): anchor the clone on the character's OWN transcribed
-            // lines (register & excitement variety) instead of one generic neutral sentence — the
-            // 0.6B cloner inherits the seed's prosody, so a flat seed meant flat dubbed voices.
-            var seedTranscript = MangaTextBender.composeVoiceSeedTranscript(
-                chapter.pages.asSequence()
-                    .flatMap { it.panels.asSequence() }
-                    .flatMap { it.lines.asSequence() }
-                    .filter { line -> line.speakerName.trim().equals(ch.name.trim(), ignoreCase = true) }
-                    .mapNotNull { line -> line.sanitizedText.ifBlank { line.rawText }.trim().takeIf(String::isNotEmpty) }
-                    .toList()
-            )
+            // ✨ STANDARD SEED LAW (v2.5.1): anchor the clone on a fixed, engineered reference
+            // transcript (STANDARD_CLONE_SEED_TEXT) instead of the character's own dub lines —
+            // dub lines are short, register-whiplashy and sometimes truncated mid-sentence, so
+            // reference-clip quality was a lottery. The 0.6B cloner inherits the seed's prosody;
+            // the seed's exclamation/ellipsis/statement/question variety spans a full prosody
+            // range, and each character's VoiceDesign instruct prompt keeps timbres distinct.
+            var seedTranscript = MangaTextBender.STANDARD_CLONE_SEED_TEXT
 
             reportTelemetry(
                 stage = MangaPipelineStage.VOICE_FORGE,
