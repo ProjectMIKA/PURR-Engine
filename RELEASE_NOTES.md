@@ -1,3 +1,30 @@
+# 🌌 PURR-TTS v2.5.0 // The Unstoppable Dub
+
+### ✨ What's New since v2.4.3
+
+Hour-long dubs are no longer all-or-nothing: **PAUSE and RESUME** the cook at safe boundaries, and when anything fails, **RETRY resumes from the last voiced line** instead of re-synthesizing the whole chapter. Plus named diagnostics for every mux-level failure — no more bare "IllegalArgumentException". ⏸️♻️🔍
+
+* **⏸️ Pause & Resume (`MangaDubStudioManager`)**:
+  * New gold `⏸ PAUSE` / `▶ RESUME` control in the cooking banner. Pause is cooperative: the job suspends at the next safe boundary (page scan, per-line synthesis, rescue batch, verification gate, or right before the irreversible mux) — never mid-sample.
+  * The banner shows a paused hint line and the telemetry keeps elapsed time ticking; nothing is lost.
+* **♻️ Resume-from-Checkpoint Retry (`MangaDubStudioManager`)**:
+  * Every voiced line is already on disk as `lineId.wav` — a RETRY now preloads those wavs as a checkpoint and **re-voices only the missing lines**. A failure after an hour of processing resumes in minutes.
+  * Applies to: error recovery, process death, and post-cancel resumes alike. New `🔁 RETRY DUB (RESUMES FROM CHECKPOINT)` pill appears whenever a chapter sits in FAILED state.
+* **🔍 Named Mux Diagnostics (`MangaMotionVideoMuxer`)**:
+  * Every `MediaMuxer.writeSampleData` (video, audio & AAC tracks) is wrapped with context — failures now report `Mux: video sample #842 failed (pts=…, 412kB): <cause>` instead of a bare class name.
+  * A corrupt/truncated per-line wav (disk pressure on long dubs) degrades to a silence span with a log entry instead of killing the whole mux.
+* **⚠️ Disruption Confirmations (`MangaDubStudioModuleWindow`)**:
+  * STOP now asks first: "CANCEL THE RUNNING DUB?" — explaining that every voiced line is checkpointed and RETRY resumes from there (CANCEL DUB / KEEP GOING).
+  * Deleting a project or chapter while a dub is running warns that the deletion also cancels the cook.
+* **🗑️ Housekeeping**: the DEMO button retired from the import panel (the sample generator remains available internally).
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.5.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `49`).
+2. **`PURR-TTS_V2.5.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.4.3 // The Fallback Protocol
 
 ### ✨ What's New since v2.4.2
