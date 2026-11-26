@@ -15,6 +15,7 @@ import com.projectmika.purrtts.core.manga.MangaAudioAudit
 import com.projectmika.purrtts.core.manga.MangaCastAssignmentEngine
 import com.projectmika.purrtts.core.manga.MangaCastConsolidator
 import com.projectmika.purrtts.core.manga.MangaCbzExtractorUtils
+import com.projectmika.purrtts.core.manga.MangaDubDiag
 import com.projectmika.purrtts.core.manga.MangaChapterEntry
 import com.projectmika.purrtts.core.manga.MangaChapterStatus
 import com.projectmika.purrtts.core.manga.MangaCharacterProfile
@@ -878,8 +879,10 @@ class MangaDubStudioManager(
                 throw ce
             } catch (err: Exception) {
                 // ✨ v2.4.1: messageless exceptions (IndexOOB/NPE from platform codecs) now name
-                // their class instead of the useless "Unknown extract error"
-                val msg = err.message ?: err.javaClass.simpleName
+                // their class instead of the useless "Unknown extract error". ✨ v2.5.2: the
+                // reporter now walks the cause chain and appends top frames, so a null-message
+                // platform IAE pinpoints its throwing call site.
+                val msg = MangaDubDiag.describeThrowable(err)
                 finishTelemetry("❌ COOK ERROR: $msg")
                 onComplete("Manga dub failed: $msg")
             } finally {
@@ -2020,9 +2023,12 @@ class MangaDubStudioManager(
             } catch (ce: CancellationException) {
                 throw ce
             } catch (err: Exception) {
-                mutateChapterStatus(projectId, chapterId, MangaChapterStatus.FAILED, err.message)
-                finishTelemetry("❌ PRODUCTION ERROR: ${err.message}")
-                onComplete("Production failed: ${err.message ?: err.javaClass.simpleName}")
+                // ✨ v2.5.2: messageless IAEs now report class + cause chain + top frames
+                // (was "PRODUCTION ERROR: null"), and the chapter status stores the same text.
+                val described = MangaDubDiag.describeThrowable(err)
+                mutateChapterStatus(projectId, chapterId, MangaChapterStatus.FAILED, described)
+                finishTelemetry("❌ PRODUCTION ERROR: $described")
+                onComplete("Production failed: $described")
             } finally {
                 backendRouter.markIdle()
                 _isBusy.value = false

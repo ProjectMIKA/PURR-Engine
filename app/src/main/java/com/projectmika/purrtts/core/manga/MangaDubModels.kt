@@ -811,6 +811,7 @@ object MangaTextBender {
         return if (base.isEmpty()) "$label\n$notes" else "$base\n\n$label\n$notes"
     }
 
+
     /**
      * ✨ QWEN3 INSTRUCT TOKEN-DIET COMPACTOR (v2.2.2) ✨
      * Keeps VoiceDesign `instruct` descriptions clean, single-line, and compact so LunaVox Talker
@@ -3722,5 +3723,67 @@ object MangaAudioAudit {
         val candidateDeviation = Math.abs(Math.log(candidate.durationRatio.coerceAtLeast(0.01f).toDouble()))
         val incumbentDeviation = Math.abs(Math.log(incumbent.durationRatio.coerceAtLeast(0.01f).toDouble()))
         return candidateDeviation < incumbentDeviation
+    }
+}
+
+/**
+ * ✨ DIAGNOSTICS HELPERS (v2.5.2) ✨
+ * Pure JVM utilities for naming messageless platform exceptions and sizing extractor buffers.
+ * The Manga Dub mux path historically dies on messageless IllegalArgumentExceptions thrown by
+ * MediaExtractor/MediaMuxer — the v2.5.2 scar: MediaExtractor.readSampleData throws a
+ * messageless IAE when a sample exceeds the read buffer capacity, which long dubs hit on
+ * large H.264 keyframes (1s GOP of dense 720p manga pages) while 1-2 page dubs sailed
+ * through. The muxer (Android-only) delegates its buffer math and error wording here so the
+ * laws stay node:test-verifiable.
+ */
+object MangaDubDiag {
+
+    /** Legacy floor: the 512KB direct buffer that shipped before the v2.5.2 read law. */
+    const val EXTRACTION_BUFFER_FLOOR_BYTES = 512 * 1024
+
+    /** Headroom added on top of a track-reported KEY_MAX_INPUT_SIZE. */
+    const val EXTRACTION_BUFFER_HEADROOM_BYTES = 64 * 1024
+
+    /**
+     * Initial capacity for a MediaExtractor.readSampleData buffer: the track-reported
+     * KEY_MAX_INPUT_SIZE plus headroom, never below the legacy floor. Invalid/missing track
+     * values (<= 0) fall back to the floor.
+     */
+    fun extractionBufferCapacity(trackMaxInputSize: Int): Int {
+        val trackBased = if (trackMaxInputSize > 0) trackMaxInputSize + EXTRACTION_BUFFER_HEADROOM_BYTES else 0
+        return maxOf(EXTRACTION_BUFFER_FLOOR_BYTES, trackBased)
+    }
+
+    /**
+     * Grow law for a sample known (via MediaExtractor.sampleSize, peekable WITHOUT advancing
+     * the cursor) not to fit: double the current capacity, but never less than the sample plus
+     * a small safety margin. Returns the existing capacity when the sample already fits.
+     */
+    fun growCapacity(currentCapacity: Int, sampleSize: Int): Int {
+        if (sampleSize <= currentCapacity) return currentCapacity
+        return maxOf(currentCapacity * 2, sampleSize + 1024)
+    }
+
+    /**
+     * Names a throwable even when its message is null/blank — class name, explicit
+     * "(no message)" fallback, the full cause chain, and the top [maxFrames] stack frames so
+     * an on-device error report pinpoints the throwing call site.
+     */
+    fun describeThrowable(t: Throwable, maxFrames: Int = 2): String {
+        val chain = ArrayList<String>()
+        var cur: Throwable? = t
+        var depth = 0
+        while (cur != null && depth < 3) {
+            val name = cur.javaClass.simpleName.ifBlank { cur.javaClass.name }
+            val msg = cur.message?.takeIf { it.isNotBlank() } ?: "(no message)"
+            chain.add("$name: $msg")
+            cur = cur.cause?.takeIf { it !== cur }
+            depth++
+        }
+        val base = chain.joinToString(" caused by ")
+        val frames = t.stackTrace.take(maxFrames).joinToString(" <- ") { f ->
+            f.className.substringAfterLast('.') + "." + f.methodName + ":" + f.lineNumber
+        }
+        return if (frames.isBlank()) base else "$base @ $frames"
     }
 }

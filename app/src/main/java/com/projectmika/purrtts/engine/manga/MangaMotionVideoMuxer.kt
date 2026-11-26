@@ -33,6 +33,7 @@ import android.view.Surface
 import com.projectmika.purrtts.core.manga.MangaAtmospherePreset
 import com.projectmika.purrtts.core.manga.MangaChapterEntry
 import com.projectmika.purrtts.core.manga.MangaDeterministicEffectsEngine
+import com.projectmika.purrtts.core.manga.MangaDubDiag
 import com.projectmika.purrtts.core.manga.MangaEmotionalPacer
 import com.projectmika.purrtts.core.manga.MangaNormalizedRect
 import com.projectmika.purrtts.core.manga.MangaPageEntry
@@ -403,8 +404,12 @@ object MangaMotionVideoMuxer {
                     }
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         if (!muxerStarted) {
-                            trackIdx = muxer.addTrack(encoder.outputFormat)
-                            muxer.start()
+                            trackIdx = runCatching { muxer.addTrack(encoder.outputFormat) }.getOrElse { err ->
+                                throw IllegalStateException("Video mux: addTrack failed: ${MangaDubDiag.describeThrowable(err)}", err)
+                            }
+                            runCatching { muxer.start() }.getOrElse { err ->
+                                throw IllegalStateException("Video mux: start failed: ${MangaDubDiag.describeThrowable(err)}", err)
+                            }
                             muxerStarted = true
                         }
                     }
@@ -420,7 +425,12 @@ object MangaMotionVideoMuxer {
                             encodedSampleCount++
                             outBuf.position(bufferInfo.offset)
                             outBuf.limit(bufferInfo.offset + bufferInfo.size)
-                            muxer.writeSampleData(trackIdx, outBuf, bufferInfo)
+                            runCatching { muxer.writeSampleData(trackIdx, outBuf, bufferInfo) }.getOrElse { writeErr ->
+                                throw IllegalStateException(
+                                    "Video mux: sample #" + encodedSampleCount + " failed (pts=" + bufferInfo.presentationTimeUs + "us, " + bufferInfo.size + "B): " + MangaDubDiag.describeThrowable(writeErr),
+                                    writeErr
+                                )
+                            }
                         }
                         val eos = (bufferInfo.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                         encoder.releaseOutputBuffer(outIdx, false)
@@ -436,6 +446,7 @@ object MangaMotionVideoMuxer {
 
         val paint = RenderPaints(width, height)
 
+        var videoStopFailure: Throwable? = null
         try {
             val maxTimeMs = (totalDurationMs - 1L).coerceAtLeast(0L)
             for (frameIdx in 0 until totalFrames) {
@@ -511,10 +522,23 @@ object MangaMotionVideoMuxer {
             runCatching { inputSurface.release() }
             runCatching { encoder.stop() }
             runCatching { encoder.release() }
-            runCatching {
-                if (muxerStarted) muxer.stop()
-                muxer.release()
+            // ✨ v2.5.2 VIDEO FINALIZATION LAW (parity with the m4a path): a swallowed
+            // muxer.stop() failure leaves the video intermediate without a moov box, which
+            // surfaces downstream as a messageless platform exception at the remux step.
+            if (muxerStarted) {
+                try {
+                    muxer.stop()
+                } catch (t: Throwable) {
+                    videoStopFailure = t
+                }
             }
+            runCatching { muxer.release() }
+        }
+        if (videoStopFailure != null) {
+            throw IllegalStateException(
+                "Video mux: MediaMuxer.stop failed (video intermediate has no moov box): " + MangaDubDiag.describeThrowable(videoStopFailure!!),
+                videoStopFailure
+            )
         }
     }
 
@@ -877,8 +901,12 @@ object MangaMotionVideoMuxer {
                     }
                     outIdx == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                         if (!muxerStarted) {
-                            trackIdx = muxer.addTrack(encoder.outputFormat)
-                            muxer.start()
+                            trackIdx = runCatching { muxer.addTrack(encoder.outputFormat) }.getOrElse { err ->
+                                throw IllegalStateException("Video mux: addTrack failed: ${MangaDubDiag.describeThrowable(err)}", err)
+                            }
+                            runCatching { muxer.start() }.getOrElse { err ->
+                                throw IllegalStateException("Video mux: start failed: ${MangaDubDiag.describeThrowable(err)}", err)
+                            }
                             muxerStarted = true
                         }
                     }
@@ -995,14 +1023,22 @@ object MangaMotionVideoMuxer {
     ) {
         val vExt = MediaExtractor()
         val aExt = MediaExtractor()
-        val muxer = MediaMuxer(destMp4File.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        val muxer = runCatching {
+            MediaMuxer(destMp4File.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+        }.getOrElse { err ->
+            throw IllegalStateException("Mux step: MediaMuxer constructor failed for ${destMp4File.name}: ${MangaDubDiag.describeThrowable(err)}", err)
+        }
 
         try {
             // ✨ v2.4.1: setDataSource moved INSIDE the try (leaked extractors on throw) and the
             // intermediates are validated — a broken/trackless file fails with a REAL message
             // instead of a messageless IndexOutOfBounds (the "Unknown extract error" scar).
-            vExt.setDataSource(videoFile.absolutePath)
-            aExt.setDataSource(audioFile.absolutePath)
+            runCatching { vExt.setDataSource(videoFile.absolutePath) }.getOrElse { err ->
+                throw IllegalStateException("Mux step: setDataSource failed on video intermediate ${videoFile.name} (${videoFile.length()}B): ${MangaDubDiag.describeThrowable(err)}", err)
+            }
+            runCatching { aExt.setDataSource(audioFile.absolutePath) }.getOrElse { err ->
+                throw IllegalStateException("Mux step: setDataSource failed on audio intermediate ${audioFile.name} (${audioFile.length()}B): ${MangaDubDiag.describeThrowable(err)}", err)
+            }
             if (vExt.trackCount < 1) {
                 throw IllegalStateException("Mux step: video intermediate has 0 tracks (${videoFile.name})")
             }
@@ -1011,16 +1047,39 @@ object MangaMotionVideoMuxer {
             }
             vExt.selectTrack(0)
             aExt.selectTrack(0)
-            val vTrack = muxer.addTrack(vExt.getTrackFormat(0))
-            val aTrack = muxer.addTrack(aExt.getTrackFormat(0))
-            muxer.start()
+            val vFormat = runCatching { vExt.getTrackFormat(0) }.getOrElse { err ->
+                throw IllegalStateException("Mux step: getTrackFormat(video) failed on ${videoFile.name}: ${MangaDubDiag.describeThrowable(err)}", err)
+            }
+            val aFormat = runCatching { aExt.getTrackFormat(0) }.getOrElse { err ->
+                throw IllegalStateException("Mux step: getTrackFormat(audio) failed on ${audioFile.name}: ${MangaDubDiag.describeThrowable(err)}", err)
+            }
+            val vTrack = runCatching { muxer.addTrack(vFormat) }.getOrElse { err ->
+                throw IllegalStateException("Mux step: addTrack(video) failed: ${MangaDubDiag.describeThrowable(err)}", err)
+            }
+            val aTrack = runCatching { muxer.addTrack(aFormat) }.getOrElse { err ->
+                throw IllegalStateException("Mux step: addTrack(audio) failed: ${MangaDubDiag.describeThrowable(err)}", err)
+            }
+            runCatching { muxer.start() }.getOrElse { err ->
+                throw IllegalStateException("Mux step: MediaMuxer.start failed: ${MangaDubDiag.describeThrowable(err)}", err)
+            }
 
-            val buf = ByteBuffer.allocateDirect(512 * 1024)
+            // ✨ v2.5.2 READ-BUFFER LAW: MediaExtractor.readSampleData throws a messageless
+            // IllegalArgumentException when a sample exceeds the buffer capacity — long dubs
+            // hit this on large H.264 keyframes (1s GOP over dense 720p manga pages) while
+            // 1-2 page dubs never exceed the legacy 512KB floor. Seed from the track-reported
+            // KEY_MAX_INPUT_SIZE and grow on-demand via sampleSize (peekable WITHOUT advancing
+            // the cursor, so the guard can never disturb extraction).
+            val vMaxInput = runCatching { vFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE) }.getOrDefault(0)
+            var buf = ByteBuffer.allocateDirect(MangaDubDiag.extractionBufferCapacity(vMaxInput))
             val info = MediaCodec.BufferInfo()
             var videoSampleIdx = 0L
             var audioSampleIdx = 0L
 
             while (true) {
+                val pendingSampleSize = vExt.sampleSize
+                if (pendingSampleSize > buf.capacity()) {
+                    buf = ByteBuffer.allocateDirect(MangaDubDiag.growCapacity(buf.capacity(), pendingSampleSize))
+                }
                 buf.clear()
                 val size = vExt.readSampleData(buf, 0)
                 if (size < 0) break
@@ -1044,6 +1103,10 @@ object MangaMotionVideoMuxer {
             }
 
             while (true) {
+                val pendingSampleSize = aExt.sampleSize
+                if (pendingSampleSize > buf.capacity()) {
+                    buf = ByteBuffer.allocateDirect(MangaDubDiag.growCapacity(buf.capacity(), pendingSampleSize))
+                }
                 buf.clear()
                 val size = aExt.readSampleData(buf, 0)
                 if (size < 0) break

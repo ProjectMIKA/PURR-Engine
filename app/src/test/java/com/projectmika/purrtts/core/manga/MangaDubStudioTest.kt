@@ -1245,6 +1245,44 @@ class MangaDubStudioTest {
     }
 
     @Test
+    fun `describeThrowable names messageless platform exceptions with cause and frames`() {
+        // The v2.5.2 scar: MediaExtractor.readSampleData IAE carries a null message
+        val bare = IllegalArgumentException()
+        val described = MangaDubDiag.describeThrowable(bare)
+        assertTrue("got: $described", described.startsWith("IllegalArgumentException: (no message)"))
+        assertTrue("frames missing: $described", described.contains(" @ "))
+
+        // Cause chain is walked and named
+        val root = RuntimeException()
+        val outer = IllegalStateException("outer wrapper", root)
+        val chain = MangaDubDiag.describeThrowable(outer)
+        assertTrue("outer missing: $chain", chain.contains("IllegalStateException: outer"))
+        assertTrue("root missing: $chain", chain.contains("caused by RuntimeException: (no message)"))
+
+        // Real messages are preserved verbatim
+        val withMsg = IllegalArgumentException("buffer is too small")
+        assertTrue(MangaDubDiag.describeThrowable(withMsg).contains("buffer is too small"))
+    }
+
+    @Test
+    fun `extraction buffer laws cover the oversized-keyframe read scar`() {
+        // Missing/invalid track value falls back to the legacy 512KB floor
+        assertEquals(MangaDubDiag.EXTRACTION_BUFFER_FLOOR_BYTES, MangaDubDiag.extractionBufferCapacity(0))
+        assertEquals(MangaDubDiag.EXTRACTION_BUFFER_FLOOR_BYTES, MangaDubDiag.extractionBufferCapacity(-3))
+        // Track max input below the floor stays at the floor
+        assertEquals(MangaDubDiag.EXTRACTION_BUFFER_FLOOR_BYTES, MangaDubDiag.extractionBufferCapacity(200_000))
+        // A big codec-reported max input gets headroom on top
+        assertEquals(600_000 + MangaDubDiag.EXTRACTION_BUFFER_HEADROOM_BYTES, MangaDubDiag.extractionBufferCapacity(600_000))
+
+        // Grow law: fitting samples keep the buffer (no churn)
+        assertEquals(524_288, MangaDubDiag.growCapacity(524_288, 100))
+        // An oversized keyframe doubles first...
+        assertEquals(1_048_576, MangaDubDiag.growCapacity(524_288, 600_000))
+        // ...but a giant sample is always honored over the doubling
+        assertEquals(5_001_024, MangaDubDiag.growCapacity(100, 5_000_000))
+    }
+
+    @Test
     fun `placeholder parrot responses are dropped instead of dubbed`() {
         // Field scar (v1.9.7): Gemma E2B answered the repair-prompt schema EXAMPLE verbatim —
         // "Dialogue text" in a male voice got dubbed as a real line. The parrot guard drops it

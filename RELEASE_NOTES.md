@@ -1,3 +1,28 @@
+# 🌌 PURR-TTS v2.5.2 // The Unskippable Read
+
+### ✨ What's New since v2.5.1
+
+The long-dub mux crash is **root-caused and dead**. `MediaExtractor.readSampleData` throws a messageless `IllegalArgumentException` when a sample exceeds the read buffer — and with a 1-second keyframe interval over dense 720p manga pages, long dubs reliably produce keyframes larger than the fixed 512KB read buffer. Short dubs never exceeded it, which is why 1–2 page manga worked while 13-page manga died at `MUXING .MP4 VIDEO & AUDIO...` with a bare `null`/class-name error. 📏🔎🛡️
+
+* **📏 Dynamic Read Buffer (`MangaMotionVideoMuxer.muxVideoAndAudio`)**:
+  * The extractor buffer is now seeded from the video track's reported `KEY_MAX_INPUT_SIZE` (+64KB headroom, 512KB floor) via the new pure law `MangaDubDiag.extractionBufferCapacity`.
+  * Grow-on-demand before **every** read (video & audio loops): the upcoming sample size is peeked via `MediaExtractor.sampleSize` — which does NOT advance the cursor — and the buffer grows to fit before `readSampleData` is ever called. An oversized keyframe can no longer detonate the mux.
+* **🏷️ Named Sub-Steps (messageless-IAE law, everywhere)**:
+  * Every `MediaMuxer`/`MediaExtractor` call in the remux — constructor, `setDataSource` ×2, `getTrackFormat` ×2, `addTrack` ×2, `start` — now rethrows as a named `IllegalStateException` with the file, size and sub-step (`Mux step: setDataSource failed on video intermediate ...`), not a bare class name.
+  * The **direct video path** (`encodeVideoTrack`) gets the same treatment: `addTrack`, `start` and `writeSampleData` failures now report `Video mux: sample #N failed (pts=…, …B): <cause>` — the v2.5.0 diagnostics law finally covers both paths.
+* **🛑 Video Finalization Law (v2.4.1 parity)**:
+  * `encodeVideoTrack`'s `muxer.stop()` failure is now CAPTURED and rethrown with a name (`Video mux: MediaMuxer.stop failed (video intermediate has no moov box)`) instead of being silently swallowed into a broken intermediate that limped to the remux step.
+* **🔎 Null-Message Killer (`MangaDubDiag.describeThrowable`)**:
+  * `PRODUCTION ERROR` / `COOK ERROR` now report class + cause chain + top stack frames — `PRODUCTION ERROR: null` is retired. The chapter status stores the same described text instead of a literal `null`.
+* **✅ Tests**: 55/55 pure-JVM tests green — new `describeThrowable` (null-message IAE + cause chain) and extraction-buffer law tests.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.5.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `51`).
+2. **`PURR-TTS_V2.5.2.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.5.1 // The Director's Cut
 
 ### ✨ What's New since v2.5.0
