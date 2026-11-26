@@ -1,3 +1,32 @@
+# 🌌 PURR-TTS v2.5.1 // The Director's Cut
+
+### ✨ What's New since v2.5.0
+
+The studio now remembers your settings, hands you a cleaner import panel, and takes direction like a proper auteur: an optional **DIRECTOR'S NOTES** box steers casting & voices before the cook, a fixed studio-grade **clone seed** keeps cloned voices consistently good, and the defaults are tuned for one-tap dubs. 🎬🎚️💾
+
+* **🎬 Director's Notes (`MangaSeriesProject.directorNotes` / `MangaTextBender.withDirectorNotes`)**:
+  * New optional input right below SERIES_TITLE — e.g. "the bunny dude has a deep, gravelly voice". Your notes ride into **all three LLM touchpoints**: page-scan cast discovery, cast consolidation, and the VoiceDesign forge (which now also feeds the standard clone seed).
+  * Injected as a labeled `DIRECTOR'S NOTES (USER DIRECTIVES - MUST OBEY):` block; blank notes pass the prompt through **byte-identical** — KV prefix cache untouched for users who leave it empty.
+  * Pre-fills from the active project, so re-imports edit notes instead of wiping them.
+* **🔊 Standard Clone Seed (`MangaTextBender.STANDARD_CLONE_SEED_TEXT`)**:
+  * Clone-lock now anchors on a fixed, engineered 192-character reference transcript (~11–13s, full prosody span: exclamation, ellipsis pause, statements, tag question) instead of the character's own dub lines. Qwen3-TTS cloning wants 5–15s of natural conversational reference + an exact transcript — dub lines were a lottery.
+  * Every character clones from the same fair seed; timbre identity still comes from each character's VoiceDesign instruct prompt. `FALLBACK_VOICE_SEED` remains the retry anchor.
+* **🧬 Clone Lock Default OFF (`lockVoicesViaCloning`)**:
+  * The Qwen/Pocket clone lock tightens pitch consistency but can introduce audio glitches on manga with lots of different text boxes — it's now **opt-in**. Turn it ON for simple casts and maximum pitch consistency.
+  * Explicit user choices persist; never-touched prefs pick up the new default automatically.
+* **💾 Persisted Cook Settings (`MangaDubStudioManager` / `MangaDubStudioModuleWindow`)**:
+  * AUTO-COOK FULL .MP4 and PAUSE IF FLAGGED now survive app restarts (prefs `manga_auto_cook_full_mp4` / `manga_pause_on_flags`) — they previously reset on every launch. Per-project values still override.
+* **⚡ New Cook Defaults**: **AUTO-COOK FULL .MP4: ON** and **PAUSE IF FLAGGED: OFF** out of the box — one-tap dubs with no mid-render interruptions (Pre-Cook inspection stays available via the toggle).
+* **🎚️ Reading Dropdown (`MangaDubStudioModuleWindow`)**: the three reading orders collapsed from a pill row into one terminal-styled dropdown (Manga / Comic / Webtoon) — same neon skin, less horizontal space.
+* **✅ Tests**: 53/53 pure-JVM tests green — new `standard clone seed is a studio-grade qwen reference clip` + `director notes wrap into labeled must-obey directive section`; the clone-lock default test flipped to the new law.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.5.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `50`).
+2. **`PURR-TTS_V2.5.1.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.5.0 // The Unstoppable Dub
 
 ### ✨ What's New since v2.4.3
