@@ -2072,6 +2072,30 @@ class MangaDubStudioManager(
         )
 
         val qwenCustomInstalled = repository.state.value.modelStates[Qwen3TtsEngine.SPEC_CUSTOM_06B]?.state == DownloadState.INSTALLED
+        // ✨ v2.5.0 RESUME-FROM-CHECKPOINT: wavs from a previous failed/partial run of this
+        // chapter are reused verbatim — a retry after an hour-long failure resumes in seconds
+        // instead of re-synthesizing everything. The dub plan below skips checkpointed lines.
+        val renderedById = HashMap<String, MangaSpeechLine>(allLinesCount)
+        for (page in chapter.pages) {
+            for (panel in page.panels) {
+                for (line in panel.lines) {
+                    if (renderedById.containsKey(line.id)) continue
+                    val ckWav = File(audioDir, "${line.id}.wav")
+                    if (!ckWav.isFile || ckWav.length() <= 44L) continue
+                    val ckSlice = runCatching { M4bAudiobookMuxer.readWavSlice(ckWav) }.getOrNull()
+                        ?: runCatching { ckWav.delete() }.let { null }
+                    if (ckSlice == null || ckSlice.dataSizeBytes <= 0L) continue
+                    renderedById[line.id] = line.copy(
+                        renderedWavPath = ckWav.absolutePath,
+                        durationMs = ((ckSlice.dataSizeBytes * 1000L) / (2L * sampleRate.toLong())).coerceAtLeast(350L)
+                    )
+                }
+            }
+        }
+        val checkpointCount = renderedById.size
+        if (checkpointCount > 0) {
+            appendLog("♻️ RESUME: $checkpointCount already-voiced line(s) restored from checkpoint — synthesis skips them")
+        }
         val dubPlan = ArrayList<DubJob>(allLinesCount)
         val passThroughLines = HashMap<String, MangaSpeechLine>()
         for (page in chapter.pages) {
@@ -2158,30 +2182,6 @@ class MangaDubStudioManager(
         val totalDubJobs = dubPlan.size.coerceAtLeast(1)
         var linesDone = 0
         val rescueJobs = ArrayList<DubJob>()
-        val renderedById = HashMap<String, MangaSpeechLine>(allLinesCount)
-        // ✨ v2.5.0 RESUME-FROM-CHECKPOINT: wavs from a previous failed/partial run of this
-        // chapter are reused verbatim — a retry after an hour-long failure resumes in seconds
-        // instead of re-synthesizing everything. The dub plan below skips checkpointed lines.
-        for (page in chapter.pages) {
-            for (panel in page.panels) {
-                for (line in panel.lines) {
-                    if (renderedById.containsKey(line.id)) continue
-                    val ckWav = File(audioDir, "${line.id}.wav")
-                    if (!ckWav.isFile || ckWav.length() <= 44L) continue
-                    val ckSlice = runCatching { M4bAudiobookMuxer.readWavSlice(ckWav) }.getOrNull()
-                        ?: runCatching { ckWav.delete() }.let { null }
-                    if (ckSlice == null || ckSlice.dataSizeBytes <= 0L) continue
-                    renderedById[line.id] = line.copy(
-                        renderedWavPath = ckWav.absolutePath,
-                        durationMs = ((ckSlice.dataSizeBytes * 1000L) / (2L * sampleRate.toLong())).coerceAtLeast(350L)
-                    )
-                }
-            }
-        }
-        val checkpointCount = renderedById.size
-        if (checkpointCount > 0) {
-            appendLog("♻️ RESUME: $checkpointCount already-voiced line(s) restored from checkpoint — synthesis skips them")
-        }
 
         suspend fun synthesizeForJob(speakText: String, jobProfile: PurrProfile, isNarratorLine: Boolean) =
             backendRouter.synthesizeSpeechChunk(

@@ -170,6 +170,7 @@ fun MangaDubStudioModuleWindowBody(
     val globalLockVoicesViaCloning by viewModel.lockMangaVoicesViaCloning.collectAsState()
     val globalMangaKvCacheEnabled by viewModel.mangaKvCacheEnabled.collectAsState()
     val mangaLocalFallback by viewModel.mangaLocalFallbackEnabled.collectAsState()
+    val isMangaPaused by viewModel.isMangaPaused.collectAsState()
     val globalMangaMaxPanelsPerPage by viewModel.mangaMaxPanelsPerPage.collectAsState()
     val lockVoicesViaCloning = activeProject?.lockVoicesViaCloning ?: globalLockVoicesViaCloning
     val globalNarratorEnabled by viewModel.mangaNarratorEnabled.collectAsState()
