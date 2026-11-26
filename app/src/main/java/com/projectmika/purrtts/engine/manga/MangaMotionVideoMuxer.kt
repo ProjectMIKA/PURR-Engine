@@ -1078,7 +1078,7 @@ object MangaMotionVideoMuxer {
             while (true) {
                 val pendingSampleSize = vExt.sampleSize
                 if (pendingSampleSize > buf.capacity()) {
-                    buf = ByteBuffer.allocateDirect(MangaDubDiag.growCapacity(buf.capacity(), pendingSampleSize))
+                    buf = ByteBuffer.allocateDirect(MangaDubDiag.growCapacity(buf.capacity(), pendingSampleSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()))
                 }
                 buf.clear()
                 val size = vExt.readSampleData(buf, 0)
@@ -1105,7 +1105,7 @@ object MangaMotionVideoMuxer {
             while (true) {
                 val pendingSampleSize = aExt.sampleSize
                 if (pendingSampleSize > buf.capacity()) {
-                    buf = ByteBuffer.allocateDirect(MangaDubDiag.growCapacity(buf.capacity(), pendingSampleSize))
+                    buf = ByteBuffer.allocateDirect(MangaDubDiag.growCapacity(buf.capacity(), pendingSampleSize.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()))
                 }
                 buf.clear()
                 val size = aExt.readSampleData(buf, 0)
