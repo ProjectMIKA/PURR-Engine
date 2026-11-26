@@ -789,25 +789,33 @@ object MangaMotionVideoMuxer {
             val targetBytes = (((span.durationMs * sampleRate) / 1000L).toInt() * 2).coerceAtLeast(2)
             val wav = span.wavFile
             if (wav != null && wav.isFile && wav.length() > 44L) {
-                val slice = M4bAudiobookMuxer.readWavSlice(wav)
-                val filePcm = FileInputStream(wav).use { fis ->
-                    var skipped = 0L
-                    while (skipped < slice.dataOffset) {
-                        val s = fis.skip(slice.dataOffset - skipped)
-                        if (s <= 0) break
-                        skipped += s
+                // ✨ v2.5.0: a corrupt/truncated wav (disk pressure on hour-long dubs) degrades
+                // to a silence span instead of killing the whole mux with a messageless IAE.
+                val sliceAndPcm = runCatching {
+                    val slice = M4bAudiobookMuxer.readWavSlice(wav)
+                    val filePcm = FileInputStream(wav).use { fis ->
+                        var skipped = 0L
+                        while (skipped < slice.dataOffset) {
+                            val s = fis.skip(slice.dataOffset - skipped)
+                            if (s <= 0) break
+                            skipped += s
+                        }
+                        val buf = ByteArray(slice.dataSizeBytes.toInt().coerceAtLeast(0))
+                        var off = 0
+                        while (off < buf.size) {
+                            val n = fis.read(buf, off, buf.size - off)
+                            if (n <= 0) break
+                            off += n
+                        }
+                        buf
                     }
-                    val buf = ByteArray(slice.dataSizeBytes.toInt().coerceAtLeast(0))
-                    var off = 0
-                    while (off < buf.size) {
-                        val n = fis.read(buf, off, buf.size - off)
-                        if (n <= 0) break
-                        off += n
-                    }
-                    buf
+                    slice to filePcm
+                }.getOrNull()
+                val filePcm = sliceAndPcm?.second
+                val writeLen = filePcm?.size?.coerceAtMost(targetBytes) ?: 0
+                if (filePcm != null && writeLen > 0) {
+                    out.write(filePcm, 0, writeLen)
                 }
-                val writeLen = minOf(filePcm.size, targetBytes)
-                out.write(filePcm, 0, writeLen)
                 var rem = targetBytes - writeLen
                 while (rem > 0) {
                     val step = minOf(rem, silenceChunk.size)
@@ -848,6 +856,7 @@ object MangaMotionVideoMuxer {
         val muxer = MediaMuxer(tempAudioFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
         var trackIdx = -1
         var muxerStarted = false
+        var aacSampleIdx = 0L
         var eosSeen = false
         var finalized = false
         var stopFailure: Throwable? = null
@@ -881,7 +890,15 @@ object MangaMotionVideoMuxer {
                         ) {
                             outBuf.position(info.offset)
                             outBuf.limit(info.offset + info.size)
-                            muxer.writeSampleData(trackIdx, outBuf, info)
+                            // ✨ v2.5.0 named diagnostics: messageless platform IAEs now say
+                            // exactly which sample failed and why
+                            runCatching { muxer.writeSampleData(trackIdx, outBuf, info) }.onFailure { writeErr ->
+                                throw IllegalStateException(
+                                    "AAC mux: sample #${aacSampleIdx} failed (pts=${info.presentationTimeUs}us, ${info.size}B): ${writeErr.message ?: writeErr.javaClass.simpleName}",
+                                    writeErr
+                                )
+                            }
+                            aacSampleIdx++
                         }
                         val done = (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0
                         encoder.releaseOutputBuffer(outIdx, false)
@@ -1000,6 +1017,8 @@ object MangaMotionVideoMuxer {
 
             val buf = ByteBuffer.allocateDirect(512 * 1024)
             val info = MediaCodec.BufferInfo()
+            var videoSampleIdx = 0L
+            var audioSampleIdx = 0L
 
             while (true) {
                 buf.clear()
@@ -1013,7 +1032,14 @@ object MangaMotionVideoMuxer {
                 } else {
                     0
                 }
-                muxer.writeSampleData(vTrack, buf, info)
+                // ✨ v2.5.0 named diagnostics for messageless platform IAEs
+                runCatching { muxer.writeSampleData(vTrack, buf, info) }.onFailure { writeErr ->
+                    throw IllegalStateException(
+                        "Mux: video sample #${videoSampleIdx} failed (pts=${info.presentationTimeUs}us, ${info.size}B): ${writeErr.message ?: writeErr.javaClass.simpleName}",
+                        writeErr
+                    )
+                }
+                videoSampleIdx++
                 vExt.advance()
             }
 
@@ -1025,7 +1051,13 @@ object MangaMotionVideoMuxer {
                 info.size = size
                 info.presentationTimeUs = aExt.sampleTime
                 info.flags = 0
-                muxer.writeSampleData(aTrack, buf, info)
+                runCatching { muxer.writeSampleData(aTrack, buf, info) }.onFailure { writeErr ->
+                    throw IllegalStateException(
+                        "Mux: audio sample #${audioSampleIdx} failed (pts=${info.presentationTimeUs}us, ${info.size}B): ${writeErr.message ?: writeErr.javaClass.simpleName}",
+                        writeErr
+                    )
+                }
+                audioSampleIdx++
                 aExt.advance()
             }
         } finally {

@@ -50,6 +50,7 @@ import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceGender
 import com.projectmika.purrtts.engine.TtsBackendRouter
+import com.projectmika.purrtts.engine.audiobook.M4bAudiobookMuxer
 import com.projectmika.purrtts.engine.qwen3.Qwen3TtsEngine
 import java.io.File
 import java.io.FileOutputStream
@@ -496,6 +497,40 @@ class MangaDubStudioManager(
         _activeProjectId.value = null
     }
 
+    // ✨ v2.5.0 PAUSE/RESUME: cooperative pause — the job suspends at the next safe boundary
+    // (page loop / line loop / verification / pre-mux) instead of dying. Wavs already voiced
+    // stay on disk as the checkpoint, so even a process kill resumes via RETRY.
+    private val _mangaPaused = MutableStateFlow(false)
+    val isMangaPaused: StateFlow<Boolean> = _mangaPaused.asStateFlow()
+
+    fun pauseMangaDub() {
+        if (!_isBusy.value || _mangaPaused.value) return
+        _mangaPaused.value = true
+        appendLog("⏸️ DUB PAUSED — synthesis halts at the next safe boundary; press RESUME to continue")
+    }
+
+    fun resumeMangaDub() {
+        if (!_mangaPaused.value) return
+        _mangaPaused.value = false
+        appendLog("▶️ DUB RESUMED — continuing from the checkpoint")
+    }
+
+    private suspend fun awaitMangaResume() {
+        var announced = false
+        while (_mangaPaused.value) {
+            if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+            if (!announced) {
+                reportTelemetry(
+                    stage = _telemetry.value.stage,
+                    detail = "⏸️ PAUSED — press RESUME to continue (nothing is lost)",
+                    addLog = false
+                )
+                announced = true
+            }
+            delay(600)
+        }
+    }
+
     fun cancelActiveWork() {
         telemetryTickerJob?.cancel()
         telemetryTickerJob = null
@@ -506,6 +541,7 @@ class MangaDubStudioManager(
             runCatching { backendRouter.evictAllVram() }
         }
         _isBusy.value = false
+        _mangaPaused.value = false
         _overallProgress.value = 0f
         finishTelemetry("CANCELLED // VRAM CLEARED")
     }
@@ -1203,6 +1239,8 @@ class MangaDubStudioManager(
                     itemTotal = ch.pages.size,
                     addLog = true
                 )
+                awaitMangaResume()
+
                 // ✨ v2.4.2 MUTABILITY LAW: this bitmap is drawn on downstream (annotated-page
                 // render) — BitmapFactory decodes IMMUTABLE by default, which crashes Canvas.
                 val bmp = BitmapFactory.decodeFile(
@@ -2040,6 +2078,9 @@ class MangaDubStudioManager(
             for (panel in page.panels) {
                 for (line in panel.lines) {
                     if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+                    // ✨ v2.5.0 checkpoint skip + pause boundary
+                    if (renderedById.containsKey(line.id)) continue
+                    awaitMangaResume()
                     val textToSpeak = line.sanitizedText.ifBlank { line.rawText }.trim()
                     if (textToSpeak.isEmpty()) {
                         passThroughLines[line.id] = line
@@ -2118,6 +2159,29 @@ class MangaDubStudioManager(
         var linesDone = 0
         val rescueJobs = ArrayList<DubJob>()
         val renderedById = HashMap<String, MangaSpeechLine>(allLinesCount)
+        // ✨ v2.5.0 RESUME-FROM-CHECKPOINT: wavs from a previous failed/partial run of this
+        // chapter are reused verbatim — a retry after an hour-long failure resumes in seconds
+        // instead of re-synthesizing everything. The dub plan below skips checkpointed lines.
+        for (page in chapter.pages) {
+            for (panel in page.panels) {
+                for (line in panel.lines) {
+                    if (renderedById.containsKey(line.id)) continue
+                    val ckWav = File(audioDir, "${line.id}.wav")
+                    if (!ckWav.isFile || ckWav.length() <= 44L) continue
+                    val ckSlice = runCatching { M4bAudiobookMuxer.readWavSlice(ckWav) }.getOrNull()
+                        ?: runCatching { ckWav.delete() }.let { null }
+                    if (ckSlice == null || ckSlice.dataSizeBytes <= 0L) continue
+                    renderedById[line.id] = line.copy(
+                        renderedWavPath = ckWav.absolutePath,
+                        durationMs = ((ckSlice.dataSizeBytes * 1000L) / (2L * sampleRate.toLong())).coerceAtLeast(350L)
+                    )
+                }
+            }
+        }
+        val checkpointCount = renderedById.size
+        if (checkpointCount > 0) {
+            appendLog("♻️ RESUME: $checkpointCount already-voiced line(s) restored from checkpoint — synthesis skips them")
+        }
 
         suspend fun synthesizeForJob(speakText: String, jobProfile: PurrProfile, isNarratorLine: Boolean) =
             backendRouter.synthesizeSpeechChunk(
@@ -2247,6 +2311,7 @@ class MangaDubStudioManager(
             )
             for (job in rescueJobs) {
                 if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+                awaitMangaResume()
                 val rescueVoiceId = resolveQwenCustomFallbackVoiceId(job.rescueGender, job.line.speakerName)
                 val rescueProfile = job.profile.copy(
                     primaryVoiceId = rescueVoiceId,
@@ -2301,6 +2366,7 @@ class MangaDubStudioManager(
             )
             for ((idx, job) in missingJobs.withIndex()) {
                 if (!kotlinx.coroutines.currentCoroutineContext().isActive) throw CancellationException("Cancelled")
+                awaitMangaResume()
                 val lineIsNarrator = MangaTextBender.isNarratorName(job.line.speakerName)
                 val laneProfile = verificationProfile ?: job.profile
                 var outcome = synthesizeForJob(job.text, laneProfile, lineIsNarrator)
@@ -2368,6 +2434,9 @@ class MangaDubStudioManager(
             }
             renderedPages += page.copy(panels = renderedPanels)
         }
+
+        // ✨ v2.5.0 last pause boundary before the irreversible mux stage
+        awaitMangaResume()
 
         // Release all TTS VRAM before hardware H.264/AAC encoding
         reportTelemetry(

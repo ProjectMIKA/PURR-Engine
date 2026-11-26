@@ -1933,6 +1933,24 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         mangaDubManager.setMangaLocalFallbackEnabled(enabled)
     }
 
+    // ✨ v2.5.0 PAUSE/RESUME/RETRY
+    val isMangaPaused: StateFlow<Boolean>
+        get() = mangaDubManager.isMangaPaused
+
+    fun pauseMangaDub() {
+        mangaDubManager.pauseMangaDub()
+    }
+
+    fun resumeMangaDub() {
+        mangaDubManager.resumeMangaDub()
+    }
+
+    fun retryFailedMangaChapter(projectId: String, chapterId: String) {
+        mangaDubManager.produceDubbedChapterMp4(projectId, chapterId) { msg ->
+            showToast(msg)
+        }
+    }
+
     val mangaMaxPanelsPerPage: StateFlow<Int>
         get() = mangaDubManager.mangaMaxPanelsPerPage
 

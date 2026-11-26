@@ -188,6 +188,8 @@ fun MangaDubStudioModuleWindowBody(
 
     var pendingDeleteProject by remember { mutableStateOf<MangaSeriesProject?>(null) }
     var pendingDeleteChapter by remember { mutableStateOf<Pair<String, MangaChapterEntry>?>(null) }
+    // ✨ v2.5.0 disruption confirmation: cancelling a running dub asks first
+    var pendingCancelConfirm by remember { mutableStateOf(false) }
     var pendingClearAllProjects by remember { mutableStateOf(false) }
 
     val visionSpecsByTier = remember(viewModel.modelCatalog) {
@@ -257,6 +259,40 @@ fun MangaDubStudioModuleWindowBody(
     }
 
 
+    // ✨ v2.5.0 disruption confirmation: cancelling a running dub asks first
+    if (pendingCancelConfirm) {
+        AlertDialog(
+            onDismissRequest = { pendingCancelConfirm = false },
+            containerColor = MikaColors.PanelBg,
+            titleContentColor = MikaColors.DangerRed,
+            textContentColor = MikaColors.PrimaryText,
+            title = {
+                Text("CANCEL THE RUNNING DUB?", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black, fontSize = 13.sp)
+            },
+            text = {
+                Text(
+                    text = "Every line voiced so far is kept on disk as a checkpoint — the RETRY DUB button resumes from there instead of re-synthesizing everything.",
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingCancelConfirm = false
+                    viewModel.cancelMangaWork()
+                }) {
+                    Text("CANCEL DUB", color = MikaColors.DangerRed, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Black)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingCancelConfirm = false }) {
+                    Text("KEEP GOING", color = MikaColors.NeonCyan, fontFamily = FontFamily.Monospace)
+                }
+            }
+        )
+    }
+
     // Confirmation dialogs for Project / Chapter deletion & Clear All
     pendingDeleteProject?.let { targetProj ->
         AlertDialog(
@@ -269,7 +305,8 @@ fun MangaDubStudioModuleWindowBody(
             },
             text = {
                 Text(
-                    text = "Permanently remove \"${targetProj.seriesTitle}\" (${targetProj.chapters.size} chapter(s), voice caches & exported videos)?",
+                    text = "Permanently remove \"${targetProj.seriesTitle}\" (${targetProj.chapters.size} chapter(s), voice caches & exported videos)?" +
+                        if (isBusy) "\n\n⚠️ A dub is currently RUNNING — deleting now also CANCELS it." else "",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 10.5.sp
                 )
@@ -301,7 +338,8 @@ fun MangaDubStudioModuleWindowBody(
             },
             text = {
                 Text(
-                    text = "Remove chapter \"${targetCh.title}\" and its extracted pages/audio?",
+                    text = "Remove chapter \"${targetCh.title}\" and its extracted pages/audio?" +
+                        if (isBusy) "\n\n⚠️ A dub is currently RUNNING — deleting now also CANCELS it." else "",
                     fontFamily = FontFamily.Monospace,
                     fontSize = 10.5.sp
                 )
@@ -927,28 +965,6 @@ fun MangaDubStudioModuleWindowBody(
                 )
             }
 
-            Row(
-                modifier = Modifier
-                    .weight(0.75f)
-                    .height(46.dp)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(MikaColors.SsrGold.copy(alpha = 0.16f))
-                    .border(1.5.dp, MikaColors.SsrGold, RoundedCornerShape(6.dp))
-                    .clickable(enabled = !isBusy) { viewModel.createSampleMangaProject() }
-                    .padding(horizontal = 4.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MikaCyberIcon(type = CyberIconType.BOLT_ACCEL, tint = MikaColors.SsrGold, size = 12.dp)
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    text = "DEMO",
-                    color = MikaColors.SsrGold,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 9.5.sp
-                )
-            }
         }
 
         // Detailed Cooking Console (always displays when busy OR logs/output exist)
@@ -959,7 +975,18 @@ fun MangaDubStudioModuleWindowBody(
                 statusFallback = statusLabel,
                 progress = overallProgress,
                 isBusy = isBusy,
-                onCancel = { viewModel.cancelMangaWork() }
+                isPaused = isMangaPaused,
+                showRetry = !isBusy && activeProject?.chapters?.any { it.status == MangaChapterStatus.FAILED } == true,
+                onCancel = { pendingCancelConfirm = true },
+                onPause = { viewModel.pauseMangaDub() },
+                onResume = { viewModel.resumeMangaDub() },
+                onRetry = {
+                    activeProject?.let { proj ->
+                        proj.chapters.firstOrNull { it.status == MangaChapterStatus.FAILED }?.let { failed ->
+                            viewModel.retryFailedMangaChapter(proj.id, failed.id)
+                        }
+                    }
+                }
             )
         }
     }
@@ -1869,7 +1896,12 @@ private fun MangaTelemetryBanner(
     statusFallback: String,
     progress: Float,
     isBusy: Boolean,
-    onCancel: () -> Unit
+    isPaused: Boolean,
+    showRetry: Boolean,
+    onCancel: () -> Unit,
+    onPause: () -> Unit,
+    onResume: () -> Unit,
+    onRetry: () -> Unit
 ) {
     val pct = (progress.coerceIn(0f, 1f) * 100f).toInt()
     val elapsedSec = (telemetry.elapsedMs / 1000L).toInt().coerceAtLeast(0)
@@ -1984,12 +2016,36 @@ private fun MangaTelemetryBanner(
             )
             if (isBusy) {
                 MikaTagPill(
+                    label = if (isPaused) "▶ RESUME" else "⏸ PAUSE",
+                    selected = true,
+                    activeColor = MikaColors.SsrGold,
+                    onClick = if (isPaused) onResume else onPause
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                MikaTagPill(
                     label = "STOP",
                     selected = true,
                     activeColor = MikaColors.DangerRed,
                     onClick = onCancel
                 )
             }
+            if (!isBusy && showRetry) {
+                MikaTagPill(
+                    label = "🔁 RETRY DUB (RESUMES FROM CHECKPOINT)",
+                    selected = true,
+                    activeColor = MikaColors.TerminalGreen,
+                    onClick = onRetry
+                )
+            }
+        }
+
+        if (isPaused) {
+            Text(
+                text = "⏸️ PAUSED — synthesis halted at a safe boundary. RESUME continues; STOP keeps every voiced line on disk for RETRY.",
+                color = MikaColors.SsrGold,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 7.6.sp
+            )
         }
 
         if (isBusy) {
