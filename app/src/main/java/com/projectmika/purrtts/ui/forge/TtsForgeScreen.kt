@@ -2,6 +2,11 @@ package com.projectmika.purrtts.ui.forge
 
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -61,7 +66,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -184,6 +193,7 @@ fun TtsForgeScreen(
     var showCloneStudio by remember { mutableStateOf(false) }
     var showAdvancedProxy by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
+    var showQuickFlushDialog by remember { mutableStateOf(false) }
     var showAcademy by remember { mutableStateOf(false) }
     var academyPatchnotesOnly by remember { mutableStateOf(false) }
     var requestedOsToolId by remember { mutableStateOf<String?>(null) }
@@ -224,6 +234,13 @@ fun TtsForgeScreen(
     val activeToolCount = remember(forgeState.slottedCartridges, viewModel.toolCartridgeCatalog) {
         viewModel.toolCartridgeCatalog.count { it.id in forgeState.slottedCartridges }
     }
+    val (headerTargetLabel, headerCanWarmTarget) = remember(
+        activeProfile,
+        forgeState.modelStates,
+        forgeState.clonedVoices
+    ) {
+        viewModel.backendRouter.selectedEngineTargetLabel(activeProfile, forgeState)
+    }
 
     val isImeVisible = WindowInsets.ime.getBottom(LocalDensity.current) > 0
 
@@ -262,26 +279,19 @@ fun TtsForgeScreen(
                         )
                         val purrActive = "tool_purr_engine" in forgeState.slottedCartridges
                         val vramModuleSlotted = VramResidencyPolicy.TOOL_ID in forgeState.slottedCartridges
-                        val (targetLabel, canWarmTarget) = remember(activeProfile, forgeState.modelStates, forgeState.clonedVoices) {
-                            viewModel.backendRouter.selectedEngineTargetLabel(activeProfile, forgeState)
-                        }
                         val openResidencyControls: () -> Unit = {
                             if (vramModuleSlotted) {
                                 requestedOsToolId = VramResidencyPolicy.TOOL_ID
                                 activeTab = PurrTab.MODULES.ordinal
                             } else {
-                                showSettingsSheet = true
+                                showQuickFlushDialog = true
                             }
                         }
                         HeaderResidencyBar(
                             purrActive = purrActive,
                             residency = residency,
-                            targetLabel = targetLabel,
-                            canWarmTarget = canWarmTarget,
-                            basicKeepWarmEnabled = forgeState.vramResidency.basicKeepWarmEnabled,
-                            onInspectResidency = openResidencyControls,
-                            onWarm = { viewModel.warmSelectedEngine() },
-                            onFlush = { viewModel.evictAllVramNow() }
+                            targetLabel = headerTargetLabel,
+                            onClick = openResidencyControls
                         )
                     }
 
@@ -929,6 +939,17 @@ fun TtsForgeScreen(
             )
         }
 
+        if (showQuickFlushDialog) {
+            QuickResidencyFlushDialog(
+                residency = residency,
+                targetLabel = headerTargetLabel,
+                canWarmTarget = headerCanWarmTarget,
+                onWarm = { viewModel.warmSelectedEngine() },
+                onFlush = { viewModel.evictAllVramNow() },
+                onDismiss = { showQuickFlushDialog = false }
+            )
+        }
+
         if (showCloneStudio) {
             val cloneImportStatus by viewModel.cloneImportStatus.collectAsState()
             val isImportingClone by viewModel.isImportingClone.collectAsState()
@@ -1453,146 +1474,295 @@ private fun HeaderResidencyBar(
     purrActive: Boolean,
     residency: TtsBackendRouter.ResidencySnapshot,
     targetLabel: String,
-    canWarmTarget: Boolean,
-    basicKeepWarmEnabled: Boolean,
-    onInspectResidency: () -> Unit,
-    onWarm: () -> Unit,
-    onFlush: () -> Unit
+    onClick: () -> Unit
 ) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(5.dp)
-    ) {
-        if (!purrActive) {
-            Text(
-                text = "// PURR Engine: OFF (Bypassed)",
-                color = MikaColors.DimText,
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
+    val coldSlate = Color(0xFF6E8496)
+    val rowModifier = Modifier
+        .fillMaxWidth()
+        .height(16.dp)
+        .clip(RoundedCornerShape(4.dp))
+        .clickable(onClick = onClick)
+
+    when {
+        !purrActive -> {
+            Row(
+                modifier = rowModifier,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(5.5.dp)
+                        .clip(CircleShape)
+                        .border(1.dp, coldSlate.copy(alpha = 0.50f), CircleShape)
+                )
+                Text(
+                    text = "COLD: PURR Bypassed",
+                    color = coldSlate.copy(alpha = 0.68f),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        residency.isWarming -> {
+            val warmingAnim = rememberInfiniteTransition(label = "warmingEngineHeat")
+            val heatPulse by warmingAnim.animateFloat(
+                initialValue = 0.55f,
+                targetValue = 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 550, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "heatPulse"
             )
-        } else if (residency.isWarming) {
-            Box(
-                modifier = Modifier
-                    .size(6.dp)
-                    .clip(CircleShape)
-                    .background(MikaColors.MikaAmber)
-            )
-            Text(
-                text = "WARMING: ${residency.warmingLabel ?: targetLabel}…",
-                color = MikaColors.MikaAmber,
-                fontFamily = FontFamily.Monospace,
-                fontWeight = FontWeight.Bold,
-                fontSize = 9.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
-            )
-        } else if (residency.residentLabel != null) {
-            val isPinned = residency.remainingSeconds < 0
-            val hotColor = if (isPinned) MikaColors.SsrGold else MikaColors.TerminalGreen
+            val warmGlow = MikaColors.MikaAmber.copy(alpha = 0.80f * heatPulse)
+            Row(
+                modifier = rowModifier,
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(MikaColors.MikaAmber.copy(alpha = heatPulse))
+                )
+                Text(
+                    text = "WARMING: ${residency.warmingLabel ?: targetLabel}…",
+                    style = TextStyle(
+                        color = MikaColors.MikaAmber.copy(alpha = 0.82f + 0.18f * heatPulse),
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 9.5.sp,
+                        shadow = Shadow(
+                            color = warmGlow,
+                            offset = Offset.Zero,
+                            blurRadius = 6f + 6f * heatPulse
+                        )
+                    ),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+        residency.residentLabel != null -> {
             val timerText = when {
                 residency.remainingSeconds < 0 -> "PIN∞"
                 residency.remainingSeconds > 0 -> "%d:%02d".format(
                     residency.remainingSeconds / 60,
                     residency.remainingSeconds % 60
                 )
-                else -> "0s"
+                else -> "0:00"
             }
+            val fireTransition = rememberInfiniteTransition(label = "hotEngineFire")
+            val flameMix by fireTransition.animateFloat(
+                initialValue = 0f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 860, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "flameMix"
+            )
+            val emberPulse by fireTransition.animateFloat(
+                initialValue = 0.45f,
+                targetValue = 1.0f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(durationMillis = 540, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "emberPulse"
+            )
+            val flameTextColor = lerp(Color(0xFFFF6D1C), Color(0xFFFFDF73), flameMix)
+            val flameGlowColor = lerp(Color(0xFFFF2A00), Color(0xFFFF9100), flameMix)
+                .copy(alpha = 0.90f * emberPulse)
+
             Row(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .clickable(onClick = onInspectResidency),
+                modifier = rowModifier
+                    .background(
+                        Brush.horizontalGradient(
+                            colors = listOf(
+                                Color(0xFFFF3D00).copy(alpha = 0.16f * emberPulse),
+                                Color(0xFFFF9100).copy(alpha = 0.06f * flameMix),
+                                Color.Transparent
+                            )
+                        )
+                    )
+                    .padding(horizontal = 3.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
-                        .background(hotColor)
-                )
+                    modifier = Modifier.size(10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0xFFFF6D00).copy(alpha = 0.85f * emberPulse),
+                                        Color.Transparent
+                                    )
+                                )
+                            )
+                    )
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFFFF3B0))
+                    )
+                }
                 Text(
                     text = "HOT: ${residency.residentLabel} ($timerText)",
-                    color = hotColor,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 9.5.sp,
+                    style = TextStyle(
+                        color = flameTextColor,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 9.5.sp,
+                        letterSpacing = 0.3.sp,
+                        shadow = Shadow(
+                            color = flameGlowColor,
+                            offset = Offset.Zero,
+                            blurRadius = 7f + 13f * emberPulse
+                        )
+                    ),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            HeaderResidencyActionChip(
-                label = "FLUSH",
-                accent = MikaColors.DangerRed,
-                onClick = onFlush
-            )
-        } else if (canWarmTarget) {
+        }
+        else -> {
             Row(
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .clickable(onClick = onInspectResidency),
+                modifier = rowModifier,
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(5.dp)
+                        .size(5.5.dp)
                         .clip(CircleShape)
-                        .background(MikaColors.DimText.copy(alpha = 0.7f))
+                        .border(1.dp, coldSlate.copy(alpha = 0.55f), CircleShape)
                 )
                 Text(
                     text = "COLD: $targetLabel",
-                    color = MikaColors.CyanWhite.copy(alpha = 0.72f),
+                    color = coldSlate.copy(alpha = 0.68f),
                     fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Normal,
                     fontSize = 9.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
-            HeaderResidencyActionChip(
-                label = "WARM",
-                accent = MikaColors.TerminalGreen,
-                onClick = onWarm
-            )
-        } else {
-            val keepLabel = if (basicKeepWarmEnabled) "5m" else "OFF"
-            Text(
-                text = "// $targetLabel • Warm:$keepLabel",
-                color = MikaColors.TerminalGreen.copy(alpha = 0.65f),
-                fontFamily = FontFamily.Monospace,
-                fontSize = 9.5.sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .weight(1f, fill = false)
-                    .clickable(onClick = onInspectResidency)
-            )
         }
     }
 }
 
 @Composable
-private fun HeaderResidencyActionChip(
-    label: String,
-    accent: Color,
-    onClick: () -> Unit
+private fun QuickResidencyFlushDialog(
+    residency: TtsBackendRouter.ResidencySnapshot,
+    targetLabel: String,
+    canWarmTarget: Boolean,
+    onWarm: () -> Unit,
+    onFlush: () -> Unit,
+    onDismiss: () -> Unit
 ) {
-    Text(
-        text = label,
-        color = accent,
-        fontFamily = FontFamily.Monospace,
-        fontWeight = FontWeight.Black,
-        fontSize = 8.sp,
-        letterSpacing = 0.4.sp,
-        modifier = Modifier
-            .clip(RoundedCornerShape(3.dp))
-            .background(accent.copy(alpha = 0.16f))
-            .border(1.dp, accent.copy(alpha = 0.68f), RoundedCornerShape(3.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 5.dp, vertical = 1.dp)
-    )
+    val isHot = residency.residentLabel != null
+    val borderAccent = if (isHot) Color(0xFFFF6D1C) else MikaColors.NeonCyan.copy(alpha = 0.55f)
+    val timerText = when {
+        residency.remainingSeconds < 0 -> "PIN∞"
+        residency.remainingSeconds > 0 -> "%d:%02d".format(
+            residency.remainingSeconds / 60,
+            residency.remainingSeconds % 60
+        )
+        else -> "0:00"
+    }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .background(MikaColors.PanelBg)
+                .border(1.dp, borderAccent, RoundedCornerShape(12.dp))
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = if (isHot) "> FLUSH_RAM_/_VRAM?" else "> ENGINE_MEMORY // COLD",
+                color = if (isHot) Color(0xFFFF9E40) else MikaColors.NeonCyan,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 12.sp
+            )
+            Text(
+                text = if (isHot) {
+                    "HOT: ${residency.residentLabel} ($timerText)"
+                } else {
+                    "COLD: $targetLabel"
+                },
+                color = if (isHot) Color(0xFFFFD166) else Color(0xFF7B93A6),
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 10.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = if (isHot) {
+                    "Flush loaded neural TTS weights from device RAM / GPU VRAM now?"
+                } else {
+                    "No neural weights are holding RAM/VRAM right now. Want to run a clean memory flush anyway?"
+                },
+                color = MikaColors.CyanWhite.copy(alpha = 0.85f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 10.sp,
+                lineHeight = 14.sp
+            )
+            Text(
+                text = "// Tip: Slam TOOL-06 in Cartridge Bay for custom timers & Always-Hot mode.",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 8.5.sp,
+                lineHeight = 12.sp
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MikaTagPill(
+                    label = "CANCEL",
+                    selected = false,
+                    activeColor = MikaColors.DimText,
+                    onClick = onDismiss
+                )
+                if (!isHot && canWarmTarget) {
+                    MikaTagPill(
+                        label = "WARM",
+                        selected = true,
+                        activeColor = MikaColors.TerminalGreen,
+                        onClick = {
+                            onWarm()
+                            onDismiss()
+                        }
+                    )
+                }
+                MikaTagPill(
+                    label = "FLUSH RAM/VRAM",
+                    selected = true,
+                    activeColor = MikaColors.DangerRed,
+                    onClick = {
+                        onFlush()
+                        onDismiss()
+                    }
+                )
+            }
+        }
+    }
 }

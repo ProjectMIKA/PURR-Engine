@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,9 +46,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
@@ -77,6 +81,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -286,29 +291,52 @@ fun MikaStatusBadge(
     }
 
     val textMeasurer = rememberTextMeasurer()
-    val textLayout = remember(display, badge) {
-        textMeasurer.measure(text = AnnotatedString(display), style = marqueeTextStyle)
+    val coloredStyle = remember(marqueeTextStyle, badgeColor) {
+        marqueeTextStyle.copy(color = badgeColor)
+    }
+    val textLayout = remember(display, coloredStyle) {
+        textMeasurer.measure(
+            text = AnnotatedString(display),
+            style = coloredStyle,
+            softWrap = false,
+            maxLines = 1
+        )
     }
     val cycleDisplay = "$display   •   "
-    val cycleLayout = remember(cycleDisplay, badge) {
-        textMeasurer.measure(text = AnnotatedString(cycleDisplay), style = marqueeTextStyle)
+    val cycleLayout = remember(cycleDisplay, coloredStyle) {
+        textMeasurer.measure(
+            text = AnnotatedString(cycleDisplay),
+            style = coloredStyle,
+            softWrap = false,
+            maxLines = 1
+        )
     }
 
-    var laneWidthPx by remember { mutableStateOf(0f) }
+    var laneWidthPx by remember { mutableFloatStateOf(0f) }
     val needsMarquee = laneWidthPx > 0f && textLayout.size.width.toFloat() > laneWidthPx
     val cycleWidthPx = cycleLayout.size.width.toFloat().coerceAtLeast(1f)
-    val marqueeDurationMs = ((cycleWidthPx / 38f) * 1000f).roundToInt().coerceIn(2200, 7500)
+    val currentCycleWidthPx by rememberUpdatedState(cycleWidthPx)
+    val speedPxPerSec = with(LocalDensity.current) { 26.dp.toPx() }
 
-    val marquee = rememberInfiniteTransition(label = "badgeMarquee")
-    val marqueeShift by marquee.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = marqueeDurationMs, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "badgeShift"
-    )
+    // Keyed only on `badge` so 1s countdown ticks update digits in-place without resetting scroll phase.
+    var scrollOffsetPx by remember(badge) { mutableFloatStateOf(0f) }
+    LaunchedEffect(needsMarquee, badge, speedPxPerSec) {
+        if (!needsMarquee) {
+            scrollOffsetPx = 0f
+            return@LaunchedEffect
+        }
+        var lastFrameNanos = 0L
+        while (true) {
+            withFrameNanos { frameNanos ->
+                if (lastFrameNanos != 0L) {
+                    val dtSec = ((frameNanos - lastFrameNanos).coerceIn(0L, 64_000_000L)) / 1_000_000_000f
+                    val wrap = currentCycleWidthPx.coerceAtLeast(1f)
+                    scrollOffsetPx = (scrollOffsetPx + dtSec * speedPxPerSec) % wrap
+                }
+                lastFrameNanos = frameNanos
+            }
+        }
+    }
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -329,27 +357,27 @@ fun MikaStatusBadge(
             contentAlignment = if (needsMarquee) Alignment.CenterStart else Alignment.Center,
             modifier = Modifier
                 .weight(1f)
+                .fillMaxHeight()
                 .clipToBounds()
                 .onSizeChanged { laneWidthPx = it.width.toFloat() }
         ) {
             if (!needsMarquee) {
                 Text(
                     text = display,
-                    color = badgeColor,
-                    style = marqueeTextStyle,
+                    style = coloredStyle,
                     softWrap = false,
                     maxLines = 1
                 )
             } else {
-                val shiftPx = -(cycleWidthPx * marqueeShift)
-                Text(
-                    text = "$cycleDisplay$display",
-                    color = badgeColor,
-                    style = marqueeTextStyle,
-                    softWrap = false,
-                    maxLines = 1,
-                    modifier = Modifier.offset { IntOffset(shiftPx.roundToInt(), 0) }
-                )
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val y = ((size.height - cycleLayout.size.height) / 2f).coerceAtLeast(0f)
+                    val step = cycleWidthPx.coerceAtLeast(1f)
+                    var x = -(scrollOffsetPx % step)
+                    while (x < size.width) {
+                        drawText(textLayoutResult = cycleLayout, topLeft = Offset(x, y))
+                        x += step
+                    }
+                }
             }
         }
     }

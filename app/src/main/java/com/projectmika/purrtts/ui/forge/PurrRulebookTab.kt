@@ -797,6 +797,7 @@ private fun OsDesktopAppTile(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .height(186.dp)
             .clip(RoundedCornerShape(10.dp))
             .background(
                 Brush.verticalGradient(
@@ -810,7 +811,7 @@ private fun OsDesktopAppTile(
             .clickable(onClick = onClick)
             .padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(8.dp)
+        verticalArrangement = Arrangement.SpaceBetween
     ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -822,7 +823,10 @@ private fun OsDesktopAppTile(
                 color = moduleAccent.copy(alpha = 0.85f),
                 fontFamily = FontFamily.Monospace,
                 fontWeight = FontWeight.Bold,
-                fontSize = 8.sp
+                fontSize = 8.sp,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
             )
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Box(
@@ -847,36 +851,52 @@ private fun OsDesktopAppTile(
             isOnline = true
         )
 
-        Text(
-            text = module.title,
-            color = MikaColors.PrimaryText,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Black,
-            fontSize = 11.sp,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = statusNote,
-            color = moduleAccent,
-            fontFamily = FontFamily.Monospace,
-            fontWeight = FontWeight.Bold,
-            fontSize = 9.sp,
-            textAlign = TextAlign.Center,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = module.subtitle,
-            color = MikaColors.DimText,
-            fontFamily = FontFamily.Monospace,
-            fontSize = 8.5.sp,
-            textAlign = TextAlign.Center,
-            maxLines = 2,
-            overflow = TextOverflow.Ellipsis,
-            lineHeight = 12.sp
-        )
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            Text(
+                text = module.title,
+                color = MikaColors.PrimaryText,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 11.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = statusNote,
+                color = moduleAccent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+                textAlign = TextAlign.Center,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(26.dp),
+                contentAlignment = Alignment.TopCenter
+            ) {
+                Text(
+                    text = module.subtitle,
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 8.5.sp,
+                    textAlign = TextAlign.Center,
+                    minLines = 2,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    lineHeight = 12.sp
+                )
+            }
+        }
     }
 }
 
