@@ -540,13 +540,6 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 
-    fun evictAllVramNow() {
-        viewModelScope.launch {
-            backendRouter.evictAllVram()
-            showToast("Flushed resident TTS weights from RAM/VRAM")
-        }
-    }
-
     fun setBasicKeepWarmEnabled(enabled: Boolean) {
         repository.updateVramResidency { cur ->
             cur.copy(
