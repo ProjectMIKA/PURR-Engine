@@ -43,7 +43,7 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `apps and tools categories host APP-01..07 and TOOL-01..06 with optional tools disabled by default plus Vision sub-cartridges`() {
+    fun `apps and tools categories host APP-01 through 07 and TOOL-01 through 06 with optional tools disabled by default plus Vision sub-cartridges`() {
         assertEquals(7, appsModules.size)
         assertEquals(
             (1..7).map { idx -> "APP-%02d".format(idx) },
