@@ -213,7 +213,11 @@ class ModelCatalogManager(
                 } &&
                 (spec.companionFileName.isNullOrBlank() || files.any { it.name == spec.companionFileName })
             SherpaModelFamily.PIPER -> files.any { it.name == "tokens.txt" } &&
-                (files.any { it.name.startsWith("lexicon") } || espeakDir != null || sharedEspeakValid)
+                (files.any { it.name.startsWith("lexicon") } ||
+                    espeakDir != null ||
+                    sharedEspeakValid ||
+                    spec.id == "rom_meta_mms" ||
+                    spec.id.startsWith("sub_mms_"))
             SherpaModelFamily.MELO_TTS -> files.any { it.name == "tokens.txt" }
             null -> true
         }

@@ -114,16 +114,22 @@ class PurrTtsService : TextToSpeechService() {
         return status
     }
 
+    private fun activeEngineVoices(repo: PurrProfileRepository): List<com.projectmika.purrtts.core.purr.VoiceDescriptor> {
+        val nonManga = repo.allAvailableVoices(includeMangaClones = false)
+        val activeCartId = repo.currentProfile.selectedCartridgeId
+        val activeOnly = nonManga.filter { it.cartridgeId == activeCartId }
+        if (activeOnly.isNotEmpty()) return activeOnly
+        return nonManga.filter { repo.isCartridgeSlotted(it.cartridgeId) }
+            .ifEmpty { nonManga.take(1) }
+    }
+
     override fun onGetVoices(): List<Voice> {
         if (!ensureDependencies()) return emptyList()
         val repo = repository ?: return emptyList()
         val profile = repo.currentProfile
 
-        // Only expose voices belonging to CORE_OS or currently SLOTTED ROM cartridges
-        val eligible = repo.allAvailableVoices().filter { v ->
-            repo.isCartridgeSlotted(v.cartridgeId)
-        }
-        val voices = eligible.ifEmpty { repo.allAvailableVoices().take(1) }
+        // Only expose non-manga voices belonging to the currently active TTS Engine cartridge
+        val voices = activeEngineVoices(repo)
 
         return voices.mapNotNull { v ->
             runCatching {
@@ -144,13 +150,15 @@ class PurrTtsService : TextToSpeechService() {
 
     override fun onIsValidVoiceName(voiceName: String?): Int {
         if (!ensureDependencies() || voiceName.isNullOrBlank()) return TextToSpeech.ERROR
-        val exists = repository?.allAvailableVoices()?.any { it.id == voiceName } == true
+        val repo = repository ?: return TextToSpeech.ERROR
+        val exists = activeEngineVoices(repo).any { it.id == voiceName }
         return if (exists) TextToSpeech.SUCCESS else TextToSpeech.ERROR
     }
 
     override fun onLoadVoice(voiceName: String?): Int {
         if (!ensureDependencies() || voiceName.isNullOrBlank()) return TextToSpeech.ERROR
-        val voice = repository?.allAvailableVoices()?.firstOrNull { it.id == voiceName }
+        val repo = repository ?: return TextToSpeech.ERROR
+        val voice = activeEngineVoices(repo).firstOrNull { it.id == voiceName }
             ?: return TextToSpeech.ERROR
         currentLocale = runCatching { Locale.forLanguageTag(voice.languageCode) }.getOrDefault(Locale.US)
         return TextToSpeech.SUCCESS
@@ -163,7 +171,7 @@ class PurrTtsService : TextToSpeechService() {
         if (profile.primaryVoiceId.isNotBlank()) return profile.primaryVoiceId
         val targetLang = normalizeLangTag(lang, country).substringBefore('-')
         val matched = PurrVoiceMatcher.assignVoice(
-            voices = repo.allAvailableVoices().filter { repo.isCartridgeSlotted(it.cartridgeId) },
+            voices = activeEngineVoices(repo),
             profile = profile,
             preferredLanguage = targetLang
         )
@@ -300,8 +308,8 @@ class PurrTtsService : TextToSpeechService() {
         val base = repo.currentProfile
         val requestedVoice = request.voiceName
         if (!requestedVoice.isNullOrBlank() && requestedVoice != base.primaryVoiceId) {
-            val match = repo.allAvailableVoices().firstOrNull { it.id == requestedVoice }
-            if (match != null && repo.isCartridgeSlotted(match.cartridgeId)) {
+            val match = activeEngineVoices(repo).firstOrNull { it.id == requestedVoice }
+            if (match != null && (repo.isCartridgeSlotted(match.cartridgeId) || match.cartridgeId == base.selectedCartridgeId)) {
                 return base.copy(
                     primaryVoiceId = requestedVoice,
                     preferredBackend = match.engine,

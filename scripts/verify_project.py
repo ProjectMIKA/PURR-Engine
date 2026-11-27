@@ -92,6 +92,7 @@ REQUIRED_FILES = [
     "app/src/test/java/com/projectmika/purrtts/core/audiobook/PurrEbookParserTest.kt",
     "app/src/test/java/com/projectmika/purrtts/core/audiobook/Mp4ChapterAtomWriterTest.kt",
     "app/src/test/java/com/projectmika/purrtts/core/manga/MangaDubStudioTest.kt",
+    "scripts/align_sherpa_ort_abi.py",
 ]
 
 
@@ -269,6 +270,13 @@ def main() -> int:
                 failures.append("model_manifest.json: Pocket TTS pins missing from the manifest")
         except json.JSONDecodeError as exc:
             failures.append(f"model_manifest.json is not valid JSON: {exc}")
+
+    # 7. CI ONNX Runtime ABI alignment gate
+    workflow_path = ROOT / ".github/workflows/build-android-apk.yml"
+    if workflow_path.is_file():
+        wf_text = workflow_path.read_text(encoding="utf-8")
+        if "align_sherpa_ort_abi.py" not in wf_text or "--verify-apk" not in wf_text:
+            failures.append(".github/workflows/build-android-apk.yml missing align_sherpa_ort_abi.py / --verify-apk ABI gate")
 
     if failures:
         print("VERIFICATION FAILED:")

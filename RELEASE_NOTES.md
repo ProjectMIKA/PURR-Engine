@@ -1,3 +1,29 @@
+# 🌌 PURR-TTS v2.5.3 // The Clean Bus
+
+### ✨ What's New since v2.5.2
+
+Every Sherpa-ONNX TTS hub mounts cleanly again, Manga Dub Studio cast clones stay inside the studio, and every TTS engine owns its own voice bus end-to-end. 🛡️🎙️🔒
+
+* **🧬 Sherpa-ONNX / ONNX Runtime ELF ABI Alignment (`scripts/align_sherpa_ort_abi.py`)**:
+  * Fixed the native `OrtGetApiBase@VERS_1.28.2` symbol-version mismatch against `onnxruntime-android:1.31.1` (`VERS_1.31.1`) that broke `dlopen()` (`"<Cartridge> failed to mount"`) across Kokoro Neural Hub, KittenTTS, Piper VITS, Inflect V2 Neural, Icefall VITS Studio, LJS Lexicon, and AISHELL-3 174.
+  * Added `scripts/align_sherpa_ort_abi.py` (with `--self-test` and `--verify-apk`) and wired it directly into `.github/workflows/build-android-apk.yml` so CI aligns the vendored Sherpa AAR and rejects any release APK whose `.so` dependencies fail ELF ABI verification.
+* **🎛️ VITS Frontend & Meta MMS Mount Fixes (`SherpaOnnxEngine`, `ModelCatalogManager`)**:
+  * Stopped `SherpaOnnxEngine.resolveStableEspeakDir` from injecting `shared_espeak` into lexicon-based (`LJS`, `AISHELL-3`, `VCTK`) or character-based (`Meta MMS`) VITS models.
+  * Removed cross-hub fallback in `resolveMountTarget`, improved native `Throwable` mount diagnostics, and recognized `Meta MMS` bundles in `ModelCatalogManager.hasCompleteSherpaExtract`.
+* **🎬 Manga Dub Studio Cast Clone Isolation (`PurrModels`, `PurrProfileRepository`, `MangaDubStudioManager`, `TtsForgeViewModel`, `PurrRulebookTab`, `MangaDubStudioModuleWindow`)**:
+  * Marked Manga Dub Studio auto-clones and Manga-scoped clones with `isMangaOnly` / `mangaOnly`. Cast clones no longer bleed into Tab 1 voice selectors, Clone Studio counters/lists, or Android OS TTS, and registering a cast clone no longer auto-slots the `CLN-04` Qwen Cloning Hub.
+  * Each cast card dropdown now lists only general voices plus that character's own clone.
+* **🔒 Strict Per-Engine Voice Isolation (`TtsForgeScreen`, `PurrProfileRepository`, `TtsBackendRouter`, `PurrTtsService`)**:
+  * Scoped Dual-Voice Split (`1. NARRATOR_VOICE` & `2. DIALOGUE_VOICE`) strictly to `voicesForSelectedEngine`, kept `primaryVoiceId` and `dialogueVoiceId` synced per engine, enforced `enabledSubCartridges` gating, added startup self-healing for stale cross-engine or Manga voices, tightened `isKokoroVoice` to the 54 v1.0 base IDs, and scoped `PurrTtsService` (`activeEngineVoices`) strictly to the active engine.
+* **✅ Tests**: Added pure-JVM verification (`manga cast clones stay isolated from general tts and engines isolate primary and dialogue voices` in `PurrHeavyEnginesTest`) alongside `verify_project.py` and `align_sherpa_ort_abi.py --self-test`.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.5.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `52`).
+2. **`PURR-TTS_V2.5.3.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.5.2 // The Unskippable Read
 
 ### ✨ What's New since v2.5.1

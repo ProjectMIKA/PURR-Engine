@@ -334,7 +334,8 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         _testInputText.value = text
     }
 
-    fun allAvailableVoices(): List<VoiceDescriptor> = repository.allAvailableVoices()
+    fun allAvailableVoices(includeMangaClones: Boolean = false): List<VoiceDescriptor> =
+        repository.allAvailableVoices(includeMangaClones)
 
     private fun isChatterboxVoiceActive(profile: PurrProfile): Boolean {
         if (profile.primaryVoiceId.startsWith("chatterbox_") ||
@@ -945,6 +946,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             .ifEmpty { listOf("cloned", "custom", gender.tag) }
         val voiceId = "clone_${cleanName.lowercase().replace(Regex("[^a-z0-9]+"), "_")}_${System.currentTimeMillis() % 10000}"
 
+        val mangaTarget = _pendingMangaCloneTarget.value
         val cloned = ClonedVoiceProfile(
             id = voiceId,
             displayName = cleanName,
@@ -954,11 +956,11 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             referenceWavPath = wavPath,
             referenceTranscript = transcript.trim().ifEmpty { "Sample reference voice for zero-shot cloning." },
             tags = parsedTags,
-            cloneEngineId = cloneEngineId
+            cloneEngineId = cloneEngineId,
+            mangaOnly = mangaTarget != null
         )
-        repository.registerClonedVoice(cloned)
-        val mangaTarget = _pendingMangaCloneTarget.value
         if (mangaTarget != null) {
+            repository.upsertBackgroundClonedVoice(cloned)
             mangaDubManager.assignVoiceToCharacter(
                 projectId = mangaTarget.projectId,
                 characterId = mangaTarget.characterId,
@@ -969,6 +971,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             showToast("Bound [$cleanName] directly to ${mangaTarget.characterName}!")
             return true
         }
+        repository.registerClonedVoice(cloned)
         val engineInstalled = repository.state.value.modelStates[cloneEngineId]?.state == DownloadState.INSTALLED
         showToast(
             if (engineInstalled) "Registered Cloned Voice [$cleanName]"
@@ -2177,7 +2180,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     }
 
     fun auditionMangaCharacter(character: MangaCharacterProfile) {
-        val voices = allAvailableVoices()
+        val voices = allAvailableVoices(includeMangaClones = true)
         val resolved = mangaDubManager.resolveSynthesisProfileForCharacter(
             baseProfile = repository.currentProfile,
             character = character,

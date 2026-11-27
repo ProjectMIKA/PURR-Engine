@@ -91,11 +91,9 @@ class TtsBackendRouter(
             BackendType.LITERT_NPU_GPU,
             BackendType.SHERPA_ONNX -> {
                 val cleanVoiceId = voiceId.substringAfter(':')
-                // v1.6.0: [a-z0-9] allows the numeric Kokoro v1.1-zh roster (zf_001, zm_100...).
-                val isKokoroVoice = cleanVoiceId.matches(Regex("^[abjefhipz][fm]_[a-z0-9]+$")) ||
-                    profile.selectedCartridgeId in setOf(
-                        "rom_kokoro_sherpa", "rom_kokoro_fp32", "rom_kokoro_v11"
-                    )
+                // Only route the 54 v1.0 base Kokoro voice IDs (af_*, am_*, bf_*, ...) through
+                // LiteRtKokoroEngine so fp32_* / v11_* never bleed into the v1.0 LiteRT weights.
+                val isKokoroVoice = cleanVoiceId.matches(Regex("^[abjefhipz][fm]_[a-z]+$"))
                 val smartOffload = repository.state.value.smartHardwareOffload
                 val npuChipOn = isKokoroVoice &&
                     (repository.isSubCartridgeEnabled("rom_kokoro_npu_g2p") || smartOffload) &&
@@ -187,7 +185,8 @@ class TtsBackendRouter(
         val cleanVoiceId = voiceId.substringAfter(':')
         val isExplicitCloneOrDesign = repository.state.value.clonedVoices.any { it.id == voiceId || it.id == cleanVoiceId } ||
             cleanVoiceId in setOf("qwen3_base_clone_default", "qwen3_design_custom")
-        val targetVoiceDesc = repository.allAvailableVoices().firstOrNull { it.id == cleanVoiceId }
+        val targetVoiceDesc = repository.allAvailableVoices(includeMangaClones = true)
+            .firstOrNull { it.id == cleanVoiceId }
         val targetCartridgeId = targetVoiceDesc?.cartridgeId ?: profile.selectedCartridgeId
         val requiredSpecId = targetVoiceDesc?.requiredSubCartridgeId ?: targetCartridgeId
         val isTargetInstalledAndSlotted =
@@ -326,8 +325,11 @@ class TtsBackendRouter(
             }
         }
 
-        val descriptor = repository.allAvailableVoices().firstOrNull { it.id == cleanId || it.id == voiceId }
-        if (descriptor != null && repository.isCartridgeSlotted(descriptor.cartridgeId)) {
+        val descriptor = repository.allAvailableVoices(includeMangaClones = true)
+            .firstOrNull { it.id == cleanId || it.id == voiceId }
+        if (descriptor != null &&
+            (repository.isCartridgeSlotted(descriptor.cartridgeId) || profile.selectedCartridgeId == descriptor.cartridgeId)
+        ) {
             return descriptor.engine
         }
         return if (repository.isCartridgeSlotted(profile.selectedCartridgeId)) {

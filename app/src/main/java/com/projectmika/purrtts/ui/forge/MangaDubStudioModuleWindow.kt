@@ -2268,17 +2268,22 @@ private fun MangaCharacterCastCard(
             )
         }
 
-        if (availableVoices.isNotEmpty()) {
+        val cardVoices = remember(availableVoices, character.assignedVoiceId, character.autoCloneVoiceId) {
+            availableVoices.filter {
+                !it.isMangaOnly || it.id == character.autoCloneVoiceId || it.id == character.assignedVoiceId
+            }
+        }
+        if (cardVoices.isNotEmpty()) {
             // ✨ v1.9.9: the card shows the character's EFFECTIVE dub voice — the auto clone lock
             // when active — never the user's global system-TTS selection (which silently
             // mislabeled an active Qwen clone as e.g. "Phonon // Snow Queen").
-            val selectedVoiceDesc = availableVoices.firstOrNull { it.id == character.assignedVoiceId }
-                ?: availableVoices.firstOrNull { it.id == character.autoCloneVoiceId }
-                ?: availableVoices.firstOrNull { it.id == activeProfile.primaryVoiceId }
-                ?: availableVoices.first()
+            val selectedVoiceDesc = cardVoices.firstOrNull { it.id == character.assignedVoiceId }
+                ?: cardVoices.firstOrNull { it.id == character.autoCloneVoiceId }
+                ?: cardVoices.firstOrNull { it.id == activeProfile.primaryVoiceId }
+                ?: cardVoices.first()
             MikaVoiceDropdownSelector(
                 label = "${character.name} // ASSIGNED VOICE (OR CLONE)",
-                voices = availableVoices,
+                voices = cardVoices,
                 selectedVoice = selectedVoiceDesc,
                 onSelectVoice = { chosen ->
                     viewModel.assignMangaCharacterVoice(

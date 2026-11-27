@@ -247,6 +247,24 @@ contracts, and scars. GachaSwipe = behavioral origin; keep parity when porting.
   `scripts/refresh_model_manifest.py`, audit via `--check`), a mismatch force-refreshes the
   manifest ONCE before failing closed, and a leftover complete `.part` must be 416-verified and
   promoted — never resumed into an eternal "HTTP 416" retry trap.
+- **v2.5.3 ONNX Runtime ELF symbol-version scar (`scripts/align_sherpa_ort_abi.py`)**: CI strips
+  `jni/*/libonnxruntime.so` (1.28.2) from `sherpa-onnx-1.13.8.aar` so the APK packages the single
+  unified `libonnxruntime.so` from `onnxruntime-android:1.31.1`. However, `libsherpa-onnx-jni.so`
+  and `libsherpa-onnx-c-api.so` retain `.gnu.version_r` entries requiring `OrtGetApiBase@VERS_1.28.2`
+  while ORT 1.31.1 only exports `VERS_1.31.1` — causing Android Bionic `linker64` to reject
+  `OfflineTts` with `UnsatisfiedLinkError` across ALL Sherpa cartridges (Kokoro, KittenTTS,
+  Piper, Inflect, Icefall, LJS, AISHELL-3). CI MUST align `.gnu.version_r` in the Sherpa AAR
+  via `scripts/align_sherpa_ort_abi.py --sherpa-aar ... --ort-aar ...` and fail-closed verify the
+  built APK with `--verify-apk`.
+- **v2.5.3 `shared_espeak` & voice-isolation laws**: (1) `SherpaOnnxEngine.resolveStableEspeakDir`
+  must ONLY fall back to `sharedEspeakDir` for Kokoro, KittenTTS, and non-lexicon/non-MMS Piper
+  packs — passing `shared_espeak` into lexicon-based (`rom_vits_ljs`, `rom_aishell3_zh`,
+  `rom_vctk_studio`) or character-frontend (`rom_meta_mms`) VITS models wipes `vitsLexicon` and
+  breaks mounting. (2) Manga Dub Studio clones (`ClonedVoiceProfile.isMangaOnly` / `manga_auto_*`)
+  are isolated via `allAvailableVoices(includeMangaClones = true)` and NEVER surface in Tab 1
+  selectors, Clone Studio, or `PurrTtsService`, nor auto-slot `sub_qwen3_base_06b`. (3) Dual-voice
+  split (`TtsForgeScreen`), `selectEngineCartridge`, `loadInitialState`, and `PurrTtsService`
+  keep both `primaryVoiceId` and `dialogueVoiceId` strictly scoped to the active TTS engine.
 - **v1.9.6 manga-dub regression**: KV panel-turn token ceiling (768 output − 384 thinking)
   truncated busy-panel JSON → 0-line specs wiped panels; the expanded SFX lexicon + a NEW
   synthesis-time re-filter dropped 1-2 word real dialogue; the clone lock's single neutral seed

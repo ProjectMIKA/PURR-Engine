@@ -657,35 +657,41 @@ fun TtsForgeScreen(
                                                 modifier = Modifier.padding(top = 10.dp),
                                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                                             ) {
-                                                val selectableVoices = allVoices.filter {
-                                                    viewModel.repository.isCartridgeSlotted(it.cartridgeId)
+                                                val engineLabel = slottedSpecs.firstOrNull { it.id == activeCartridgeId }?.name
+                                                    ?: if (activeCartridgeId == "proxy_lan") "LAN PROXY" else "NO ENGINE"
+                                                val emptyVoiceHint = if (slottedSpecs.isEmpty()) {
+                                                    "No TTS cartridge slotted - open Cartridge Bay to slam ROM-01 or a neural cartridge."
+                                                } else {
+                                                    "No voices found for $engineLabel."
                                                 }
-                                                val primaryVoiceObj = selectableVoices.firstOrNull { it.id == activeProfile.primaryVoiceId }
-                                                    ?: selectableVoices.firstOrNull()
-                                                val dialogueVoiceObj = selectableVoices.firstOrNull { it.id == activeProfile.dialogueVoiceId }
-                                                    ?: selectableVoices.firstOrNull()
+                                                val primaryVoiceObj = voicesForSelectedEngine.firstOrNull { it.id == activeProfile.primaryVoiceId }
+                                                    ?: voicesForSelectedEngine.firstOrNull()
+                                                val dialogueVoiceObj = voicesForSelectedEngine.firstOrNull { it.id == activeProfile.dialogueVoiceId }
+                                                    ?: voicesForSelectedEngine.firstOrNull()
 
                                                 MikaVoiceDropdownSelector(
-                                                    label = "> 1. NARRATOR_VOICE (PROSE & *ACTIONS*)",
-                                                    voices = selectableVoices,
+                                                    label = "> 1. NARRATOR_VOICE // $engineLabel (${voicesForSelectedEngine.size})",
+                                                    voices = voicesForSelectedEngine,
                                                     selectedVoice = primaryVoiceObj,
                                                     onSelectVoice = { v -> viewModel.selectPrimaryVoice(v) },
                                                     onSampleVoice = { v -> viewModel.auditionText(overrideVoice = v) },
                                                     accent = MikaColors.NeonCyan,
-                                                    onRefreshAction = if (viewModel.repository.isCartridgeSlotted("rom_core_os")) {
+                                                    onRefreshAction = if (activeCartridgeId == "rom_core_os") {
                                                         { viewModel.refreshSystemVoices() }
                                                     } else {
                                                         null
-                                                    }
+                                                    },
+                                                    emptyHint = emptyVoiceHint
                                                 )
 
                                                 MikaVoiceDropdownSelector(
-                                                    label = "> 2. DIALOGUE_VOICE (INSIDE \"QUOTES\")",
-                                                    voices = selectableVoices,
+                                                    label = "> 2. DIALOGUE_VOICE // $engineLabel (${voicesForSelectedEngine.size})",
+                                                    voices = voicesForSelectedEngine,
                                                     selectedVoice = dialogueVoiceObj,
                                                     onSelectVoice = { v -> viewModel.selectDialogueVoice(v) },
                                                     onSampleVoice = { v -> viewModel.auditionText(overrideVoice = v) },
-                                                    accent = MikaColors.NeonPink
+                                                    accent = MikaColors.NeonPink,
+                                                    emptyHint = emptyVoiceHint
                                                 )
 
                                                 Text(

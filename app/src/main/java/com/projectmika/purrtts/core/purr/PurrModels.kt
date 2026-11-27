@@ -653,7 +653,7 @@ data class PurrProfile(
     val preferredBackend: BackendType = BackendType.CORE_OS,
     val sherpaFamily: SherpaModelFamily = SherpaModelFamily.KOKORO,
     val primaryVoiceId: String = "core_os_auto",
-    val dialogueVoiceId: String = "af_sarah",
+    val dialogueVoiceId: String = "core_os_auto",
     val enableDualVoiceSplit: Boolean = false,
     val actionHandlingMode: ActionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
     val narrationVolumeMultiplier: Float = 0.78f,
@@ -724,7 +724,8 @@ data class VoiceDescriptor(
     val speakerIndex: Int = 0,
     val nativeTags: List<String> = emptyList(),
     val isCloned: Boolean = false,
-    val requiredSubCartridgeId: String? = null
+    val requiredSubCartridgeId: String? = null,
+    val isMangaOnly: Boolean = false
 )
 
 @Serializable
@@ -737,12 +738,19 @@ data class ClonedVoiceProfile(
     val languageCode: String = "en-US",
     val referenceWavPath: String,
     val referenceTranscript: String,
-    val tags: List<String> = listOf("cloned", "custom")
+    val tags: List<String> = listOf("cloned", "custom"),
+    val mangaOnly: Boolean = false
 ) {
     val resolvedCloneEngineId: String
         get() = cloneEngineId.ifBlank {
             if (family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
         }
+
+    val isMangaOnly: Boolean
+        get() = mangaOnly ||
+            id.startsWith("manga_auto_") ||
+            tags.any { it.equals("autoclone", ignoreCase = true) } ||
+            displayName.startsWith("Manga Cast //", ignoreCase = true)
 }
 
 @Serializable
@@ -1967,7 +1975,7 @@ object PurrDefaultPresets {
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
-            dialogueVoiceId = "af_bella",
+            dialogueVoiceId = "core_os_auto",
             enableDualVoiceSplit = false,
             actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             narrationVolumeMultiplier = 0.80f,
@@ -2005,7 +2013,7 @@ object PurrDefaultPresets {
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
-            dialogueVoiceId = "af_bella",
+            dialogueVoiceId = "core_os_auto",
             enableDualVoiceSplit = true,
             actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             narrationVolumeMultiplier = 0.85f,
@@ -2043,7 +2051,7 @@ object PurrDefaultPresets {
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
-            dialogueVoiceId = "af_alloy",
+            dialogueVoiceId = "core_os_auto",
             enableDualVoiceSplit = false,
             actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS,
             baseSpeed = 1.05f,
@@ -2079,7 +2087,7 @@ object PurrDefaultPresets {
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
-            dialogueVoiceId = "af_bella",
+            dialogueVoiceId = "core_os_auto",
             enableDualVoiceSplit = false,
             actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             narrationVolumeMultiplier = 0.72f,
@@ -2117,7 +2125,7 @@ object PurrDefaultPresets {
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
-            dialogueVoiceId = "af_nicole",
+            dialogueVoiceId = "core_os_auto",
             enableDualVoiceSplit = false,
             actionHandlingMode = ActionHandlingMode.NARRATE_SOFT,
             baseSpeed = 0.98f,
@@ -2153,7 +2161,7 @@ object PurrDefaultPresets {
             selectedCartridgeId = "rom_core_os",
             preferredBackend = BackendType.CORE_OS,
             primaryVoiceId = "core_os_auto",
-            dialogueVoiceId = "af_kore",
+            dialogueVoiceId = "core_os_auto",
             enableDualVoiceSplit = false,
             actionHandlingMode = ActionHandlingMode.STRIP_ACTIONS,
             baseSpeed = 1.10f,

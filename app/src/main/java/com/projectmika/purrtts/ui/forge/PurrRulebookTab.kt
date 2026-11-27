@@ -310,7 +310,7 @@ fun PurrRulebookTab(
                                                 ActiveOsModule.PURR_ENGINE -> activeProfile.name
                                                 ActiveOsModule.DSP_RACK -> activeProfile.dspConfig.effectPreset.label
                                                 ActiveOsModule.SYMBOL_SHIELD -> if (activeProfile.enableSymbolShield) "SHIELD ACTIVE" else "BYPASSED"
-                                                ActiveOsModule.CLONE_STUDIO -> "${forgeState.clonedVoices.size} CLONED"
+                                                ActiveOsModule.CLONE_STUDIO -> "${forgeState.clonedVoices.count { !it.isMangaOnly }} CLONED"
                                                 ActiveOsModule.AUDIO_EXPORTER -> "${forgeState.exportedAudioFiles.size} EXPORTS"
                                                 ActiveOsModule.VOICE_DESIGN -> "${forgeState.savedVoiceDesigns.size} DESIGNS"
                                                 ActiveOsModule.AUDIOBOOK_CONSTRUCTOR -> "EPUB/PDF -> .M4B"
@@ -594,7 +594,7 @@ fun PurrRulebookTab(
                                 ActiveOsModule.MANGA_DUB_STUDIO -> MangaDubStudioModuleWindowBody(
                                     forgeState = forgeState,
                                     activeProfile = activeProfile,
-                                    availableVoices = viewModel.allAvailableVoices(),
+                                    availableVoices = viewModel.allAvailableVoices(includeMangaClones = true),
                                     viewModel = viewModel,
                                     onLaunchCloneForCharacter = onLaunchCloneForMangaCharacter
                                 )
@@ -1450,16 +1450,19 @@ private fun CloneStudioModuleWindowBody(
         }
     }
 
+    val userClones = remember(forgeState.clonedVoices) {
+        forgeState.clonedVoices.filterNot { it.isMangaOnly }
+    }
     MikaGlowPanel(accent = MikaColors.NeonCyan) {
         Text(
-            text = "> REGISTERED_CLONED_VOICES (${forgeState.clonedVoices.size})",
+            text = "> REGISTERED_CLONED_VOICES (${userClones.size})",
             color = MikaColors.NeonCyan,
             fontFamily = FontFamily.Monospace,
             fontWeight = FontWeight.Black,
             fontSize = 10.sp
         )
         Spacer(modifier = Modifier.height(6.dp))
-        if (forgeState.clonedVoices.isEmpty()) {
+        if (userClones.isEmpty()) {
             Text(
                 text = "// No cloned voices yet. Launch the recorder above after installing a cloning engine in ROM-03 or ROM-04.",
                 color = MikaColors.DimText,
@@ -1468,7 +1471,7 @@ private fun CloneStudioModuleWindowBody(
             )
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                forgeState.clonedVoices.forEach { clone ->
+                userClones.forEach { clone ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()

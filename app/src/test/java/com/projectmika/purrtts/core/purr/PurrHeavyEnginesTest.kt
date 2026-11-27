@@ -430,4 +430,88 @@ class PurrHeavyEnginesTest {
         assertEquals(16, phononVoices.size)
         assertTrue(phononVoices.all { it.engine == BackendType.ONNX_NATIVE && it.id.startsWith("phonon_") })
     }
+
+    @Test
+    fun `manga cast clones stay isolated from general tts and engines isolate primary and dialogue voices`() {
+        val repoDir = Files.createTempDirectory("purr_isolation").toFile()
+        try {
+            val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
+            val poisonedClone = ClonedVoiceProfile(
+                id = "manga_auto_proj1_char1",
+                displayName = "Manga Cast // CHAR_A",
+                family = SherpaModelFamily.ZIPVOICE,
+                cloneEngineId = "sub_qwen3_base_06b",
+                referenceWavPath = "/tmp/manga_seed.wav",
+                referenceTranscript = "Wait right there!",
+                tags = listOf("manga", "autoclone", "sub_qwen3_base_06b")
+            )
+            // Legacy state where Tab 1 profile was polluted with a Manga Cast clone & cross-engine dialogue voice
+            File(repoDir, "purr_forge_state.json").writeText(
+                json.encodeToString(
+                    PurrForgeState(
+                        activeProfileId = "gachaswipe_default",
+                        profiles = listOf(
+                            PurrDefaultPresets.builtInProfiles().first().copy(
+                                selectedCartridgeId = "rom_kitten_tts",
+                                preferredBackend = BackendType.SHERPA_ONNX,
+                                sherpaFamily = SherpaModelFamily.KITTEN_TTS,
+                                primaryVoiceId = poisonedClone.id,
+                                dialogueVoiceId = "af_bella"
+                            )
+                        ),
+                        clonedVoices = listOf(poisonedClone),
+                        slottedCartridges = setOf("rom_core_os", "rom_kitten_tts", "rom_kokoro_sherpa"),
+                        modelStates = mapOf(
+                            "rom_kitten_tts" to ModelBundleState("rom_kitten_tts", DownloadState.INSTALLED, sha256Verified = true),
+                            "rom_kokoro_sherpa" to ModelBundleState("rom_kokoro_sherpa", DownloadState.INSTALLED, sha256Verified = true),
+                            "rom_kokoro_fp32" to ModelBundleState("rom_kokoro_fp32", DownloadState.INSTALLED, sha256Verified = true),
+                            "sub_qwen3_base_06b" to ModelBundleState("sub_qwen3_base_06b", DownloadState.INSTALLED, sha256Verified = true)
+                        ),
+                        enabledSubCartridges = emptySet()
+                    )
+                )
+            )
+
+            val repo = PurrProfileRepository(repoDir)
+            // 1. Persisted Manga Cast clone is healed off the active profile & hidden from general TTS
+            assertTrue(repo.currentProfile.primaryVoiceId.startsWith("kitten_"))
+            assertTrue(repo.currentProfile.dialogueVoiceId.startsWith("kitten_"))
+            assertTrue(repo.allAvailableVoices().none { it.id == poisonedClone.id })
+            assertTrue(repo.userClonedVoices().none { it.id == poisonedClone.id })
+            assertFalse("sub_qwen3_base_06b" in repo.state.value.slottedCartridges)
+
+            // 2. Manga Dub Studio still sees Manga clones when explicitly requested
+            assertTrue(repo.allAvailableVoices(includeMangaClones = true).any { it.id == poisonedClone.id })
+
+            // 3. Disabled sub-cartridges (rom_kokoro_fp32 not in enabledSubCartridges) stay hidden
+            assertTrue(repo.allAvailableVoices().none { it.id.startsWith("fp32_") })
+
+            // 4. Background Manga clone upsert neither surfaces globally nor auto-slots CLN-04
+            val secondMangaClone = ClonedVoiceProfile(
+                id = "manga_auto_proj1_char2",
+                displayName = "Manga Cast // CHAR_B",
+                family = SherpaModelFamily.ZIPVOICE,
+                cloneEngineId = "sub_qwen3_base_06b",
+                referenceWavPath = "/tmp/manga_seed_2.wav",
+                referenceTranscript = "Don't look!",
+                tags = listOf("manga", "autoclone", "sub_qwen3_base_06b"),
+                mangaOnly = true
+            )
+            repo.upsertBackgroundClonedVoice(secondMangaClone)
+            assertTrue(repo.allAvailableVoices().none { it.id == secondMangaClone.id })
+            assertFalse("sub_qwen3_base_06b" in repo.state.value.slottedCartridges)
+
+            // 5. Switching engines updates BOTH primaryVoiceId and dialogueVoiceId strictly to that engine
+            repo.selectEngineCartridge("rom_kokoro_sherpa")
+            val kokoroIds = repo.allAvailableVoices().filter { it.cartridgeId == "rom_kokoro_sherpa" }.map { it.id }.toSet()
+            assertTrue(repo.currentProfile.primaryVoiceId in kokoroIds)
+            assertTrue(repo.currentProfile.dialogueVoiceId in kokoroIds)
+
+            repo.selectEngineCartridge("rom_core_os")
+            assertEquals("core_os_auto", repo.currentProfile.primaryVoiceId)
+            assertEquals("core_os_auto", repo.currentProfile.dialogueVoiceId)
+        } finally {
+            repoDir.deleteRecursively()
+        }
+    }
 }

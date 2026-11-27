@@ -43,11 +43,11 @@ class PurrProfileRepository(filesDir: File) {
         "qwen3GpuOffload"
     )
 
-    private val _state = MutableStateFlow(loadInitialState())
-    val state: StateFlow<PurrForgeState> = _state.asStateFlow()
-
     private val _discoveredSystemVoices = MutableStateFlow<List<VoiceDescriptor>>(emptyList())
     val discoveredSystemVoices: StateFlow<List<VoiceDescriptor>> = _discoveredSystemVoices.asStateFlow()
+
+    private val _state = MutableStateFlow(loadInitialState())
+    val state: StateFlow<PurrForgeState> = _state.asStateFlow()
 
     val currentProfile: PurrProfile
         get() {
@@ -164,19 +164,24 @@ class PurrProfileRepository(filesDir: File) {
                 val needsSubHeal = slotted && p.selectedCartridgeId == cartridgeId &&
                     availableVoices.none { it.id == p.primaryVoiceId }
                 if (needsSwitchOnEject && fallbackCart != null) {
+                    val nextPrimary = fallbackVoice?.id ?: p.primaryVoiceId
+                    val voicesForFallback = availableVoices.filter { it.cartridgeId == fallbackCart }
                     p.copy(
                         selectedCartridgeId = fallbackCart,
                         preferredBackend = fallbackVoice?.engine ?: fallbackSpec?.backend ?: p.preferredBackend,
                         sherpaFamily = fallbackVoice?.sherpaFamily ?: fallbackSpec?.sherpaFamily ?: p.sherpaFamily,
-                        primaryVoiceId = fallbackVoice?.id ?: p.primaryVoiceId
+                        primaryVoiceId = nextPrimary,
+                        dialogueVoiceId = pickDialogueVoiceForCartridge(voicesForFallback, nextPrimary, p.dialogueVoiceId)
                     )
                 } else if (needsSubHeal) {
                     val healed = availableVoices.firstOrNull { it.cartridgeId == cartridgeId }
                     if (healed != null) {
+                        val voicesForCart = availableVoices.filter { it.cartridgeId == cartridgeId }
                         p.copy(
                             preferredBackend = healed.engine,
                             sherpaFamily = healed.sherpaFamily ?: p.sherpaFamily,
-                            primaryVoiceId = healed.id
+                            primaryVoiceId = healed.id,
+                            dialogueVoiceId = pickDialogueVoiceForCartridge(voicesForCart, healed.id, p.dialogueVoiceId)
                         )
                     } else p
                 } else {
@@ -216,27 +221,42 @@ class PurrProfileRepository(filesDir: File) {
 
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }
-        val voicesForCart = allAvailableVoices().filter { it.cartridgeId == cartridgeId }
+        val normalizedId = if (cartridgeId == "core_os") "rom_core_os" else cartridgeId
+        val voicesForCart = allAvailableVoices(includeMangaClones = false).filter { it.cartridgeId == normalizedId }
         val defaultVoice = voicesForCart.firstOrNull()
 
         updateActiveProfile { p ->
-            when (cartridgeId) {
-                "rom_core_os", "core_os" -> p.copy(
-                    selectedCartridgeId = "rom_core_os",
-                    preferredBackend = BackendType.CORE_OS,
-                    primaryVoiceId = voicesForCart.firstOrNull()?.id ?: "core_os_auto"
-                )
+            when (normalizedId) {
+                "rom_core_os" -> {
+                    val nextPrimary = voicesForCart.firstOrNull { it.id == p.primaryVoiceId }?.id
+                        ?: defaultVoice?.id
+                        ?: "core_os_auto"
+                    val nextDialogue = pickDialogueVoiceForCartridge(voicesForCart, nextPrimary, p.dialogueVoiceId)
+                    p.copy(
+                        selectedCartridgeId = "rom_core_os",
+                        preferredBackend = BackendType.CORE_OS,
+                        primaryVoiceId = nextPrimary,
+                        dialogueVoiceId = nextDialogue
+                    )
+                }
                 "proxy_lan" -> p.copy(
                     selectedCartridgeId = "proxy_lan",
                     preferredBackend = BackendType.EXTERNAL_PROXY,
-                    primaryVoiceId = "proxy_openai_endpoint"
+                    primaryVoiceId = "proxy_openai_endpoint",
+                    dialogueVoiceId = "proxy_openai_endpoint"
                 )
-                else -> p.copy(
-                    selectedCartridgeId = cartridgeId,
-                    preferredBackend = defaultVoice?.engine ?: spec?.backend ?: BackendType.SHERPA_ONNX,
-                    sherpaFamily = defaultVoice?.sherpaFamily ?: spec?.sherpaFamily ?: p.sherpaFamily,
-                    primaryVoiceId = defaultVoice?.id ?: p.primaryVoiceId
-                )
+                else -> {
+                    val chosen = voicesForCart.firstOrNull { it.id == p.primaryVoiceId } ?: defaultVoice
+                    val nextPrimary = chosen?.id ?: p.primaryVoiceId
+                    val nextDialogue = pickDialogueVoiceForCartridge(voicesForCart, nextPrimary, p.dialogueVoiceId)
+                    p.copy(
+                        selectedCartridgeId = normalizedId,
+                        preferredBackend = chosen?.engine ?: spec?.backend ?: BackendType.SHERPA_ONNX,
+                        sherpaFamily = chosen?.sherpaFamily ?: spec?.sherpaFamily ?: p.sherpaFamily,
+                        primaryVoiceId = nextPrimary,
+                        dialogueVoiceId = nextDialogue
+                    )
+                }
             }
         }
     }
@@ -329,11 +349,26 @@ class PurrProfileRepository(filesDir: File) {
         }
         updateState { s ->
             val updatedClones = s.clonedVoices.filterNot { it.id == voice.id } + voice
+            val nextEnabledSubs = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
+                s.enabledSubCartridges + engineId
+            } else {
+                s.enabledSubCartridges
+            }
+            val nextSlotted = s.slottedCartridges + targetCart
+            val targetVoices = computeAvailableVoices(
+                s.copy(
+                    clonedVoices = updatedClones,
+                    slottedCartridges = nextSlotted,
+                    enabledSubCartridges = nextEnabledSubs
+                ),
+                includeMangaClones = false
+            ).filter { it.cartridgeId == targetCart }
             val updatedProfiles = s.profiles.map { p ->
                 if (p.id == s.activeProfileId) {
                     p.copy(
                         selectedCartridgeId = targetCart,
                         primaryVoiceId = voice.id,
+                        dialogueVoiceId = pickDialogueVoiceForCartridge(targetVoices, voice.id, p.dialogueVoiceId),
                         preferredBackend = targetBackend,
                         sherpaFamily = voice.family
                     )
@@ -341,15 +376,10 @@ class PurrProfileRepository(filesDir: File) {
                     p
                 }
             }
-            val nextEnabledSubs = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
-                s.enabledSubCartridges + engineId
-            } else {
-                s.enabledSubCartridges
-            }
             s.copy(
                 clonedVoices = updatedClones,
                 profiles = updatedProfiles,
-                slottedCartridges = s.slottedCartridges + targetCart,
+                slottedCartridges = nextSlotted,
                 enabledSubCartridges = nextEnabledSubs
             )
         }
@@ -358,20 +388,26 @@ class PurrProfileRepository(filesDir: File) {
     /**
      * Registers or updates a cloned voice profile in the background without disturbing
      * the user's currently selected Tab 1 speaking profile or voice.
+     * Manga-only clones never auto-slot cloning cartridges into the global TTS rack.
      */
     fun upsertBackgroundClonedVoice(voice: ClonedVoiceProfile) {
         val engineId = voice.resolvedCloneEngineId
         val targetCart = resolveCloneTargetCartridge(engineId)
         updateState { s ->
             val updatedClones = s.clonedVoices.filterNot { it.id == voice.id } + voice
-            val nextEnabledSubs = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
+            val nextEnabledSubs = if (!voice.isMangaOnly && engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
                 s.enabledSubCartridges + engineId
             } else {
                 s.enabledSubCartridges
             }
+            val nextSlotted = if (voice.isMangaOnly) {
+                s.slottedCartridges
+            } else {
+                s.slottedCartridges + targetCart
+            }
             s.copy(
                 clonedVoices = updatedClones,
-                slottedCartridges = s.slottedCartridges + targetCart,
+                slottedCartridges = nextSlotted,
                 enabledSubCartridges = nextEnabledSubs
             )
         }
@@ -474,9 +510,10 @@ class PurrProfileRepository(filesDir: File) {
             )
             if (bundleState.state == DownloadState.INSTALLED && spec?.category == CartridgeCategory.TTS) {
                 val targetHub = spec.parentCartridgeId?.takeIf { it.isNotBlank() } ?: specId
-                val avail = computeAvailableVoices(provisional)
+                val avail = computeAvailableVoices(provisional, includeMangaClones = false)
+                val voicesForHub = avail.filter { it.cartridgeId == targetHub }
                 val preferredForBundle = avail.filter { it.requiredSubCartridgeId == specId }
-                    .ifEmpty { avail.filter { it.cartridgeId == targetHub } }
+                    .ifEmpty { voicesForHub }
                 val healedProfiles = provisional.profiles.map { p ->
                     if (p.id == provisional.activeProfileId &&
                         p.selectedCartridgeId == targetHub &&
@@ -487,7 +524,8 @@ class PurrProfileRepository(filesDir: File) {
                             p.copy(
                                 preferredBackend = pick.engine,
                                 sherpaFamily = pick.sherpaFamily ?: p.sherpaFamily,
-                                primaryVoiceId = pick.id
+                                primaryVoiceId = pick.id,
+                                dialogueVoiceId = pickDialogueVoiceForCartridge(voicesForHub, pick.id, p.dialogueVoiceId)
                             )
                         } else p
                     } else p
@@ -499,10 +537,31 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
-    fun allAvailableVoices(): List<VoiceDescriptor> = computeAvailableVoices(_state.value)
+    fun userClonedVoices(): List<ClonedVoiceProfile> =
+        _state.value.clonedVoices.filterNot { it.isMangaOnly }
 
-    private fun computeAvailableVoices(state: PurrForgeState): List<VoiceDescriptor> {
+    private fun pickDialogueVoiceForCartridge(
+        voicesForCart: List<VoiceDescriptor>,
+        primaryId: String,
+        currentDialogueId: String
+    ): String {
+        if (currentDialogueId.isNotBlank() && voicesForCart.any { it.id == currentDialogueId }) {
+            return currentDialogueId
+        }
+        return voicesForCart.firstOrNull { it.id != primaryId }?.id
+            ?: voicesForCart.firstOrNull()?.id
+            ?: primaryId
+    }
+
+    fun allAvailableVoices(includeMangaClones: Boolean = false): List<VoiceDescriptor> =
+        computeAvailableVoices(_state.value, includeMangaClones)
+
+    private fun computeAvailableVoices(
+        state: PurrForgeState,
+        includeMangaClones: Boolean = false
+    ): List<VoiceDescriptor> {
         val catalog = PurrDefaultPresets.modelCatalog()
+        val catalogById = catalog.associateBy { it.id }
         val addOnChipIds = setOf("rom_kokoro_npu_g2p", "rom_kokoro_litert")
         val hubCartridgesWithStandaloneSubs = setOf(
             "rom_kokoro_sherpa", "rom_piper", "rom_kitten_tts", "rom_qwen3_custom_06b",
@@ -511,10 +570,18 @@ class PurrProfileRepository(filesDir: File) {
             "rom_mimic3_neural"
         )
         val base = PurrDefaultPresets.builtInVoices().filter { v ->
-            val subOk = v.requiredSubCartridgeId == null ||
-                (v.requiredSubCartridgeId in state.enabledSubCartridges &&
-                    state.modelStates[v.requiredSubCartridgeId]?.state == DownloadState.INSTALLED) ||
-                state.modelStates[v.requiredSubCartridgeId]?.state == DownloadState.INSTALLED
+            val subOk = if (v.requiredSubCartridgeId == null) {
+                true
+            } else {
+                val reqId = v.requiredSubCartridgeId
+                val installed = state.modelStates[reqId]?.state == DownloadState.INSTALLED
+                val reqSpec = catalogById[reqId]
+                if (reqSpec?.isSubCartridge == true) {
+                    installed && reqId in state.enabledSubCartridges
+                } else {
+                    installed
+                }
+            }
             val baseHubOk = if (v.requiredSubCartridgeId != null) {
                 true
             } else if (v.cartridgeId in hubCartridgesWithStandaloneSubs) {
@@ -531,40 +598,43 @@ class PurrProfileRepository(filesDir: File) {
             subOk && baseHubOk
         }
         val sysVoices = _discoveredSystemVoices.value
-        val cloned = state.clonedVoices.map { c ->
-            val engineId = c.resolvedCloneEngineId
-            val cartId = when (engineId) {
-                "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
-                "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
-                "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
-                else -> "rom_pocket_tts"
+        val cloned = state.clonedVoices
+            .filter { includeMangaClones || !it.isMangaOnly }
+            .map { c ->
+                val engineId = c.resolvedCloneEngineId
+                val cartId = when (engineId) {
+                    "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
+                    "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
+                    "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
+                    else -> "rom_pocket_tts"
+                }
+                val requiredSub = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) engineId else null
+                val backend = when (engineId) {
+                    "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
+                    "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
+                    else -> BackendType.SHERPA_ONNX
+                }
+                val engineTag = when (engineId) {
+                    "sub_qwen3_base_06b" -> "Qwen3 0.6B Base"
+                    "sub_chatterbox_turbo" -> "Chatterbox-Turbo"
+                    "sub_pocket_fp32" -> "Pocket FP32"
+                    "sub_zipvoice_full" -> "ZipVoice Full"
+                    else -> c.family.label
+                }
+                VoiceDescriptor(
+                    id = c.id,
+                    displayName = "Clone ($engineTag) // ${c.displayName}",
+                    engine = backend,
+                    cartridgeId = cartId,
+                    requiredSubCartridgeId = requiredSub,
+                    sherpaFamily = c.family,
+                    gender = c.gender,
+                    languageCode = c.languageCode,
+                    nativeTags = c.tags + listOf(c.gender.tag, "cloned"),
+                    isCloned = true,
+                    isMangaOnly = c.isMangaOnly
+                )
             }
-            val requiredSub = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) engineId else null
-            val backend = when (engineId) {
-                "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
-                "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
-                else -> BackendType.SHERPA_ONNX
-            }
-            val engineTag = when (engineId) {
-                "sub_qwen3_base_06b" -> "Qwen3 0.6B Base"
-                "sub_chatterbox_turbo" -> "Chatterbox-Turbo"
-                "sub_pocket_fp32" -> "Pocket FP32"
-                "sub_zipvoice_full" -> "ZipVoice Full"
-                else -> c.family.label
-            }
-            VoiceDescriptor(
-                id = c.id,
-                displayName = "Clone ($engineTag) // ${c.displayName}",
-                engine = backend,
-                cartridgeId = cartId,
-                requiredSubCartridgeId = requiredSub,
-                sherpaFamily = c.family,
-                gender = c.gender,
-                languageCode = c.languageCode,
-                nativeTags = c.tags + listOf(c.gender.tag, "cloned"),
-                isCloned = true
-            )
-        }
         return sysVoices + cloned + base
     }
 
@@ -702,23 +772,33 @@ class PurrProfileRepository(filesDir: File) {
                     }
                 }
             }
-            // Promote cloning engines out of retired rom_clone_hub & rom_qwen3_custom_06b into CLONING bay
+            // Promote cloning engines out of retired rom_clone_hub & rom_qwen3_custom_06b into CLONING bay once
+            val migratingLegacyCloneHub = "rom_clone_hub" in decoded.slottedCartridges ||
+                topLevelCloningIds.any { it in decoded.enabledSubCartridges }
             nextSlotted.remove("rom_clone_hub")
-            for (cloningId in topLevelCloningIds) {
-                if (normalizedModelStates[cloningId]?.state == DownloadState.INSTALLED) {
-                    nextSlotted += cloningId
-                    nextEnabledSubs.remove(cloningId)
+            if (migratingLegacyCloneHub) {
+                for (cloningId in topLevelCloningIds) {
+                    if (normalizedModelStates[cloningId]?.state == DownloadState.INSTALLED) {
+                        nextSlotted += cloningId
+                        nextEnabledSubs.remove(cloningId)
+                    }
                 }
             }
             if (normalizedModelStates["sub_pocket_fp32"]?.state == DownloadState.INSTALLED) {
-                nextSlotted += "rom_pocket_tts"
+                if (migratingLegacyCloneHub) nextSlotted += "rom_pocket_tts"
                 nextEnabledSubs += "sub_pocket_fp32"
             }
             if (normalizedModelStates["sub_zipvoice_full"]?.state == DownloadState.INSTALLED) {
-                nextSlotted += "rom_zipvoice"
+                if (migratingLegacyCloneHub) nextSlotted += "rom_zipvoice"
                 nextEnabledSubs += "sub_zipvoice_full"
             }
             val clonedById = decoded.clonedVoices.associateBy { it.id }
+            val provisionalForVoices = decoded.copy(
+                modelStates = normalizedModelStates,
+                slottedCartridges = nextSlotted,
+                enabledSubCartridges = nextEnabledSubs
+            )
+            val nonMangaVoices = computeAvailableVoices(provisionalForVoices, includeMangaClones = false)
             val remappedProfiles = decoded.profiles.map { profile ->
                 val prefix = premiumPrefixByCartridge[profile.selectedCartridgeId]
                 val prefixFixed = if (prefix == null) {
@@ -745,8 +825,8 @@ class PurrProfileRepository(filesDir: File) {
                     prefixFixed
                 }
                 val clonedMatch = clonedById[hubFixed.primaryVoiceId]
-                when {
-                    clonedMatch != null -> {
+                val cloneFixed = when {
+                    clonedMatch != null && !clonedMatch.isMangaOnly -> {
                         val targetCart = when (clonedMatch.resolvedCloneEngineId) {
                             "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
                             "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
@@ -768,6 +848,34 @@ class PurrProfileRepository(filesDir: File) {
                         hubFixed.copy(selectedCartridgeId = "sub_qwen3_base_06b")
                     }
                     else -> hubFixed
+                }
+
+                // Isolate primary & dialogue voices strictly to cloneFixed.selectedCartridgeId (and heal Manga Cast bleed)
+                val cartVoices = nonMangaVoices.filter { it.cartridgeId == cloneFixed.selectedCartridgeId }
+                    .ifEmpty { PurrDefaultPresets.builtInVoices().filter { it.cartridgeId == cloneFixed.selectedCartridgeId } }
+                if (cartVoices.isEmpty()) {
+                    cloneFixed
+                } else {
+                    val isCoreOsSysPrimary = cloneFixed.selectedCartridgeId == "rom_core_os" &&
+                        cloneFixed.primaryVoiceId.startsWith("core_os_sys:")
+                    val primaryValid = isCoreOsSysPrimary || cartVoices.any { it.id == cloneFixed.primaryVoiceId }
+                    val healedPrimary = if (primaryValid) null else cartVoices.first()
+                    val finalPrimaryId = healedPrimary?.id ?: cloneFixed.primaryVoiceId
+
+                    val isCoreOsSysDialogue = cloneFixed.selectedCartridgeId == "rom_core_os" &&
+                        cloneFixed.dialogueVoiceId.startsWith("core_os_sys:")
+                    val finalDialogueId = if (isCoreOsSysDialogue) {
+                        cloneFixed.dialogueVoiceId
+                    } else {
+                        pickDialogueVoiceForCartridge(cartVoices, finalPrimaryId, cloneFixed.dialogueVoiceId)
+                    }
+
+                    cloneFixed.copy(
+                        primaryVoiceId = finalPrimaryId,
+                        dialogueVoiceId = finalDialogueId,
+                        preferredBackend = healedPrimary?.engine ?: cloneFixed.preferredBackend,
+                        sherpaFamily = healedPrimary?.sherpaFamily ?: cloneFixed.sherpaFamily
+                    )
                 }
             }
             decoded.copy(

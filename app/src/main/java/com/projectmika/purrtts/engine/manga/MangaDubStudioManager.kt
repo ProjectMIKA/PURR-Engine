@@ -2064,7 +2064,7 @@ class MangaDubStudioManager(
             )
             chapter = proj.chapters.firstOrNull { it.id == chapterId } ?: chapter
         }
-        val voices = repository.allAvailableVoices()
+        val voices = repository.allAvailableVoices(includeMangaClones = true)
 
         mutateChapterStatus(projectId, chapterId, MangaChapterStatus.SYNTHESIZING_AUDIO, null)
         reportTelemetry(
@@ -2589,7 +2589,7 @@ class MangaDubStudioManager(
         if (charsToLock.isEmpty()) return proj
 
         val seedDir = File(projectDir(proj.id), "voice_seeds").apply { mkdirs() }
-        val availableNow = repository.allAvailableVoices()
+        val availableNow = repository.allAvailableVoices(includeMangaClones = true)
         val updatedCharacters = proj.characters.toMutableList()
         val designBase = repository.currentProfile.copy(
             selectedCartridgeId = "rom_qwen3_custom_06b",
@@ -2707,7 +2707,8 @@ class MangaDubStudioManager(
                     referenceWavPath = seedFile.absolutePath,
                     referenceTranscript = seedTranscript,
                     tags = listOf("manga", "autoclone", targetCloneEngineId),
-                    cloneEngineId = targetCloneEngineId
+                    cloneEngineId = targetCloneEngineId,
+                    mangaOnly = true
                 )
             )
             updatedCharacters[idx] = ch.copy(
@@ -2902,7 +2903,7 @@ class MangaDubStudioManager(
             .split(Regex("[^a-z0-9]+"))
             .filter { it.length >= 3 }
         val smartVoice = PurrVoiceMatcher.assignVoice(
-            voices = availableVoices,
+            voices = availableVoices.filterNot { it.isMangaOnly },
             profile = baseProfile,
             queryName = character.name,
             queryTags = queryTags,

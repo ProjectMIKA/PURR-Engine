@@ -39,8 +39,13 @@ jobs:
           mkdir -p app/libs
           curl -fSL -o app/libs/sherpa-onnx-1.13.8.aar \
             "https://github.com/k2-fsa/sherpa-onnx/releases/download/v1.13.8/sherpa-onnx-1.13.8.aar"
-          # Keep single unified libonnxruntime.so from onnxruntime-android 1.31.1
-          zip -d app/libs/sherpa-onnx-1.13.8.aar "jni/*/libonnxruntime.so" || true
+          curl -fSL -o /tmp/ort-android.aar \
+            "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.31.1/onnxruntime-android-1.31.1.aar"
+          # Keep single unified libonnxruntime.so from onnxruntime-android 1.31.1 AND align
+          # sherpa-onnx ELF symbol versions (.gnu.version_r VERS_1.28.2 -> VERS_1.31.1) so Android Bionic loads cleanly.
+          python3 scripts/align_sherpa_ort_abi.py \
+            --sherpa-aar app/libs/sherpa-onnx-1.13.8.aar \
+            --ort-aar /tmp/ort-android.aar
           ls -lh app/libs/sherpa-onnx-1.13.8.aar
 
       - name: Fetch Native Qwen3-TTS (LunaVox + llama.cpp b8470 + ORT Headers)
@@ -57,8 +62,10 @@ jobs:
           # 3) Clamps max_frames inside talker_ctx_cap_ so long bubbles/seeds never fail with context overflow.
           git -C "$TP_DIR/lunavox" apply --check "$GITHUB_WORKSPACE/patches/lunavox_opencl_gpu_offload.patch"
           git -C "$TP_DIR/lunavox" apply "$GITHUB_WORKSPACE/patches/lunavox_opencl_gpu_offload.patch"
-          curl -fSL -o /tmp/ort-android.aar \
-            "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.31.1/onnxruntime-android-1.31.1.aar"
+          if [ ! -f /tmp/ort-android.aar ]; then
+            curl -fSL -o /tmp/ort-android.aar \
+              "https://repo1.maven.org/maven2/com/microsoft/onnxruntime/onnxruntime-android/1.31.1/onnxruntime-android-1.31.1.aar"
+          fi
           unzip -q /tmp/ort-android.aar "headers/*" "jni/arm64-v8a/libonnxruntime.so" "jni/x86_64/libonnxruntime.so" -d "$TP_DIR/onnxruntime"
           mv "$TP_DIR/onnxruntime/headers/"* "$TP_DIR/onnxruntime/include/"
           rm -rf /tmp/ort-android.aar "$TP_DIR/onnxruntime/headers"
@@ -107,6 +114,7 @@ jobs:
             echo "Error: Release APK not found at $APK_SRC" >&2
             exit 1
           fi
+          python3 scripts/align_sherpa_ort_abi.py --verify-apk "$APK_SRC"
           cp "$APK_SRC" "builds/PURR-Engine_V${VERSION}_Android.apk"
           cp "$APK_SRC" "builds/PURR-TTS_V${VERSION}.apk"
           APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)

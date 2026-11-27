@@ -128,6 +128,13 @@ class SherpaOnnxEngine(
         return siblingCandidate?.absolutePath.orEmpty()
     }
 
+    private fun isCharacterFrontendVits(subCartridgeId: String?, dir: File): Boolean {
+        val id = subCartridgeId.orEmpty()
+        return id == "rom_meta_mms" ||
+            id.startsWith("sub_mms_") ||
+            dir.name.contains("mms", ignoreCase = true)
+    }
+
     private fun hasMinimumRequiredAssets(dir: File, family: SherpaModelFamily): Boolean {
         if (!dir.exists() || !dir.isDirectory) return false
         val files = dir.walkTopDown()
@@ -170,7 +177,7 @@ class SherpaOnnxEngine(
                 files.any { it.extension.equals("onnx", true) && !isVocoderOnnx(it) } &&
                 resolveMatchaVocoderForDir(dir, files).isNotEmpty()
             SherpaModelFamily.PIPER -> files.any { it.name == "tokens.txt" } &&
-                (files.any { it.name.startsWith("lexicon") } || hasEspeak)
+                (files.any { it.name.startsWith("lexicon") } || hasEspeak || isCharacterFrontendVits(null, dir))
             SherpaModelFamily.MELO_TTS -> files.any { it.name == "tokens.txt" }
         }
     }
@@ -220,28 +227,6 @@ class SherpaOnnxEngine(
                 speakerIndex = installedSibling.speakerIndex,
                 voiceDisplayName = installedSibling.displayName,
                 cartridgeId = installedSibling.cartridgeId
-            )
-        }
-
-        // Active cartridge fallback: if the requested voice's hub isn't installed, route to the currently selected cartridge
-        val activeCartFallback = allBuiltIn.firstOrNull { candidate ->
-            candidate.cartridgeId == profile.selectedCartridgeId &&
-                candidate.sherpaFamily != null &&
-                run {
-                    val cSub = candidate.requiredSubCartridgeId
-                        ?: candidate.cartridgeId.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
-                    hasMinimumRequiredAssets(familyDir(candidate.sherpaFamily, cSub), candidate.sherpaFamily)
-                }
-        }
-        if (activeCartFallback != null && activeCartFallback.sherpaFamily != null) {
-            val resolvedSub = activeCartFallback.requiredSubCartridgeId
-                ?: activeCartFallback.cartridgeId.takeIf { it !in setOf("rom_piper", "rom_kokoro_sherpa", "rom_kitten_tts") }
-            return MountTarget(
-                family = activeCartFallback.sherpaFamily,
-                subCartridgeId = resolvedSub,
-                speakerIndex = activeCartFallback.speakerIndex,
-                voiceDisplayName = activeCartFallback.displayName,
-                cartridgeId = activeCartFallback.cartridgeId
             )
         }
 
@@ -603,13 +588,6 @@ class SherpaOnnxEngine(
                 files = scanNonEspeakFiles(dir)
             }
         }
-        val repairedEspeakDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
-        val dataDir = resolveStableEspeakDir(repairedEspeakDir)
-        if (repairedEspeakDir != null && dataDir.isEmpty()) {
-            lastMountError = "Incomplete espeak-ng-data in ${dir.name} (missing phontab/phonindex/phondata/intonations) — re-download cartridge"
-            Log.w(TAG, "[MOUNT_MISS] $lastMountError")
-            return
-        }
 
         val sortedLexiconFiles = files.filter { it.name.startsWith("lexicon") && it.extension.equals("txt", ignoreCase = true) }
             .sortedWith(
@@ -628,6 +606,20 @@ class SherpaOnnxEngine(
             )
         val multiLexicons = sortedLexiconFiles.joinToString(",") { it.absolutePath }
         val singleLexicon = sortedLexiconFiles.firstOrNull()?.absolutePath.orEmpty()
+
+        val repairedEspeakDir = dir.walkTopDown().firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
+        val allowSharedEspeakFallback = when (family) {
+            SherpaModelFamily.KOKORO,
+            SherpaModelFamily.KITTEN_TTS -> true
+            SherpaModelFamily.PIPER -> sortedLexiconFiles.isEmpty() && !isCharacterFrontendVits(subCartridgeId, dir)
+            else -> false
+        }
+        val dataDir = resolveStableEspeakDir(repairedEspeakDir, allowSharedEspeakFallback)
+        if (repairedEspeakDir != null && dataDir.isEmpty()) {
+            lastMountError = "Incomplete espeak-ng-data in ${dir.name} (missing phontab/phonindex/phondata/intonations) — re-download cartridge"
+            Log.w(TAG, "[MOUNT_MISS] $lastMountError")
+            return
+        }
 
         // Order rule FSTs properly (`phone*` -> `date*` -> `number*` -> `new_heteronym*` -> others)
         // matching k2-fsa's upstream generate-tts-apk-script pipeline. For MeloTTS ZH-EN exclude
@@ -907,13 +899,17 @@ class SherpaOnnxEngine(
                     retryAttempt.getOrThrow()
                 } else {
                     val retryErr = retryAttempt.exceptionOrNull() ?: firstErr
-                    lastMountError = retryErr?.message ?: "OfflineTts mount failed"
+                    lastMountError = retryErr?.message?.takeIf { it.isNotBlank() }
+                        ?: retryErr?.javaClass?.simpleName
+                        ?: "OfflineTts mount failed"
                     Log.e(TAG, "Failed to mount sherpa-onnx ${family.label} after repair: $lastMountError", retryErr)
                     activeOfflineTts = null
                     return
                 }
             } else {
-                lastMountError = firstErr?.message ?: "OfflineTts mount failed"
+                lastMountError = firstErr?.message?.takeIf { it.isNotBlank() }
+                    ?: firstErr?.javaClass?.simpleName
+                    ?: "OfflineTts mount failed"
                 Log.e(TAG, "Failed to mount sherpa-onnx ${family.label}: $lastMountError", firstErr)
                 activeOfflineTts = null
                 return
@@ -924,7 +920,7 @@ class SherpaOnnxEngine(
         Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")
     }
 
-    private fun resolveStableEspeakDir(rawEspeakDir: File?): String {
+    private fun resolveStableEspeakDir(rawEspeakDir: File?, allowSharedFallback: Boolean): String {
         if (rawEspeakDir != null) {
             if (!isCompleteEspeakDir(rawEspeakDir)) return ""
             if (!isCompleteEspeakDir(sharedEspeakDir)) {
@@ -933,7 +929,7 @@ class SherpaOnnxEngine(
             }
             return sharedEspeakDir.takeIf { isCompleteEspeakDir(it) }?.absolutePath ?: rawEspeakDir.absolutePath
         }
-        return if (isCompleteEspeakDir(sharedEspeakDir)) sharedEspeakDir.absolutePath else ""
+        return if (allowSharedFallback && isCompleteEspeakDir(sharedEspeakDir)) sharedEspeakDir.absolutePath else ""
     }
 
     private fun tryRepairSherpaDirFromArchiveLocked(
