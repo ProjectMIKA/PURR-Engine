@@ -1,3 +1,27 @@
+# 🌌 PURR-TTS v2.6.1 // Living Ember
+
+### ✨ What's New since v2.6.0
+
+Butter-smooth continuous hardware ticker scrolling, a show-don't-tell molten/frosted header residency line with a slick quick-flush popup, and uniform module cards across Tab 2. 🔥🧊🎛️
+
+* **🎞️ Smooth Continuous Hardware/CPU Marquee (`MikaStatusBadge` in `MikaComponents`)**:
+  * Replaced the width-clipped `Text` + `Modifier.offset` transition with an unconstrained `Canvas` multi-copy ticker (`drawText`) driven by a continuous `withFrameNanos` scroll phase (`26.dp/s`).
+  * Eliminated mid-scroll blanking and countdown-tick animation restarts — `1s` keep-warm timer updates now mutate digits in-place while scrolling seamlessly forever.
+* **🔥 Show-Don't-Tell Header Residency Line & Slick Quick-Flush Popup (`TtsForgeScreen`)**:
+  * Removed the inline `WARM` / `FLUSH` button chip so the residency readout gets the full header column width.
+  * **COLD (`COLD: <engine>`):** styled stale and frosted in muted icy slate with a hollow frost ring and zero glow.
+  * **WARMING (`WARMING: <engine>…`):** pulsing amber indicator with heat-up glow.
+  * **HOT (`HOT: <model> (<timer>)`):** dual-wave molten flame gradient (`#FF6D1C` ↔ `#FFDF73`), animated ember `Shadow` blur, radial fire core dot, and subtle horizontal heat shimmer.
+  * **Tap Action:** jumps straight to `TOOL-06` when slotted, or opens the compact `QuickResidencyFlushDialog` popup (`FLUSH RAM/VRAM` + optional `WARM` when cold) when `TOOL-06` is ejected.
+* **📐 Uniform Fixed-Size Cyberdeck Module Cards (`OsDesktopAppTile` in `PurrRulebookTab`)**:
+  * Locked every card in `> STUDIO_APPS` and `> ENGINE_&_SYSTEM_TOOLS` to a consistent `186.dp` height with single-line ellipsized titles/status notes and a fixed 2-line subtitle slot so sibling cards never grow or shrink unevenly on text wrap.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.6.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `54`).
+
+---
+
 # 🌌 PURR-TTS v2.6.0 // Keep It Hot
 
 ### ✨ What's New since v2.5.3
