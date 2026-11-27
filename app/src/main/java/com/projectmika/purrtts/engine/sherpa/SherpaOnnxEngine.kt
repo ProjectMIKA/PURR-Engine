@@ -150,6 +150,9 @@ class SherpaOnnxEngine(
             SherpaModelFamily.KITTEN_TTS -> files.any { it.name == "voices.bin" } &&
                 files.any { it.name == "tokens.txt" } &&
                 hasEspeak
+            // ✨ ZONOS (v2.7.0): native ggml — never validated through the sherpa path.
+            SherpaModelFamily.ZONOS3,
+            SherpaModelFamily.ZONOS1 -> false
             SherpaModelFamily.SUPERTONIC_3 -> {
                 files.any { it.name.contains("duration_predictor") && it.extension.equals("onnx", true) } &&
                     files.any { it.name.contains("text_encoder") && it.extension.equals("onnx", true) } &&
@@ -533,6 +536,9 @@ class SherpaOnnxEngine(
         } else {
             File(modelsBaseDir, "kitten")
         }
+        // ✨ ZONOS (v2.7.0): native ggml dirs — never routed through sherpa in practice.
+        SherpaModelFamily.ZONOS3 -> File(modelsBaseDir, "zonos3")
+        SherpaModelFamily.ZONOS1 -> File(modelsBaseDir, "zonos1")
         SherpaModelFamily.SUPERTONIC_3 -> File(modelsBaseDir, "supertonic3")
         SherpaModelFamily.POCKET_TTS -> if (subCartridgeId != null && subCartridgeId != "rom_pocket_tts") {
             File(modelsBaseDir, "pocket_$subCartridgeId")
@@ -592,6 +598,8 @@ class SherpaOnnxEngine(
             SherpaModelFamily.MATCHA -> "Matcha"
             SherpaModelFamily.PIPER -> "Piper VITS"
             SherpaModelFamily.MELO_TTS -> "MeloTTS"
+            SherpaModelFamily.ZONOS3 -> "Zonos3 Mini"
+            SherpaModelFamily.ZONOS1 -> "Zonos1 Studio"
         }
     }
 
@@ -715,6 +723,9 @@ class SherpaOnnxEngine(
         fun resolveMatchaVocoder(): String = resolveMatchaVocoderForDir(dir, files)
 
         fun buildConfigForProvider(providerName: String): OfflineTtsModelConfig? = when (family) {
+            // ✨ ZONOS (v2.7.0): native ggml engines — never mounted through sherpa-onnx.
+            SherpaModelFamily.ZONOS3,
+            SherpaModelFamily.ZONOS1 -> null
             SherpaModelFamily.KOKORO -> {
                 val onnx = pickPreferredOnnx(files.filter { it.extension.equals("onnx", ignoreCase = true) })
                 val voices = files.firstOrNull { it.name == "voices.bin" }?.absolutePath.orEmpty()

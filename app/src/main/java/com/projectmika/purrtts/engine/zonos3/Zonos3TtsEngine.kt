@@ -7,6 +7,7 @@ import com.projectmika.purrtts.core.purr.ClonedVoiceProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
+import com.projectmika.purrtts.core.purr.PurrSentimentScorer
 import com.projectmika.purrtts.engine.PurrSynthesizer
 import com.projectmika.purrtts.engine.ResidencyTimer
 import com.projectmika.purrtts.engine.SynthesisOutcome

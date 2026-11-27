@@ -195,6 +195,10 @@ class ModelCatalogManager(
             SherpaModelFamily.SUPERTONIC_3 -> files.any { it.name == "tts.json" } &&
                 files.any { it.name.contains("unicode_indexer") } &&
                 files.any { it.name.contains("voice") && it.extension.equals("bin", true) }
+            // ✨ ZONOS (v2.7.0): native ggml bundles never use the sherpa extract path —
+            // branches kept for exhaustiveness; never reached in practice.
+            SherpaModelFamily.ZONOS3,
+            SherpaModelFamily.ZONOS1 -> false
             SherpaModelFamily.POCKET_TTS -> files.any { it.name.contains("lm_flow") } &&
                 files.any { it.name.contains("lm_main") } &&
                 files.any { it.name.contains("encoder") } &&
@@ -802,6 +806,10 @@ class ModelCatalogManager(
         } else {
             File(context.filesDir, "models/sherpa/kitten")
         }
+        // ✨ ZONOS (v2.7.0): isolated dirs for type safety — Zonos specs never carry a
+        // sherpa family, so this branch is unreachable in practice.
+        SherpaModelFamily.ZONOS3,
+        SherpaModelFamily.ZONOS1 -> File(context.filesDir, "models/sherpa/zonos_${spec.id}")
         SherpaModelFamily.SUPERTONIC_3 -> File(context.filesDir, "models/sherpa/supertonic3")
         SherpaModelFamily.POCKET_TTS -> if (spec.id != "rom_pocket_tts") {
             File(context.filesDir, "models/sherpa/pocket_${spec.id}")
