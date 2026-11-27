@@ -21,7 +21,6 @@ Keep Qwen3 1.7B VoiceDesign and heavy neural TTS engines pre-warmed right from t
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.6.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `53`).
-2. **`PURR-TTS_V2.6.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -47,7 +46,6 @@ Every Sherpa-ONNX TTS hub mounts cleanly again, Manga Dub Studio cast clones sta
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.5.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `52`).
-2. **`PURR-TTS_V2.5.3.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -72,7 +70,6 @@ The long-dub mux crash is **root-caused and dead**. `MediaExtractor.readSampleDa
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.5.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `51`).
-2. **`PURR-TTS_V2.5.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -101,7 +98,6 @@ The studio now remembers your settings, hands you a cleaner import panel, and ta
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.5.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `50`).
-2. **`PURR-TTS_V2.5.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -128,7 +124,6 @@ Hour-long dubs are no longer all-or-nothing: **PAUSE and RESUME** the cook at sa
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.5.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `49`).
-2. **`PURR-TTS_V2.5.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -150,7 +145,6 @@ Cloud API models conk out — refusals, censorship walls, rate limits, dead endp
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.4.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `48`).
-2. **`PURR-TTS_V2.4.3.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -172,7 +166,6 @@ The import flow collapses into **ONE smart button** that accepts .cbz, .zip, .cb
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.4.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `47`).
-2. **`PURR-TTS_V2.4.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -196,7 +189,6 @@ Two big ones: the **~50% "Unknown extract error" that killed dubs at the very la
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.4.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `46`).
-2. **`PURR-TTS_V2.4.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -223,7 +215,6 @@ The Manga Dub Studio now opens the gates: **every image format Android can decod
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.4.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `45`).
-2. **`PURR-TTS_V2.4.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -258,7 +249,6 @@ The Manga Dub Studio gets Master's coverage law: the Cast QTY caps VOICES, never
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.3.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `44`).
-2. **`PURR-TTS_V2.3.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -286,7 +276,6 @@ Critical fix for Manga Dub Studio Qwen3 voice synthesis (`Failed to generate spe
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.2.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `43`).
-2. **`PURR-TTS_V2.2.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -307,7 +296,6 @@ Voice-forge resilience hotfix: the upstream LunaVox codec occasionally emits zer
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.2.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `42`).
-2. **`PURR-TTS_V2.2.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -332,7 +320,6 @@ The storyboard preview only sees thumbnails; the deep panel scan sees the truth.
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.2.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `41`).
-2. **`PURR-TTS_V2.2.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -356,7 +343,6 @@ Dub reliability hotfix: the Qwen3 voice forge no longer thrashes its native engi
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.1.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `40`).
-2. **`PURR-TTS_V2.1.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -378,7 +364,6 @@ Quick hotfix & polish release for **`TOOL-12` (`OPENAI_VISION_API_HUB`)** and **
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.1.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `39`).
-2. **`PURR-TTS_V2.1.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -409,7 +394,6 @@ Major Manga Dub Studio & audio cleanliness release: cohesive cross-page storytel
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.1.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `38`).
-2. **`PURR-TTS_V2.1.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -432,7 +416,6 @@ The Manga Dub Studio milestone release: no spoken line can EVER fall back to the
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V2.0.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `37`).
-2. **`PURR-TTS_V2.0.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -455,7 +438,6 @@ Hotfix for a v1.9.9 regression: placeholder-named cast members (like THE_WOMAN) 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.10_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `36`).
-2. **`PURR-TTS_V1.9.10.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -478,7 +460,6 @@ Field-feedback patch for Manga Dub Studio: MIKA's narrator identity is now prote
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.9_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `35`).
-2. **`PURR-TTS_V1.9.9.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -507,7 +488,6 @@ Field-feedback patch for Manga Dub Studio: KV-cache scanning becomes opt-in afte
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.8_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `34`).
-2. **`PURR-TTS_V1.9.8.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -539,7 +519,6 @@ Focus patch for Manga Dub Studio: ends the v1.9.6 bubble-skipping regression, re
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.7_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `33`).
-2. **`PURR-TTS_V1.9.7.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -567,7 +546,6 @@ Major upgrades to Manga Dubbing reading accuracy, anti-drift character voice clo
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.6_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `32`).
-2. **`PURR-TTS_V1.9.6.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -591,7 +569,6 @@ Fixes over-segmentation into tiny speech-bubble crops, backwards Left-to-Right p
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.5_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `31`).
-2. **`PURR-TTS_V1.9.5.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -615,7 +592,6 @@ Eliminates dizzying over-zooming/panning (especially in **Portrait 9:16**), skip
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.4_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `30`).
-2. **`PURR-TTS_V1.9.4.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -642,7 +618,6 @@ Makes your selected Vision LLM and Reading Direction stick reliably, upgrades OC
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `29`).
-2. **`PURR-TTS_V1.9.3.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -669,7 +644,6 @@ Fixes the `.MP4` panel pacing & compression quality issues in Manga Dub Studio, 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `28`).
-2. **`PURR-TTS_V1.9.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -694,7 +668,6 @@ Fixes the silent Gemma 4 bypass in Manga Dub Studio and brings **1-Tap Auto-Cook
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `27`).
-2. **`PURR-TTS_V1.9.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -723,7 +696,6 @@ Major reliability, UX telemetry, and AI vision upgrade for **`TOOL-11` Manga Dub
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.9.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `26`).
-2. **`PURR-TTS_V1.9.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -746,7 +718,6 @@ Turn full `.CBZ` manga chapters into dubbed motion-comic `.MP4` episodes right o
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.9_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `25`).
-2. **`PURR-TTS_V1.8.9.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -771,7 +742,6 @@ Eliminated `"failed to mount"` failures across all 16 TTS hubs and cloning packs
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.8_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `24`).
-2. **`PURR-TTS_V1.8.8.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -791,7 +761,6 @@ Completed all 16 TTS Cartridge Bays (`ROM-01..ROM-16`), sleek single-row HUD dro
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.7_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `23`).
-2. **`PURR-TTS_V1.8.7.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -817,7 +786,6 @@ Inflect v2 & Icefall VITS wired up cleanly, 5 new on-device neural TTS hubs (14 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.6_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `22`).
-2. **`PURR-TTS_V1.8.6.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -838,7 +806,6 @@ Clean collapsible racks, a dedicated Voice Cloning bay, smart hardware accelerat
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.5_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `21`).
-2. **`PURR-TTS_V1.8.5.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -859,7 +826,6 @@ The engine gets its true colors — in-app *and* in law — and learns to check 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.4_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `20`).
-2. **`PURR-TTS_V1.8.4.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -881,7 +847,6 @@ The Rulebook finally reads like a sentence: one dropdown, three honest toggles, 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `19`).
-2. **`PURR-TTS_V1.8.3.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -901,7 +866,6 @@ Qwen3 gets a GPU lane and large models get their slang back! 🎮🐾
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `18`).
-2. **`PURR-TTS_V1.8.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -922,7 +886,6 @@ A reliability hotfix for the cartridge download pipeline, prompted by live user 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `17`).
-2. **`PURR-TTS_V1.8.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -948,7 +911,6 @@ Six major upgrades turning PURR-TTS into a full mobile voice lab and chaptered a
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.8.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `16`).
-2. **`PURR-TTS_V1.8.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -969,7 +931,6 @@ Five focused runtime and UI polish fixes from live on-device testing! 🐾✨
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.7.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `15`).
-2. **`PURR-TTS_V1.7.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1001,7 +962,6 @@ Four heavyweight neural TTS architectures now run **100% locally on Android** �
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.7.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `14`) with Qwen3-TTS JNI, Chatterbox-Turbo Q4, NeuTTS-2E, Soprano-80M, MeloTTS, Kitten Mini, FP32/Full clones & the 8-Bay Hub Rack.
-2. **`PURR-TTS_V1.7.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1020,7 +980,6 @@ The premium Kokoro cartridges were fail-softing to stock OS voices — root caus
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.6.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `13`) with the unique voice-ID routing fix and selection migration.
-2. **`PURR-TTS_V1.6.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1038,7 +997,6 @@ Two live-testing fixes for the premium tier — one invisible, one audible! 🐾
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.6.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `12`) with the premium voice-availability fix and the correct Matcha vocoder.
-2. **`PURR-TTS_V1.6.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1060,7 +1018,6 @@ The Forge grows a **premium tier** — bigger, heavier, higher-fidelity engines 
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.6.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `11`) with the premium cartridge tier, heavy-model proxy presets, and the 10-bay rack.
-2. **`PURR-TTS_V1.6.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1077,7 +1034,6 @@ A quick layout patch — the Clone Studio's new IMPORT_CLIP and CLEAN_AUDIO cont
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.5.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `10`) with the Clone Studio layout patch.
-2. **`PURR-TTS_V1.5.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1099,7 +1055,6 @@ The Forge gets a voice of its own — a full GachaSwipe-style walkthrough, chang
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.5.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `9`) with the M.I.K.A. Academy, update patchnotes popups, the settings cog + sheet, the sleek engine dropdown, and the marquee badge.
-2. **`PURR-TTS_V1.5.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1118,7 +1073,6 @@ The Clone Voice Studio can now clone from **your own audio files** — and clean
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.4.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `8`) with clip import, the optional audio cleanup toggle, and the expanded pure-JVM test suite.
-2. **`PURR-TTS_V1.4.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1145,7 +1099,6 @@ Live testing surfaced the top hardware badge (`[CPU NEON]` etc.) resizing on eve
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.3.3_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `7`) with the fixed-size header HUD, fixed-width badge slot, and expanded pure-JVM test coverage.
-2. **`PURR-TTS_V1.3.3.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1171,7 +1124,6 @@ Three subtle neural synthesis issues surfaced during live testing — **KittenTT
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.3.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `6`) with restored `espeak-ng` G2P (`KittenTTS` + difficult/OOV word pronunciation) and zero-buzz crystal-clear default DSP.
-2. **`PURR-TTS_V1.3.2.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1196,7 +1148,6 @@ v1.3.1 chased the glassmorphic look of **GachaSwipe's frosted bar** for the bott
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.3.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `5`) with the GachaSwipe glassmorphic icon HUD, phasing tab transitions, decluttered Modules desktop, and 100% custom vector icons.
-2. **`PURR-TTS_V1.3.1.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1226,7 +1177,6 @@ v1.3.0 leveled PURR-TTS up into an **All-in-One Cyberdeck Neural TTS Suite** wit
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.3.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `4`) with KittenTTS Nano, 6 Piper expansion voices, Bottom HUD navigation, 5 Cyberdeck OS Tool Modules, and the Audio Media Exporter.
-2. **`PURR-TTS_V1.3.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1251,7 +1201,6 @@ v1.2.0 brought cleaner voice selection via a stylized dropdown, the ability to e
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.2.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `3`) with stylized voice dropdown, 8-bay Cartridge Rack (`ROM-01`..`ROM-08`), ejectable System OS cartridge, and Hexagon NPU / Adreno GPU cartridges.
-2. **`PURR-TTS_V1.2.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 
@@ -1277,7 +1226,6 @@ v1.1.0 made PURR-TTS stop sounding like a sine-wave synth, stop crashing when An
 ### 📦 Android APK Packages (Attached Below)
 
 1. **`PURR-Engine_V1.1.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `2`) with bundled `sherpa-onnx` JNI, fixed system `PurrTtsService`, and the Cartridge Bay UI.
-2. **`PURR-TTS_V1.1.0.apk`** — Mirror signed release APK for direct Android sideloading.
 
 ---
 

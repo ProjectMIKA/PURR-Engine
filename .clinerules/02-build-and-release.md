@@ -14,10 +14,9 @@
 3. Runs `scripts/verify_project.py` (fails the build on drift).
 4. Generates `release.keystore` (keytool, env-overridable passwords).
 5. `gradle testDebugUnitTest assembleRelease` — tests gate the release.
-6. Packages EXACTLY TWO artifacts into `builds/`:
-   - `PURR-Engine_V{version}_Android.apk` (main release)
-   - `PURR-TTS_V{version}.apk` (sideload mirror)
-7. Uploads artifacts; on tag pushes attaches both APKs to the GitHub Release (`gh release upload --clobber` if the release exists, else skips).
+6. Packages EXACTLY ONE artifact into `builds/`:
+   - `PURR-Engine_V{version}_Android.apk` (the signed release APK)
+7. Uploads artifacts; on tag pushes attaches the APK to the GitHub Release (`gh release upload --clobber` if the release exists, else skips).
 
 ## Release checklist (mirrors GachaSwipe's `release` skill)
 1. Bump `versionName` + `versionCode` in `app/build.gradle.kts` (single source of truth).
@@ -25,7 +24,7 @@
 3. Add the matching changelog section to `README.md` (newest on top).
 4. Run `python3 scripts/verify_project.py` locally (works without Android SDK).
 5. Commit `vX.Y.Z: <summary>` → **tag `vX.Y.Z` (REQUIRED, every release)** → push main + tags together.
-6. After CI green: `gh release create vX.Y.Z builds/PURR-Engine_VX.Y.Z_Android.apk builds/PURR-TTS_VX.Y.Z.apk --title "PURR-TTS vX.Y.Z // <Codename>" --notes-file <file>` (authed as ProjectMIKA).
+6. After CI green: `gh release create vX.Y.Z builds/PURR-Engine_VX.Y.Z_Android.apk --title "PURR-TTS vX.Y.Z // <Codename>" --notes-file <file>` (authed as ProjectMIKA).
 
 ## Versioning
 - Pattern `1.#.##`. versionCode increments by 1 every release. RELEASE_NOTES + README must match

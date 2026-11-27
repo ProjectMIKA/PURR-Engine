@@ -105,7 +105,7 @@ jobs:
       - name: Run JVM unit tests & build signed Release APK
         run: gradle testDebugUnitTest assembleRelease --no-daemon --stacktrace
 
-      - name: Package & Verify Signed Release APKs
+      - name: Package & Verify Signed Release APK
         run: |
           mkdir -p builds
           VERSION=$(grep -E 'versionName\s*=' app/build.gradle.kts | sed -E 's/.*"([^"]+)".*/\1/')
@@ -116,7 +116,6 @@ jobs:
           fi
           python3 scripts/align_sherpa_ort_abi.py --verify-apk "$APK_SRC"
           cp "$APK_SRC" "builds/PURR-Engine_V${VERSION}_Android.apk"
-          cp "$APK_SRC" "builds/PURR-TTS_V${VERSION}.apk"
           APKSIGNER=$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/build-tools" -name apksigner 2>/dev/null | sort -V | tail -n 1)
           if [ -x "$APKSIGNER" ]; then
             "$APKSIGNER" verify --print-certs "builds/PURR-Engine_V${VERSION}_Android.apk"
@@ -128,10 +127,10 @@ jobs:
       - name: Upload Release APK Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: PURR-TTS-Release-APKs
+          name: PURR-Engine-Release-APK
           path: builds/*.apk
 
-      - name: Attach Signed APKs to GitHub Release
+      - name: Attach Signed APK to GitHub Release
         if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || github.event_name == 'workflow_dispatch'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -147,7 +146,6 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" \
               "builds/PURR-Engine_V${VERSION}_Android.apk" \
-              "builds/PURR-TTS_V${VERSION}.apk" \
               --clobber
           else
             echo "Release $TAG does not exist yet; skipping upload."

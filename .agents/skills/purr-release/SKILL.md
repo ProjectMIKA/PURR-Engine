@@ -11,7 +11,7 @@ GachaSwipe's `release` skill pattern, adapted to the native Android repo. CI bui
 1. `app/build.gradle.kts` → `versionCode` (increment by 1) + `versionName` (`1.#.##`).
 2. `RELEASE_NOTES.md` → prepend `# 🌌 PURR-TTS vX.Y.Z // <Codename>` section with
    `### ✨ What's New since v<prev>` bullets + `### 📦 Android APK Packages (Attached Below)`
-   naming both APKs, then `---` separator. Newest on top.
+   naming the single `PURR-Engine_VX.Y.Z_Android.apk`, then `---` separator. Newest on top.
 3. `README.md` → **NO changelog** — the GitHub Releases page is the canonical public
    changelog (README is app-info only; it carries only a pointer to the Releases page).
 
@@ -21,12 +21,11 @@ GachaSwipe's `release` skill pattern, adapted to the native Android repo. CI bui
 3. `git tag vX.Y.Z` — **REQUIRED every release, no exceptions** (untagged = unreachable release).
 4. `git push origin main --tags` (or `git push origin main vX.Y.Z`).
 5. CI (`.github/workflows/build-android-apk.yml`) auto-runs on the tag: fetch sherpa AAR →
-   verify_project.py → unit tests → assembleRelease → `builds/PURR-Engine_VX.Y.Z_Android.apk`
-   + `builds/PURR-TTS_VX.Y.Z.apk` → attaches to the GitHub Release IF it already exists.
+   verify_project.py → unit tests → assembleRelease → `builds/PURR-Engine_VX.Y.Z_Android.apk` → attaches to the GitHub Release IF it already exists.
 6. Create the release (CI only uploads to EXISTING releases):
    ```
    gh release create vX.Y.Z \
-     builds/PURR-Engine_VX.Y.Z_Android.apk builds/PURR-TTS_VX.Y.Z.apk \
+     builds/PURR-Engine_VX.Y.Z_Android.apk \
      --title "PURR-TTS vX.Y.Z // <Codename>" --notes-file release_notes.md
    ```
    (Order matters: push tag → wait green CI → create release → CI-on-tag already ran, so either
@@ -61,7 +60,7 @@ signing if no keystore exists. Never commit keystores (`.gitignore` covers `*.ke
   (`gh release create vX.Y.Z --target <sha>`) or push the tag with git FIRST
   (`git push origin vX.Y.Z`) and create the release after. If wrong assets land:
   `gh release delete-asset`, delete the remote tag, re-push the local tag (git push can't race),
-  and either let the fresh tag-CI attach or `gh run download <run-id> -n PURR-TTS-Release-APKs`
+  and either let the fresh tag-CI attach or `gh run download <run-id> -n PURR-Engine-Release-APK`
   + `gh release upload vX.Y.Z *.apk --clobber` manually.
 - **`--target <sha>` can ALSO be rejected** ("Release.target_commitish is invalid") during
   API replication lag even when the commit exists — fallback: confirm `main` via

@@ -62,7 +62,7 @@ The Manga Dub Studio isn't a spec sheet — it's a dubbing booth. Two captures, 
 
 ## 📲 Installation
 
-1. Grab the latest `PURR-TTS_V*.apk` (or `PURR-Engine_V*_Android.apk`) from the [Releases page](https://github.com/ProjectMIKA/PURR-Engine/releases).
+1. Grab the latest `PURR-Engine_V*_Android.apk` from the [Releases page](https://github.com/ProjectMIKA/PURR-Engine/releases).
 2. Sideload it — allow *Install unknown apps* for your browser/file manager when Android asks (requires Android 8.0+ / arm64-v8a or x86_64).
 3. Open **`Settings › Accessibility › Text-to-Speech output`** (wording varies by OEM) and select **PURR-TTS** as your system engine.
 4. Tap **`Sample text`** / **`Listen to an example`** — if the example speaks, the engine is bound system-wide. Nyaa~ success!
