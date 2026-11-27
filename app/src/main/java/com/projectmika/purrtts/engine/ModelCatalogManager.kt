@@ -317,14 +317,17 @@ class ModelCatalogManager(
         if (spec.isArchiveTarBz2 && spec.sherpaFamily != null) {
             runCatching { resolveSherpaExtractDir(spec).deleteRecursively() }
         }
-        if (spec.backend == BackendType.ONNX_NATIVE || spec.backend == BackendType.QWEN3_NATIVE) {
+        if (spec.backend == BackendType.ONNX_NATIVE || spec.backend == BackendType.QWEN3_NATIVE ||
+            spec.backend == BackendType.ZONOS3_NATIVE || spec.backend == BackendType.ZONOS1_NATIVE) {
             runCatching { resolveNativeModelDir(spec.id).deleteRecursively() }
         }
         repository.updateModelState(spec.id, ModelBundleState(specId = spec.id, state = DownloadState.NOT_INSTALLED))
     }
 
     private suspend fun downloadAndInstall(spec: ModelBundleSpec) = withContext(Dispatchers.IO) {
-        if (spec.extraAssets.isNotEmpty() || spec.backend == BackendType.ONNX_NATIVE || spec.backend == BackendType.QWEN3_NATIVE) {
+        if (spec.extraAssets.isNotEmpty() || spec.backend == BackendType.ONNX_NATIVE ||
+            spec.backend == BackendType.QWEN3_NATIVE || spec.backend == BackendType.ZONOS3_NATIVE ||
+            spec.backend == BackendType.ZONOS1_NATIVE) {
             downloadMultiFileNativeBundle(spec)
             return@withContext
         }
@@ -777,7 +780,9 @@ class ModelCatalogManager(
         BackendType.LITERT_NPU_GPU -> File(context.filesDir, "models/litert/${spec.fileName}")
         BackendType.SHERPA_ONNX -> File(context.filesDir, "models/downloads/${spec.fileName}")
         BackendType.ONNX_NATIVE,
-        BackendType.QWEN3_NATIVE -> File(resolveNativeModelDir(spec.id), spec.fileName)
+        BackendType.QWEN3_NATIVE,
+        BackendType.ZONOS3_NATIVE,
+        BackendType.ZONOS1_NATIVE -> File(resolveNativeModelDir(spec.id), spec.fileName)
         BackendType.CORE_OS,
         BackendType.EXTERNAL_PROXY -> File(context.filesDir, "models/proxy/${spec.fileName}")
     }

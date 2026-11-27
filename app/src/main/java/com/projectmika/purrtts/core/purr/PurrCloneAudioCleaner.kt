@@ -27,15 +27,19 @@ import kotlin.random.Random
  */
 object PurrCloneAudioCleaner {
 
-    /** Clipping reference window per Sherpa clone family (seconds of reference audio). */
+    /** Clipping reference window per clone family (seconds of reference audio). */
     fun targetClipSeconds(family: SherpaModelFamily): Int = when (family) {
         SherpaModelFamily.ZIPVOICE -> 12
+        SherpaModelFamily.ZONOS3 -> 60
+        SherpaModelFamily.ZONOS1 -> 30
         else -> 5
     }
 
     /** Optimal reference window in seconds for any Clone Studio engine spec ID. */
     fun targetClipSecondsForEngine(cloneEngineId: String): Int = when (cloneEngineId) {
         "rom_zipvoice", "sub_zipvoice_full", "sub_chatterbox_turbo", "sub_qwen3_base_06b" -> 12
+        "sub_zonos3_clone" -> 60
+        "rom_zonos1_studio" -> 30
         else -> 5
     }
 

@@ -1,3 +1,26 @@
+# 🌌 PURR-TTS v2.7.0 // Zonos Rising
+
+### ✨ What's New since v2.6.1
+
+The Zonos family joins the rack: Zyphra's brand-new **ZONOS3-Mini** — a 100M-active-parameter MoE that runs **real-time on phones** — plus the **ZONOS1 Studio** heavy tier, both riding official native ggml/GGUF runtimes with 60-second zero-shot voice cloning baked into the Clone Studio. 🦁🎙️🌍
+
+* **🦁 `ROM-18: ZONOS3_MINI_HUB` — 100M-Active MoE, Real-Time on Device (`PurrModels`, `Zonos3TtsEngine`, `Zonos3NativeBridge`)**:
+  * Zyphra ZONOS3-Mini (886M total / 100M active per token, Gated DeltaNet + Latent-MoE) via the official `zonos3.cpp` ggml/GGUF runtime — a 632MB four-file native bundle (`backbone-ptq.gguf` + `zac-keep2.gguf` ZAC-1 decoder + SuperBPE tokenizer + params), rendered at 44.1kHz and resampled into PURR's 24kHz rack.
+  * **SUB-18A / SUB-18B voice packs** — 11 default speakers as tiny 192-d MECT-B2 embeddings (896 bytes each!): Cillian (Irish M), Imogen (British F), Jett, Thaddeus (announcer), Willow (ASMR) & Wyatt in English; Rodrigo, Ximena, Liesel, Wolfgang & Gaspard across ES/DE/FR. ZONOS3 speaks 43 languages — packs extend as Zyphra ships them.
+  * **SUB-18C Clone Chip** — mounts `spk-encoder.gguf` (43MB) so the Voice Clone Studio accepts **up to 60 SECONDS** of reference audio (the longest window in the deck), encodes it ONCE to a cached embedding, and speaks every line in that identity.
+  * **Native emotion steering** — PURR's five sentiment axes (joy/love/anger/sadness/flustered) map onto the `steer.gguf` delivery directions instead of DSP rate tricks.
+* **🎙️ `ROM-19: ZONOS1_STUDIO` — The 1.6B Heavy Tier (`Zonos1TtsEngine`, `Zonos1NativeBridge`)**:
+  * Zonos-v0.1's entire pipeline in native C++ via `zonos1.cpp` — eSpeak-ng phonemization, prefix conditioner, 1.6B dense transformer with classifier-free guidance, and the DAC-44kHz vocoder — Q8_0 backbone (1.77GB, effectively lossless) with an optional **SUB-19A Q4_K Lite** swap (~1.4GB total, 96.8% top-1 agreement). 5 languages: EN / JA / ZH / FR / DE. Clone-first: 10–30s references through the ResNet293 speaker encoder.
+* **🎛️ Rack Integrity**: cartridge bay grew 17 → **19 bays**; Clone Studio now lists **8 engines**; residency governor tracks **6 neural runtimes**; fresh SHA-256 pins for every Zonos asset were verified against upstream LFS oids (`model_manifest.json` regenerated).
+* **🛠️ Native plumbing**: `libpurr_zonos3_jni.so` + `libpurr_zonos1_jni.so` build targets with honest stub adapters (fail-soft when sources aren't vendored), `scripts/fetch_zonos_sources.sh` to pull the official runtimes, and NOTICE ledger entries for the MIT runtimes + Apache-2.0 weights.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.7.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`).
+
+---
+
+
 # 🌌 PURR-TTS v2.6.1 // Living Ember
 
 ### ✨ What's New since v2.6.0

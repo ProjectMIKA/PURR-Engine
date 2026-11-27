@@ -22,6 +22,8 @@ import com.projectmika.purrtts.engine.onnx.OnnxRuntimeEngine
 import com.projectmika.purrtts.engine.proxy.ExternalProxyEngine
 import com.projectmika.purrtts.engine.qwen3.Qwen3TtsEngine
 import com.projectmika.purrtts.engine.sherpa.SherpaOnnxEngine
+import com.projectmika.purrtts.engine.zonos1.Zonos1TtsEngine
+import com.projectmika.purrtts.engine.zonos3.Zonos3TtsEngine
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -115,6 +117,16 @@ class TtsBackendRouter(
         },
         idleTimeoutMsProvider = { currentEffectiveTimeoutMs() }
     )
+    val zonos3Engine = Zonos3TtsEngine(
+        context = context,
+        clonedVoicesProvider = { repository.state.value.clonedVoices },
+        idleTimeoutMsProvider = { currentEffectiveTimeoutMs() }
+    )
+    val zonos1Engine = Zonos1TtsEngine(
+        context = context,
+        clonedVoicesProvider = { repository.state.value.clonedVoices },
+        idleTimeoutMsProvider = { currentEffectiveTimeoutMs() }
+    )
     val proxyEngine = ExternalProxyEngine(context)
 
     private val synthMutex = Mutex()
@@ -137,12 +149,18 @@ class TtsBackendRouter(
     }
 
     private val enginesResidencyFlow: Flow<EngineResidencyEntry?> = combine(
-        residencyEntryFlow(qwen3Engine.residentModelLabel, qwen3Engine.remainingWarmSeconds, qwen3Engine.statusFlow),
-        residencyEntryFlow(liteRtEngine.residentModelLabel, liteRtEngine.remainingWarmSeconds, liteRtEngine.statusFlow),
-        residencyEntryFlow(sherpaEngine.residentModelLabel, sherpaEngine.remainingWarmSeconds, sherpaEngine.statusFlow),
-        residencyEntryFlow(onnxEngine.residentModelLabel, onnxEngine.remainingWarmSeconds, onnxEngine.statusFlow)
-    ) { q, l, s, o ->
-        listOf(q, l, s, o).firstOrNull { it.label != null }
+        combine(
+            residencyEntryFlow(qwen3Engine.residentModelLabel, qwen3Engine.remainingWarmSeconds, qwen3Engine.statusFlow),
+            residencyEntryFlow(liteRtEngine.residentModelLabel, liteRtEngine.remainingWarmSeconds, liteRtEngine.statusFlow),
+            residencyEntryFlow(sherpaEngine.residentModelLabel, sherpaEngine.remainingWarmSeconds, sherpaEngine.statusFlow),
+            residencyEntryFlow(onnxEngine.residentModelLabel, onnxEngine.remainingWarmSeconds, onnxEngine.statusFlow)
+        ) { q, l, s, o ->
+            listOfNotNull(q, l, s, o).firstOrNull { it.label != null }
+        },
+        residencyEntryFlow(zonos3Engine.residentModelLabel, zonos3Engine.remainingWarmSeconds, zonos3Engine.statusFlow),
+        residencyEntryFlow(zonos1Engine.residentModelLabel, zonos1Engine.remainingWarmSeconds, zonos1Engine.statusFlow)
+    ) { base, z3, z1 ->
+        listOfNotNull(base, z3, z1).firstOrNull { it.label != null }
     }
 
     val residencyFlow: StateFlow<ResidencySnapshot> = combine(
@@ -191,6 +209,8 @@ class TtsBackendRouter(
             sherpaEngine.applyResidencyPolicyNow()
             onnxEngine.applyResidencyPolicyNow()
             qwen3Engine.applyResidencyPolicyNow()
+            zonos3Engine.applyResidencyPolicyNow()
+            zonos1Engine.applyResidencyPolicyNow()
         }
     }
 
@@ -274,6 +294,24 @@ class TtsBackendRouter(
             }
             BackendType.QWEN3_NATIVE -> {
                 qwen3Engine.synthesizeChunk(
+                    text = chunk.text,
+                    voiceId = voiceId,
+                    speakingRate = effectiveRate,
+                    pitch = effectivePitch,
+                    profile = profile
+                )
+            }
+            BackendType.ZONOS3_NATIVE -> {
+                zonos3Engine.synthesizeChunk(
+                    text = chunk.text,
+                    voiceId = voiceId,
+                    speakingRate = effectiveRate,
+                    pitch = effectivePitch,
+                    profile = profile
+                )
+            }
+            BackendType.ZONOS1_NATIVE -> {
+                zonos1Engine.synthesizeChunk(
                     text = chunk.text,
                     voiceId = voiceId,
                     speakingRate = effectiveRate,
@@ -419,6 +457,8 @@ class TtsBackendRouter(
             val ready = state.modelStates[engineId]?.state == DownloadState.INSTALLED
             val label = when (engineId) {
                 "sub_qwen3_base_06b" -> "Qwen3 0.6B Clone"
+                "sub_zonos3_clone" -> "ZONOS3 Clone"
+                "rom_zonos1_studio" -> "ZONOS1 Studio"
                 "sub_chatterbox_turbo" -> "Chatterbox Q4"
                 "sub_pocket_fp32" -> "Pocket FP32"
                 "sub_zipvoice_full" -> "ZipVoice Full"
@@ -444,6 +484,9 @@ class TtsBackendRouter(
                 "rom_qwen3_custom_06b" -> "Qwen3 0.6B"
                 "sub_qwen3_design_17b" -> "Qwen3 1.7B Design"
                 "sub_qwen3_base_06b" -> "Qwen3 0.6B Clone"
+                "sub_zonos3_clone" -> "ZONOS3 Clone"
+                "rom_zonos3_mini" -> "ZONOS3-Mini"
+                "rom_zonos1_studio" -> "ZONOS1 Studio"
                 "rom_kokoro_fp32" -> "Kokoro FP32"
                 "rom_kokoro_v11" -> "Kokoro v1.1"
                 "rom_kokoro_sherpa", "rom_kokoro_litert" -> "Kokoro 82M"
@@ -491,6 +534,34 @@ class TtsBackendRouter(
                         val mounted = qwen3Engine.residentModelLabel.value
                         if (mounted != null) {
                             WarmupOutcome(true, "HOT in RAM: $mounted", qwen3Engine.statusFlow.value)
+                        } else {
+                            WarmupOutcome(false, "Failed to mount $targetLabel — check model files", HardwareStatusBadge.IDLE)
+                        }
+                    }
+                    BackendType.ZONOS3_NATIVE -> {
+                        liteRtEngine.evictResources()
+                        sherpaEngine.evictResources()
+                        onnxEngine.evictResources()
+                        qwen3Engine.evictResources()
+                        zonos1Engine.evictResources()
+                        zonos3Engine.warmup(profile)
+                        val mounted = zonos3Engine.residentModelLabel.value
+                        if (mounted != null) {
+                            WarmupOutcome(true, "HOT in RAM: $mounted", zonos3Engine.statusFlow.value)
+                        } else {
+                            WarmupOutcome(false, "Failed to mount $targetLabel — check model files", HardwareStatusBadge.IDLE)
+                        }
+                    }
+                    BackendType.ZONOS1_NATIVE -> {
+                        liteRtEngine.evictResources()
+                        sherpaEngine.evictResources()
+                        onnxEngine.evictResources()
+                        qwen3Engine.evictResources()
+                        zonos3Engine.evictResources()
+                        zonos1Engine.warmup(profile)
+                        val mounted = zonos1Engine.residentModelLabel.value
+                        if (mounted != null) {
+                            WarmupOutcome(true, "HOT in RAM: $mounted", zonos1Engine.statusFlow.value)
                         } else {
                             WarmupOutcome(false, "Failed to mount $targetLabel — check model files", HardwareStatusBadge.IDLE)
                         }
@@ -548,6 +619,8 @@ class TtsBackendRouter(
             sherpaEngine.evictResources()
             onnxEngine.evictResources()
             qwen3Engine.evictResources()
+            zonos3Engine.evictResources()
+            zonos1Engine.evictResources()
             proxyEngine.evictResources()
             _telemetry.value = LiveTelemetry(
                 badge = HardwareStatusBadge.IDLE,
@@ -571,6 +644,8 @@ class TtsBackendRouter(
             return when (cloned.resolvedCloneEngineId) {
                 "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
                 "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
+                "sub_zonos3_clone" -> BackendType.ZONOS3_NATIVE
+                "rom_zonos1_studio" -> BackendType.ZONOS1_NATIVE
                 else -> BackendType.SHERPA_ONNX
             }
         }
@@ -580,6 +655,14 @@ class TtsBackendRouter(
         if (cleanId == "qwen3_design_custom" || cleanId == "qwen3_base_clone_default" || cleanId.startsWith("qwen3_")) {
             if (qwen3Engine.isSpecReadyForVoice(cleanId)) {
                 return BackendType.QWEN3_NATIVE
+            }
+        }
+
+        // Route ZONOS3 default voices straight to the Zonos3 engine when ROM-18 + a voice
+        // pack are installed, even if the hub card isn't manually slotted (Qwen3 parity).
+        if (cleanId.startsWith("zonos3_")) {
+            if (zonos3Engine.isSpecReadyForVoice(cleanId)) {
+                return BackendType.ZONOS3_NATIVE
             }
         }
 

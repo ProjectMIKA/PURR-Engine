@@ -114,7 +114,12 @@ enum class BackendType(val displayLabel: String) {
     LITERT_NPU_GPU("LiteRT GPU/NPU Cartridge"),
     ONNX_NATIVE("ONNX Runtime Native"),
     QWEN3_NATIVE("Qwen3-TTS GGUF+ONNX Native"),
-    EXTERNAL_PROXY("LAN OpenAI / Proxy")
+    EXTERNAL_PROXY("LAN OpenAI / Proxy"),
+    // ✨ ZONOS NATIVE (v2.7.0): Zyphra ZONOS3-Mini (100M-active MoE, real-time ggml) and the
+    // ZONOS1 Studio tier (1.6B dense + DAC-44kHz) ride their own native ggml JNI bridges —
+    // same fail-soft contract as QWEN3_NATIVE when the .so is absent on an ABI.
+    ZONOS3_NATIVE("Zonos3 MoE GGUF Native"),
+    ZONOS1_NATIVE("Zonos1 GGUF Native")
 }
 
 @Serializable
@@ -126,7 +131,9 @@ enum class SherpaModelFamily(val label: String) {
     ZIPVOICE("ZipVoice (Clone)"),
     PIPER("Piper VITS"),
     MATCHA("Matcha-TTS"),
-    MELO_TTS("MeloTTS English")
+    MELO_TTS("MeloTTS English"),
+    ZONOS3("Zonos3 Mini (MoE)"),
+    ZONOS1("Zonos1 Studio")
 }
 
 @Serializable
@@ -2021,7 +2028,122 @@ object PurrDefaultPresets {
             )
         )
 
-        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + vitsLjsVoices + aishell3Voices + phononVoices + sherpaSpecialized + heavyNativeVoices + proxyVoices
+        // ✨ ZONOS3-Mini default voices (v2.7.0) — 192-d MECT-B2 speaker embeddings.
+        // English pack (SUB-18A) + multilingual pack (SUB-18B); tags drive PurrVoiceMatcher.
+        val zonosVoices = listOf(
+            VoiceDescriptor(
+                id = "zonos3_cillian",
+                displayName = "Zonos3 // Cillian (Irish Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "en-IE",
+                nativeTags = listOf("male", "irish", "warm", "zonos", "moe", "realtime"),
+                requiredSubCartridgeId = "sub_zonos3_voices_en"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_imogen",
+                displayName = "Zonos3 // Imogen (British Female)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-GB",
+                nativeTags = listOf("female", "british", "soft", "zonos", "moe", "realtime"),
+                requiredSubCartridgeId = "sub_zonos3_voices_en"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_jett",
+                displayName = "Zonos3 // Jett (Energetic Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "en-US",
+                nativeTags = listOf("male", "american", "energetic", "young", "zonos", "moe"),
+                requiredSubCartridgeId = "sub_zonos3_voices_en"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_thaddeus",
+                displayName = "Zonos3 // Thaddeus (Announcer Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "en-US",
+                nativeTags = listOf("male", "american", "announcer", "narrator", "deep", "zonos"),
+                requiredSubCartridgeId = "sub_zonos3_voices_en"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_willow",
+                displayName = "Zonos3 // Willow (ASMR Female)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.FEMALE,
+                languageCode = "en-US",
+                nativeTags = listOf("female", "american", "asmr", "whisper", "calm", "zonos"),
+                requiredSubCartridgeId = "sub_zonos3_voices_en"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_wyatt",
+                displayName = "Zonos3 // Wyatt (American Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "en-US",
+                nativeTags = listOf("male", "american", "natural", "steady", "zonos"),
+                requiredSubCartridgeId = "sub_zonos3_voices_en"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_rodrigo",
+                displayName = "Zonos3 // Rodrigo (Spanish Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "es-ES",
+                nativeTags = listOf("male", "spanish", "zonos", "moe"),
+                requiredSubCartridgeId = "sub_zonos3_voices_ml"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_ximena",
+                displayName = "Zonos3 // Ximena (Spanish Female)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.FEMALE,
+                languageCode = "es-ES",
+                nativeTags = listOf("female", "spanish", "zonos", "moe"),
+                requiredSubCartridgeId = "sub_zonos3_voices_ml"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_liesel",
+                displayName = "Zonos3 // Liesel (German Female)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.FEMALE,
+                languageCode = "de-DE",
+                nativeTags = listOf("female", "german", "zonos", "moe"),
+                requiredSubCartridgeId = "sub_zonos3_voices_ml"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_wolfgang",
+                displayName = "Zonos3 // Wolfgang (German Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "de-DE",
+                nativeTags = listOf("male", "german", "zonos", "moe"),
+                requiredSubCartridgeId = "sub_zonos3_voices_ml"
+            ),
+            VoiceDescriptor(
+                id = "zonos3_gaspard",
+                displayName = "Zonos3 // Gaspard (French Male)",
+                engine = BackendType.ZONOS3_NATIVE,
+                cartridgeId = "rom_zonos3_mini",
+                gender = VoiceGender.MALE,
+                languageCode = "fr-FR",
+                nativeTags = listOf("male", "french", "zonos", "moe"),
+                requiredSubCartridgeId = "sub_zonos3_voices_ml"
+            )
+        )
+
+        return coreOsVoices + kokoroSherpa + kokoroFp32 + kokoroV11 + matcha + kittenVoices + kittenMiniVoices + kittenMicroVoices + inflectAndIcefallVoices + coquiVctkVoices + mmsVoices + vctkStudioVoices + matchaEnVoices + mimic3Voices + vitsLjsVoices + aishell3Voices + phononVoices + zonosVoices + sherpaSpecialized + heavyNativeVoices + proxyVoices
     }
 
     /**
@@ -3937,6 +4059,156 @@ object PurrDefaultPresets {
             unlocksSummary = "ENABLES: VRAM & Keep-Warm Governor (`TOOL-06`) with manual preload, ∞ Pinning & Always-Hot notification.",
             category = CartridgeCategory.TOOLS,
             releaseOrder = 19
+        ),
+
+        // =========================================================================
+        // ✨ ZONOS FAMILY (v2.7.0): Zyphra ZONOS3-Mini MoE hub + voice packs + clone chip,
+        //    and the ZONOS1 Studio tier (1.6B dense, DAC-44kHz). All weights Apache-2.0.
+        // =========================================================================
+        ModelBundleSpec(
+            id = "rom_zonos3_mini",
+            romCode = "ROM-18",
+            badge = "ZONOS3_MOE_HUB",
+            accentHex = 0xFF7C3AED,
+            name = "ZONOS3_MINI_HUB",
+            subtitle = "Zyphra ZONOS3-Mini • 100M Active MoE Real-Time TTS + ZAC-1 Codec (632MB)",
+            description = "Zyphra's open-source ZONOS3-Mini: an 886M-parameter Gated DeltaNet + Latent-MoE backbone with just 100M active parameters per token, running REAL-TIME on phones via the official ggml/GGUF runtime. Clones any voice from up to 60s of reference audio, supports 43 languages, and speaks ultra-clean 44.1kHz speech through the multi-resolution iSTFT decoder. Mount the SUB-18 voice packs & 60s Clone Chip below. Needs 6GB+ RAM.",
+            backend = BackendType.ZONOS3_NATIVE,
+            downloadUrl = "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/backbone-ptq.gguf",
+            fileName = "backbone-ptq.gguf",
+            expectedSha256 = "66fceb6d73a8c30bde80249e4112bb308380ab7f3384fa11c8e4048115e4ceec",
+            approximateSizeMb = 632,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "ggml Q4_0-Expert/Q8_0-Mixer GGUF • CPU NEON Real-Time • 6GB+ RAM",
+            unlocksSummary = "UNLOCKS: ZONOS3-Mini real-time MoE synthesis (43 languages) + hosts Voice Pack & Clone chips below.",
+            extraAssets = listOf(
+                BundleAssetFile("zac-keep2.gguf", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/zac-keep2.gguf", "834e5b70b88294afc3c702a478487e0664dcc6b574c16fc6167d72444aabeafd", 452325440L),
+                BundleAssetFile("steer.gguf", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/steer.gguf", "6e8e3f86e89a09801ce083b9286f43263ec696acfaff72e25aca537aa9efa90c", 204960L),
+                BundleAssetFile("superbpe8192.json", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/lm/zonos3_mini/tokenizer/superbpe8192.json", "", 559287L),
+                BundleAssetFile("params.json", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/lm/zonos3_mini/params.json", "", 2500L)
+            ),
+            category = CartridgeCategory.TTS,
+            releaseOrder = 20
+        ),
+        ModelBundleSpec(
+            id = "sub_zonos3_voices_en",
+            romCode = "SUB-18A",
+            badge = "VOICES_EN_6",
+            accentHex = 0xFF8B5CF6,
+            name = "ZONOS3_VOICE_PACK_EN",
+            subtitle = "6 Default English Speakers • Embedding Vectors Only (+1 MB)",
+            description = "Default English ZONOS3 voices as 192-d MECT-B2 speaker embeddings (896 bytes each!): Cillian (Irish Male), Imogen (British Female), Jett (Energetic Male), Thaddeus (Announcer Male), Willow (ASRM Female) & Wyatt (American Male). Embeddings need no encoder at synthesis time.",
+            backend = BackendType.ZONOS3_NATIVE,
+            downloadUrl = "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Cillian_en-Irish_M_1.embedding.npy",
+            fileName = "voices/English/Cillian_en-Irish_M_1.embedding.npy",
+            expectedSha256 = "f3125fae2f679fb5c8128d308ddd02986fd7d914975d17cc6dadf9eb130b1061",
+            approximateSizeMb = 1,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "192-d Speaker Embeddings • Encoder-Free Synthesis",
+            unlocksSummary = "ADDS VOICES: Cillian, Imogen, Jett, Thaddeus, Willow & Wyatt to ROM-18.",
+            extraAssets = listOf(
+                BundleAssetFile("voices/English/Imogen_en-British_F_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Imogen_en-British_F_1.embedding.npy", "683424b91faeade48c8a92e05e1c3679366abbba443ef62eccba8dc40de48e9e", 896L),
+                BundleAssetFile("voices/English/Jett_en-energetic_M_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Jett_en-energetic_M_1.embedding.npy", "624b749d220dac7fdcda479b1964cb8f7de58c838c1357f2f0161dac06e34f48", 896L),
+                BundleAssetFile("voices/English/Thaddeus_en-announcervoice_M_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Thaddeus_en-announcervoice_M_1.embedding.npy", "fc8e21356730988aa20da70123991404345e0bdbfe3afe31e6371d8d93095461", 896L),
+                BundleAssetFile("voices/English/Willow_en-asrm_F_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Willow_en-asrm_F_1.embedding.npy", "6ebb84309f21f1dcbe6371e2355dc98f8ee3d0aee5850c305d06a73fe0a7c222", 896L),
+                BundleAssetFile("voices/English/Wyatt_en-American_M_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Wyatt_en-American_M_1.embedding.npy", "b39d377b653ebaca6bbd4ecd13c382fe16d81f0cfae27217d9b626e5589a0511", 896L)
+            ),
+            isSubCartridge = true,
+            parentCartridgeId = "rom_zonos3_mini",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 20
+        ),
+        ModelBundleSpec(
+            id = "sub_zonos3_voices_ml",
+            romCode = "SUB-18B",
+            badge = "VOICES_MULTILING",
+            accentHex = 0xFFA78BFA,
+            name = "ZONOS3_VOICE_PACK_ML",
+            subtitle = "Spanish + German + French Default Speakers • Embeddings Only (+1 MB)",
+            description = "Multilingual ZONOS3 default voices as tiny 192-d embeddings: Rodrigo & Ximena (Spanish), Liesel & Wolfgang (German) and Gaspard (French). ZONOS3 speaks 43 languages — more packs slot in as Zyphra publishes them.",
+            backend = BackendType.ZONOS3_NATIVE,
+            downloadUrl = "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/Spanish/Rodrigo_es_M_1.embedding.npy",
+            fileName = "voices/Spanish/Rodrigo_es_M_1.embedding.npy",
+            expectedSha256 = "0305b7ab40d5d4a1df07ed7aa1c164f64ede1ac4b6250fa56383b4c3ae03e1e1",
+            approximateSizeMb = 1,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "192-d Speaker Embeddings • ES / DE / FR",
+            unlocksSummary = "ADDS VOICES: Rodrigo, Ximena, Liesel, Wolfgang & Gaspard to ROM-18.",
+            extraAssets = listOf(
+                BundleAssetFile("voices/Spanish/Ximena_es_F_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/Spanish/Ximena_es_F_1.embedding.npy", "b9cc1284c52003705619b37f2c25c59e170d2c70650af39e5692b2fe91782bd6", 896L),
+                BundleAssetFile("voices/German/Liesel_de_F_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/German/Liesel_de_F_1.embedding.npy", "2d44e40f8c1f43fcabaabf301e14bfc48325bf4596cb04e076d662d8b2724c5d", 896L),
+                BundleAssetFile("voices/German/Wolfgang_de_M_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/German/Wolfgang_de_M_1.embedding.npy", "3a0e305b2789f79b843d96628b275b5d8f3f877f89c80e87fe57bf6078901467", 896L),
+                BundleAssetFile("voices/French/Gaspard_fr_M_1.embedding.npy", "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/French/Gaspard_fr_M_1.embedding.npy", "6e19a9a545af6a263c00b997368d8396ff8abc761b53dce2a6d4df735f0766e9", 896L)
+            ),
+            isSubCartridge = true,
+            parentCartridgeId = "rom_zonos3_mini",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 20
+        ),
+        ModelBundleSpec(
+            id = "sub_zonos3_clone",
+            romCode = "SUB-18C",
+            badge = "60S_CLONE_CHIP",
+            accentHex = 0xFF6D28D9,
+            name = "ZONOS3_CLONE_CHIP",
+            subtitle = "MECT-B2 Speaker Encoder • 60-Second Zero-Shot Clone Reference (+43 MB)",
+            description = "Mounts the native MECT-B2 speaker encoder for ZONOS3-Mini: record or import up to 60 SECONDS of reference audio in the Voice Clone Studio and every line is spoken in that identity. Encodes once to a 192-d embedding (896 bytes) — no encoder needed for playback after that.",
+            backend = BackendType.ZONOS3_NATIVE,
+            downloadUrl = "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/spk-encoder.gguf",
+            fileName = "spk-encoder.gguf",
+            expectedSha256 = "9539f340b70be246005403b9c254732e180e85e0b3c57fb1973f0d6bc6c59bdc",
+            approximateSizeMb = 43,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "MECT-B2 Speaker Encoder • 60s Reference Window",
+            unlocksSummary = "ENABLES: ZONOS3 60-second zero-shot cloning in Clone Studio (CLN-05).",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_zonos3_mini",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 20
+        ),
+        ModelBundleSpec(
+            id = "rom_zonos1_studio",
+            romCode = "ROM-19",
+            badge = "ZONOS1_STUDIO",
+            accentHex = 0xFFF59E0B,
+            name = "ZONOS1_STUDIO",
+            subtitle = "Zonos-v0.1 1.6B Dense • Full Native Pipeline + DAC-44kHz Vocoder (~2.2GB)",
+            description = "The original Zonos flagship as a heavy Studio tier via the official zonos1.cpp native port: eSpeak-ng phonemization, prefix conditioner, 1.6B dense transformer with classifier-free guidance and the DAC-44kHz vocoder — the ENTIRE pipeline in native C++, no Python. Q8_0 is effectively lossless (recommended); an optional Q4_K Lite chip below trims it to ~1.4GB. Clones voices from 10-30s references (ResNet293 encoder included). 5 languages: EN / JA / ZH / FR / DE. Needs 8GB+ RAM.",
+            backend = BackendType.ZONOS1_NATIVE,
+            downloadUrl = "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/zonos1-q8_0.gguf",
+            fileName = "zonos1-q8_0.gguf",
+            expectedSha256 = "5507520988be4fd2024c79e36357e2ec66815781333070b033398222328332cf",
+            approximateSizeMb = 1685,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "ggml Q8_0 Dense 1.6B • DAC 44kHz • 8GB+ RAM",
+            unlocksSummary = "UNLOCKS: Zonos-v0.1 Studio (EN/JA/ZH/FR/DE) + hosts the Q4_K Lite swap below.",
+            extraAssets = listOf(
+                BundleAssetFile("dac.gguf", "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/dac.gguf", "b5330fc112cfac5e7bae511a5083915ce5028899de4d7a4193dcc5874063532c", 254172448L),
+                BundleAssetFile("spk-encoder.gguf", "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/spk-encoder.gguf", "6c0b99f9b876afcd733a37d21a64d2760e37249a55f37a72113d45b3a7a19532", 198062240L)
+            ),
+            category = CartridgeCategory.TTS,
+            releaseOrder = 21
+        ),
+        ModelBundleSpec(
+            id = "sub_zonos1_q4_lite",
+            romCode = "SUB-19A",
+            badge = "Q4K_LITE",
+            accentHex = 0xFFFBBF24,
+            name = "ZONOS1_Q4_LITE_CHIP",
+            subtitle = "Q4_K Backbone Swap • ~1.4GB Total Footprint (96.8% Top-1)",
+            description = "Memory-tight swap for ROM-19: the Q4_K backbone (941MB) keeps the prefix conditioner & speaker projection at full precision and still holds 96.8% top-1 logit agreement with the F16 reference — clean, ASR-verified audio at ~half the RAM.",
+            backend = BackendType.ZONOS1_NATIVE,
+            downloadUrl = "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/zonos1-q4_k.gguf",
+            fileName = "zonos1-q4_k.gguf",
+            expectedSha256 = "d71c26abdab44aef0160e751b27aa7d6288941cd5652e62fc6bdf6058a17d2df",
+            approximateSizeMb = 897,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "ggml Q4_K Dense • ~1.4GB Bundle • Lower-RAM Devices",
+            unlocksSummary = "SWAPS: ROM-19 to the compact Q4_K backbone when slotted.",
+            isSubCartridge = true,
+            parentCartridgeId = "rom_zonos1_studio",
+            category = CartridgeCategory.TTS,
+            releaseOrder = 21
         )
     )
 }

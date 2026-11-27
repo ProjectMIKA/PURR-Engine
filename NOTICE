@@ -53,3 +53,16 @@ under the license; they describe what the license does not cover)
    - PdfBox-Android (TomRoush/PdfBox-Android): Apache License 2.0
    - OpenCL-Headers (KhronosGroup/OpenCL-Headers): Apache License 2.0 (vendored under
      `app/src/main/cpp/opencl_headers/CL` for the Adreno OpenCL GPU-offload backend build)
+
+5. ZONOS FAMILY RUNTIMES & WEIGHTS (v2.7.0)
+   - zonos3.cpp / ZONOS3-Mini inference runtime (Zyphra/ZONOS3-Mini, servers/ggml): MIT License
+   - ZONOS3-Mini model weights + ZAC-1 codec + MECT-B2 speaker encoder + default
+     voices (Zyphra/ZONOS3-Mini on Hugging Face): Apache License 2.0
+   - zonos1.cpp Zonos-v0.1 inference runtime (Zyphra/zonos1.cpp): MIT License
+   - Zonos-v0.1 GGUF weights, DAC-44kHz decoder & ResNet293 speaker encoder
+     (Zyphra/ZONOS1-GGUF on Hugging Face): Apache License 2.0
+   - zyphra-textnorm Rust text normalizer (Zyphra, via third_party submodule): MIT License
+   - Vendored sources land under `app/src/main/cpp/third_party/zonos3` and
+     `app/src/main/cpp/third_party/zonos1` via `scripts/fetch_zonos_sources.sh`; the
+     model weights are downloaded at runtime by the user into app-private storage and
+     remain governed by their upstream licenses.

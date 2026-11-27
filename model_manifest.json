@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAtUtc": "2026-11-23T22:54:48Z",
+  "generatedAtUtc": "2026-11-27T22:16:14Z",
   "source": "scripts/refresh_model_manifest.py (GitHub release digests + HuggingFace LFS oids)",
   "assets": {
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/kokoro-int8-multi-lang-v1_0.tar.bz2": {
@@ -174,6 +174,30 @@
     "https://huggingface.co/litert-community/InternVL3-1B/resolve/main/InternVL3-1B.litertlm": {
       "sha256": "6ab8028669a549823fca784a622f980c36bd4414242af86ee96409344f597e26",
       "sizeBytes": 738902016
+    },
+    "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/backbone-ptq.gguf": {
+      "sha256": "66fceb6d73a8c30bde80249e4112bb308380ab7f3384fa11c8e4048115e4ceec",
+      "sizeBytes": 663150624
+    },
+    "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/English/Cillian_en-Irish_M_1.embedding.npy": {
+      "sha256": "f3125fae2f679fb5c8128d308ddd02986fd7d914975d17cc6dadf9eb130b1061",
+      "sizeBytes": 896
+    },
+    "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/voices/Spanish/Rodrigo_es_M_1.embedding.npy": {
+      "sha256": "0305b7ab40d5d4a1df07ed7aa1c164f64ede1ac4b6250fa56383b4c3ae03e1e1",
+      "sizeBytes": 896
+    },
+    "https://huggingface.co/Zyphra/ZONOS3-Mini/resolve/main/gguf/spk-encoder.gguf": {
+      "sha256": "9539f340b70be246005403b9c254732e180e85e0b3c57fb1973f0d6bc6c59bdc",
+      "sizeBytes": 45385728
+    },
+    "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/zonos1-q8_0.gguf": {
+      "sha256": "5507520988be4fd2024c79e36357e2ec66815781333070b033398222328332cf",
+      "sizeBytes": 1766918176
+    },
+    "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/zonos1-q4_k.gguf": {
+      "sha256": "d71c26abdab44aef0160e751b27aa7d6288941cd5652e62fc6bdf6058a17d2df",
+      "sizeBytes": 940850592
     }
   }
 }

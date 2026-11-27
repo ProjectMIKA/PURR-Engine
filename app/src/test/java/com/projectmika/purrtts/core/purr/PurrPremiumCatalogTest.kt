@@ -22,11 +22,11 @@ class PurrPremiumCatalogTest {
     private val toolsModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
 
     @Test
-    fun `top level tts catalog forms a 17-hub rack ROM-01 through ROM-17`() {
-        assertEquals(17, mainTtsHubs.size)
+    fun `top level tts catalog forms a 19-hub rack ROM-01 through ROM-19`() {
+        assertEquals(19, mainTtsHubs.size)
         val codes = mainTtsHubs.map { it.romCode }
         assertEquals(
-            (1..17).map { idx -> "ROM-%02d".format(idx) },
+            (1..19).map { idx -> "ROM-%02d".format(idx) },
             codes
         )
         val expectedIds = setOf(
@@ -37,7 +37,9 @@ class PurrPremiumCatalogTest {
             "rom_mimic3_neural",
             "rom_vits_ljs",
             "rom_aishell3_zh",
-            "rom_phonon_31m"
+            "rom_phonon_31m",
+            "rom_zonos3_mini",
+            "rom_zonos1_studio"
         )
         assertTrue(mainTtsHubs.map { it.id }.toSet().containsAll(expectedIds))
     }

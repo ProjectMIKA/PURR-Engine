@@ -2554,7 +2554,11 @@ class MangaDubStudioManager(
             "rom_pocket_tts",
             "sub_chatterbox_turbo",
             "sub_zipvoice_full",
-            "rom_zipvoice"
+            "rom_zipvoice",
+            // ✨ ZONOS (v2.7.0): 60s MECT-B2 cloning / 1.6B Studio tier join the auto-clone
+            // roster only when already installed — legacy candidate order stays intact.
+            "sub_zonos3_clone",
+            "rom_zonos1_studio"
         )
         return candidates.firstOrNull { states[it]?.state == DownloadState.INSTALLED }
     }

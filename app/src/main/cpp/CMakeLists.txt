@@ -128,3 +128,53 @@ target_link_libraries(purr_qwen3_jni PRIVATE
     log
     m
 )
+
+# =============================================================================
+# ✨ MIKA'S ZONOS NATIVE ENGINES (v2.7.0) — fail-soft like everything else ✨
+# Builds libpurr_zonos3_jni.so + libpurr_zonos1_jni.so from the JNI glue in ./zonos
+# plus an adapter that links the vendored Zyphra runtimes when present:
+#   third_party/zonos3  ← servers/ggml of github.com/Zyphra/ZONOS3-Mini (zonos3.cpp)
+#   third_party/zonos1  ← github.com/Zyphra/zonos1.cpp
+# Fetch with scripts/fetch_zonos_sources.sh. When the sources are absent the
+# adapters compile to honest stubs that surface "runtime not vendored" through
+# nativeGetLastError() — the Kotlin engines then fail soft exactly like an
+# unsupported ABI, and the legacy rack stays byte-identical.
+# =============================================================================
+set(ZONOS3_ROOT "${THIRD_PARTY_DIR}/zonos3")
+set(ZONOS1_ROOT "${THIRD_PARTY_DIR}/zonos1")
+
+add_library(purr_zonos3_jni SHARED
+    "${CMAKE_CURRENT_SOURCE_DIR}/zonos/purr_zonos3_jni.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/zonos/zonos3_engine_adapter.cpp"
+)
+target_include_directories(purr_zonos3_jni PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/zonos")
+target_link_libraries(purr_zonos3_jni PRIVATE Threads::Threads dl log m)
+set_target_properties(purr_zonos3_jni PROPERTIES VERSION "" SOVERSION "")
+if(EXISTS "${ZONOS3_ROOT}/servers/ggml")
+    message(STATUS "Zonos3 sources found at ${ZONOS3_ROOT}/servers/ggml — enabling real runtime adapter")
+    target_compile_definitions(purr_zonos3_jni PRIVATE PURR_ZONOS3_VENDORED=1)
+    target_include_directories(purr_zonos3_jni PRIVATE
+        "${ZONOS3_ROOT}/servers/ggml"
+        "${ZONOS3_ROOT}/servers/ggml/ggml/include")
+    # The vendored build exports the zonos3 inference entry points as a static
+    # library target `zonos3_engine` (see servers/ggml/CMakeLists.txt) — link it.
+    target_link_libraries(purr_zonos3_jni PRIVATE zonos3_engine ggml ggml-base ggml-cpu)
+else()
+    message(STATUS "Zonos3 sources not vendored — building stub adapter (fail-soft)")
+endif()
+
+add_library(purr_zonos1_jni SHARED
+    "${CMAKE_CURRENT_SOURCE_DIR}/zonos/purr_zonos1_jni.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/zonos/zonos1_engine_adapter.cpp"
+)
+target_include_directories(purr_zonos1_jni PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/zonos")
+target_link_libraries(purr_zonos1_jni PRIVATE Threads::Threads dl log m)
+set_target_properties(purr_zonos1_jni PROPERTIES VERSION "" SOVERSION "")
+if(EXISTS "${ZONOS1_ROOT}")
+    message(STATUS "Zonos1 sources found at ${ZONOS1_ROOT} — enabling real runtime adapter")
+    target_compile_definitions(purr_zonos1_jni PRIVATE PURR_ZONOS1_VENDORED=1)
+    target_include_directories(purr_zonos1_jni PRIVATE "${ZONOS1_ROOT}")
+    target_link_libraries(purr_zonos1_jni PRIVATE zonos1 ggml ggml-base ggml-cpu)
+else()
+    message(STATUS "Zonos1 sources not vendored — building stub adapter (fail-soft)")
+endif()

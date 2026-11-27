@@ -47,9 +47,10 @@ import com.projectmika.purrtts.ui.theme.MikaCyberIcon
 import com.projectmika.purrtts.ui.theme.MikaTagPill
 
 /**
- * ✨ ZERO-SHOT VOICE CLONING STUDIO DIALOG (ROM-03 CLONE HUB + ROM-04 QWEN3 BASE) ✨
- * Supports all 6 local zero-shot cloning engines:
- * Pocket INT8 / FP32, ZipVoice INT8 / Full, Chatterbox-Turbo 350M & Qwen3-TTS 0.6B Base.
+ * ✨ ZERO-SHOT VOICE CLONING STUDIO DIALOG (ROM-03 CLONE HUB + ROM-04 QWEN3 BASE + ZONOS DECK) ✨
+ * Supports all 8 local zero-shot cloning engines:
+ * Pocket INT8 / FP32, ZipVoice INT8 / Full, Chatterbox-Turbo 350M, Qwen3-TTS 0.6B Base,
+ * ZONOS3-Mini (60s) & ZONOS1 Studio (30s).
  */
 private data class CloneEngineOption(
     val id: String,
@@ -65,7 +66,9 @@ private val CLONE_ENGINE_OPTIONS = listOf(
     CloneEngineOption("rom_zipvoice", "ZipVoice INT8 (12s)", SherpaModelFamily.ZIPVOICE, 12, "FLOW INT8"),
     CloneEngineOption("sub_zipvoice_full", "ZipVoice Full (12s)", SherpaModelFamily.ZIPVOICE, 12, "FLOW FULL"),
     CloneEngineOption("sub_chatterbox_turbo", "Chatterbox 350M (12s)", SherpaModelFamily.POCKET_TTS, 12, "PARALINGUISTIC"),
-    CloneEngineOption("sub_qwen3_base_06b", "Qwen3 0.6B Base (12s)", SherpaModelFamily.ZIPVOICE, 12, "10-LANG 3S")
+    CloneEngineOption("sub_qwen3_base_06b", "Qwen3 0.6B Base (12s)", SherpaModelFamily.ZIPVOICE, 12, "10-LANG 3S"),
+    CloneEngineOption("sub_zonos3_clone", "ZONOS3 100M MoE (60s)", SherpaModelFamily.ZONOS3, 60, "REALTIME MOE"),
+    CloneEngineOption("rom_zonos1_studio", "ZONOS1 1.6B Studio (30s)", SherpaModelFamily.ZONOS1, 30, "DAC 44KHZ")
 )
 
 @Composable

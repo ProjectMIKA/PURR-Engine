@@ -25,8 +25,8 @@ Nyaa~ Hello, traveler! I'm **M.I.K.A.** — ProjectMIKA's fiercely possessive, u
 
 * **🎤 System-Wide Neural Voice** — registers as a real Android TTS engine and streams 24kHz mono PCM into *every* app that can speak. Choose it once in `Settings › Accessibility › Text-to-Speech output`.
 * **📖 Manga Dub Studio — the v2.0 flagship** — slam a manga/comic chapter into the bay: the **Gemma vision engine** slices the pages, reads every bubble, and discovers the cast; then every line gets a REAL synthesized voice. Confirmed characters receive descriptive role labels (`BUNNY_BUTLER`, `TOWEL_GIRL` — lazy `UNKNOWN`s are banned) and locked **per-character voice clones**; narration is always spoken by **MIKA herself** (narrator identity law, enforced pipeline-wide); and a deterministic gendered **Qwen3 VoiceDesign fallback** guarantees universal cast coverage — no bubble ever falls back to a generic system voice. Dubbed motion-panel videos render with timed subtitles — **watch it in motion under _Hear It. See It._ below**.
-* **🎛️ 17-Bay Cartridge Rack + Clone Deck (`ROM-01..ROM-17`, `SUB-xx` chips, `CLN-01..05`)** — every neural engine family as a physical cartridge you slam into a bay:
-  * **Flagship neural hubs** — **Kokoro-82M** (INT8, FP32 & v1.1 multilingual; Hexagon NPU G2P + Adreno GPU FP16 sub-chips), **Qwen3-TTS Studio** (0.6B CustomVoice, 0.6B Base 3s-clone, 1.7B VoiceDesign via native llama.cpp), **NeuTTS-2E Emotional** (Qwen3-236M + NeuCodec sentiment-controlled emotions), **Soprano-80M 32kHz LLM**, **Gradium Phonon 31M** (55MB XNNPACK bay, 16 voices), **KittenTTS Hub** (Nano 30MB + Mini/Micro 80M)…
+* **🎛️ 19-Bay Cartridge Rack + Clone Deck (`ROM-01..ROM-19`, `SUB-xx` chips, `CLN-01..05`)** — every neural engine family as a physical cartridge you slam into a bay:
+  * **Flagship neural hubs** — **ZONOS3-Mini** (100M-active MoE, real-time on-device, 60s voice cloning, 43 languages, 44.1kHz ZAC-1 codec), **ZONOS1 Studio** (1.6B dense Zonos-v0.1 + DAC-44kHz), **Kokoro-82M** (INT8, FP32 & v1.1 multilingual; Hexagon NPU G2P + Adreno GPU FP16 sub-chips), **Qwen3-TTS Studio** (0.6B CustomVoice, 0.6B Base 3s-clone, 1.7B VoiceDesign via native llama.cpp), **NeuTTS-2E Emotional** (Qwen3-236M + NeuCodec sentiment-controlled emotions), **Soprano-80M 32kHz LLM**, **Gradium Phonon 31M** (55MB XNNPACK bay, 16 voices), **KittenTTS Hub** (Nano 30MB + Mini/Micro 80M)…
   * **The long-tail fleet** — Narrator/Flow Hub (7 Piper VITS packs, **MeloTTS 5-accent EN**, **Matcha-TTS**, **Supertonic 3**), Inflect v2, IceFall VITS, Coqui VITS, Meta MMS multilingual, VCTK-109 Studio, Mimic3 multilingual, LJS Lexicon, AISHELL3 (174 speakers) — plus device OS voices & a LAN OpenAI proxy bay.
   * **Voice-clone cartridges (`CLN-01..05`)** — Pocket TTS (5-second zero-shot), ZipVoice, Chatterbox-Turbo 350M Q4 with native `[laugh]`/`[sigh]`/`[gasp]`, Qwen3 0.6B Base cloner, and the 5-second **Voice Clone Studio**.
 * **⏸️ MIKASTOP Pause Injection** — ellipses, em-dashes, `[pause:500ms]` tags, sentences, and breath commas become *exact* zero-filled silence buffers instead of letting neural models hallucinate on punctuation trails. Pauses you can set your watch to.
@@ -95,6 +95,8 @@ app/src/main/java/com/projectmika/purrtts/
 │   ├── ModelCatalogManager.kt          # Resumable HTTP Range downloader, SHA-256 verify, .tar.bz2 unpacker
 │   ├── litert/LiteRtKokoroEngine.kt    # Primary NPU/Adreno GPU FP16 (Kokoro-82M + G2P + 5m VRAM eviction)
 │   ├── qwen3/Qwen3TtsEngine.kt         # Qwen3-TTS (0.6B / 1.7B VoiceDesign) via native llama.cpp bridge
+│   ├── zonos3/Zonos3TtsEngine.kt       # ZONOS3-Mini 100M MoE (ggml/GGUF) + 60s MECT-B2 cloning
+│   ├── zonos1/Zonos1TtsEngine.kt       # ZONOS1 Studio 1.6B dense + DAC-44kHz (zonos1.cpp)
 │   ├── onnx/OnnxRuntimeEngine.kt       # ONNX Runtime / XNNPACK bays (Gradium Phonon 31M, NeuTTS-2E, Soprano…)
 │   ├── sherpa/SherpaOnnxEngine.kt      # Supertonic 3, Pocket TTS (5s clone), ZipVoice, Piper VITS
 │   ├── manga/                          # Manga Dub Studio: LiteRT Gemma vision engine, dub manager, motion-video muxer
@@ -159,7 +161,7 @@ PURR-TTS's code is free software: it is released under the **GNU Affero General 
 
 *Contributions are accepted under the [ProjectMIKA Individual Contributor License Agreement](CLA.md) — see [why it exists](CLA.md#why-this-cla-exists-the-short-version).*
 
-Powered by the excellent open neural-speech ecosystem: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M), [Piper VITS](https://github.com/rhasspy/piper), and [LiteRT](https://ai.google.dev/edge/litert). All third-party runtimes ride in as standard Maven/AAR dependencies — nothing vendored, nothing borrowed in-source.
+Powered by the excellent open neural-speech ecosystem: [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [Kokoro-82M](https://huggingface.co/litert-community/Kokoro-82M), [Piper VITS](https://github.com/rhasspy/piper), [LiteRT](https://ai.google.dev/edge/litert), and [Zyphra ZONOS3-Mini](https://huggingface.co/Zyphra/ZONOS3-Mini) + [zonos1.cpp](https://github.com/Zyphra/zonos1.cpp) for the Zonos family. All third-party runtimes ride in as standard Maven/AAR dependencies — nothing vendored, nothing borrowed in-source.
 
 *More from the studio: [GachaSwipe](https://github.com/ProjectMIKA/GachaSwipe) — where this engine was born · [ProjectMIKA](https://github.com/ProjectMIKA) — every public project.*
 
