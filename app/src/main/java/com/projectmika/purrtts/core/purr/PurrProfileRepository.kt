@@ -160,14 +160,15 @@ class PurrProfileRepository(filesDir: File) {
                 null
             }
             val nextProfiles = s.profiles.map { p ->
-                val needsSwitchOnEject = !slotted && p.selectedCartridgeId == cartridgeId && fallbackCart != null
+                val needsSwitchOnEject = !slotted && p.selectedCartridgeId == cartridgeId
+                val resolvedFallback = if (needsSwitchOnEject) fallbackCart else null
                 val needsSubHeal = slotted && p.selectedCartridgeId == cartridgeId &&
                     availableVoices.none { it.id == p.primaryVoiceId }
-                if (needsSwitchOnEject && fallbackCart != null) {
+                if (resolvedFallback != null) {
                     val nextPrimary = fallbackVoice?.id ?: p.primaryVoiceId
-                    val voicesForFallback = availableVoices.filter { it.cartridgeId == fallbackCart }
+                    val voicesForFallback = availableVoices.filter { it.cartridgeId == resolvedFallback }
                     p.copy(
-                        selectedCartridgeId = fallbackCart,
+                        selectedCartridgeId = resolvedFallback,
                         preferredBackend = fallbackVoice?.engine ?: fallbackSpec?.backend ?: p.preferredBackend,
                         sherpaFamily = fallbackVoice?.sherpaFamily ?: fallbackSpec?.sherpaFamily ?: p.sherpaFamily,
                         primaryVoiceId = nextPrimary,
@@ -765,7 +766,9 @@ class PurrProfileRepository(filesDir: File) {
                 nextSlotted += "tool_manga_dub_studio"
             }
             for ((legacyId, hubId) in legacyCartridgeToHub) {
-                if (normalizedModelStates[legacyId]?.state == DownloadState.INSTALLED) {
+                val isLegacyTopLevel = legacyId in decoded.slottedCartridges ||
+                    decoded.profiles.any { it.selectedCartridgeId == legacyId }
+                if (isLegacyTopLevel && normalizedModelStates[legacyId]?.state == DownloadState.INSTALLED) {
                     nextEnabledSubs += legacyId
                     if (nextSlotted.remove(legacyId) || catalogById[legacyId]?.parentCartridgeId == hubId) {
                         nextSlotted += hubId
