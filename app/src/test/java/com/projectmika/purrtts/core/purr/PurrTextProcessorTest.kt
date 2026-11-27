@@ -292,24 +292,31 @@ class PurrTextProcessorTest {
         assertEquals(8, narratorSubs.count { it.id.startsWith("sub_piper_") })
         assertEquals(8, voices.count { it.requiredSubCartridgeId?.startsWith("sub_piper_") == true })
 
-        val defaultSlottedTools = setOf(
-            "tool_purr_engine",
-            "tool_dsp_rack",
-            "tool_symbol_shield",
+        val expectedApps = setOf(
             "tool_audio_exporter",
             "tool_voice_design",
             "tool_audiobook_constructor",
-            "tool_theme_engine",
             "tool_script_studio",
             "tool_voice_benchmark",
             "tool_srt_batch_studio",
             "tool_manga_dub_studio"
         )
-        val expectedTools = defaultSlottedTools + "tool_openai_vision_api"
+        val apps = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.APPS }
+        assertEquals(expectedApps, apps.map { it.id }.toSet())
+        assertTrue(expectedApps.all { it in defaultState.slottedCartridges })
+
+        val defaultSlottedTools = setOf(
+            "tool_purr_engine",
+            "tool_dsp_rack",
+            "tool_symbol_shield",
+            "tool_theme_engine"
+        )
+        val expectedTools = defaultSlottedTools + setOf("tool_openai_vision_api", "tool_vram_residency")
         val tools = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
         assertEquals(expectedTools, tools.map { it.id }.toSet())
         assertTrue(defaultSlottedTools.all { it in defaultState.slottedCartridges })
         assertFalse("tool_openai_vision_api" in defaultState.slottedCartridges)
+        assertFalse("tool_vram_residency" in defaultState.slottedCartridges)
 
         val cloning = catalog.filter { it.category == CartridgeCategory.CLONING && !it.isSubCartridge }
         assertEquals(

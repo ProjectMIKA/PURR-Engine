@@ -285,7 +285,9 @@ class PurrTtsService : TextToSpeechService() {
             runCatching { callback.error() }
         } finally {
             activeSynthesisJob = null
-            router.markIdle()
+            runBlocking(kotlinx.coroutines.NonCancellable) {
+                router.onUtteranceComplete()
+            }
         }
     }
 

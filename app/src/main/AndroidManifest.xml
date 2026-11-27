@@ -6,6 +6,7 @@
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Android 11+ (API 30+) visibility to discover secondary TTS engines for Passthrough Proxy -->
@@ -73,6 +74,12 @@
                 android:name="android.speech.tts"
                 android:resource="@xml/tts_engine" />
         </service>
+
+        <!-- Optional Persistent Keep-Warm Foreground Service (TOOL-13) -->
+        <service
+            android:name=".service.PurrKeepWarmService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback" />
 
         <!-- System TTS Contract Activities -->
         <activity

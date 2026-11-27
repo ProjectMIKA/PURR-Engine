@@ -60,6 +60,11 @@ fun MikaSettingsSheet(
     hardwareSummary: String,
     qwen3GpuOffload: Boolean,
     onQwen3GpuOffloadToggle: (Boolean) -> Unit,
+    basicKeepWarmEnabled: Boolean,
+    onBasicKeepWarmToggle: (Boolean) -> Unit,
+    vramModuleSlotted: Boolean,
+    effectiveKeepWarmSummary: String,
+    onOpenVramModuleOrBay: () -> Unit,
     onReplayTutorial: () -> Unit,
     onDismiss: () -> Unit
 ) {
@@ -157,6 +162,55 @@ fun MikaSettingsSheet(
                 accent = MikaColors.TerminalGreen
             ) {
                 onCheckForUpdates()
+            }
+
+            // ✨ MEMORY & KEEP-WARM (v2.6.0): default 5-minute idle keep-warm with basic off switch;
+            // advanced timers, pre-warming, and persistent foreground notification live in TOOL-06.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    MikaCyberIcon(type = CyberIconType.CHIP_EXPANSION, tint = MikaColors.NeonCyan, size = 15.dp)
+                    Text(
+                        text = "> MEMORY_&_KEEP_WARM",
+                        color = MikaColors.NeonCyan,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 12.sp,
+                        letterSpacing = 0.8.sp
+                    )
+                }
+            }
+            SettingsToggleRow(
+                title = "KEEP_WARM_IN_RAM (5M DEFAULT)",
+                subtitle = if (vramModuleSlotted) {
+                    "Active policy: $effectiveKeepWarmSummary (governed by TOOL-06)."
+                } else {
+                    "Keep loaded TTS models warm for 5m of idle. Turn OFF for zero keep-warm (evict right after speech)."
+                },
+                checked = basicKeepWarmEnabled,
+                accent = MikaColors.NeonCyan,
+                onToggle = onBasicKeepWarmToggle
+            )
+            SettingsActionRow(
+                icon = CyberIconType.CHIP_EXPANSION,
+                label = if (vramModuleSlotted) "OPEN_TOOL_06_KEEP_WARM_GOVERNOR" else "ADVANCED_KEEP_WARM (TOOL-06)",
+                sub = if (vramModuleSlotted) {
+                    "Tune custom timers, manual preload & Always-Hot persistent notification in Tab 2."
+                } else {
+                    "Slam TOOL-06 in Cartridge Bay ▸ TOOLS (ejected by default) for ∞ pinning, manual preload & persistent notification."
+                },
+                accent = MikaColors.SsrGold
+            ) {
+                onDismiss()
+                onOpenVramModuleOrBay()
             }
 
             // ✨ HARDWARE OFFLOAD // EXPERIMENTAL (v1.8.3) — the future home for engine-level

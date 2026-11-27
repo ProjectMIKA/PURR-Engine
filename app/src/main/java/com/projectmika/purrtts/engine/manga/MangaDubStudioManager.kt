@@ -1165,7 +1165,7 @@ class MangaDubStudioManager(
             if (openAiEngine != null) {
                 appendLog("🌐 Using OpenAI Vision Engine: ${openAiEngine.name} (${openAiEngine.modelId})")
             } else if (proj.selectedOpenAiVisionEngineId.isNotBlank() && !repository.isOpenAiVisionModuleActive()) {
-                appendLog("ℹ️ TOOL-12 ejected — using local VLM (${proj.preferredVisionModel.shortLabel})")
+                appendLog("ℹ️ TOOL-05 ejected — using local VLM (${proj.preferredVisionModel.shortLabel})")
             }
             if (expectedCharCount > 0) {
                 appendLog("🎭 Character count baseline: $expectedCharCount speaking character(s) (excl. NARRATOR)")

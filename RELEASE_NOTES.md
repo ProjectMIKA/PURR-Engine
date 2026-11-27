@@ -1,3 +1,30 @@
+# 🌌 PURR-TTS v2.6.0 // Keep It Hot
+
+### ✨ What's New since v2.5.3
+
+Keep Qwen3 1.7B VoiceDesign and heavy neural TTS engines pre-warmed right from the top bar, shield them from Android `lmkd` with an optional persistent notification, and enjoy a cleaner separation between Studio Apps and System Tools. 🔥🧠🗂️
+
+* **🔥 Top Header Engine Residency Bar (`TtsForgeScreen`, `TtsBackendRouter`, `MikaStatusBadge`)**:
+  * Replaced the static `// Preset:` header line with a live residency bar tracking `COLD` / `WARMING` / `HOT` status, active accelerator (`GPU`, `NPU`, `CPU`), and countdown or `PIN∞` badge across **all 4 neural runtimes** (`Qwen3`, `LiteRT`, `Sherpa-ONNX`, `ONNX Runtime`).
+  * Added one-tap **`WARM`** (pre-mount Qwen3 1.7B VoiceDesign or your active neural engine into RAM/GPU right after typing your prompt) and **`FLUSH`** chips directly in the top bar.
+* **⚙️ Basic Keep-Warm Default & Settings Switch (`MikaSettingsSheet`, `VramResidencyPolicy`, `ResidencyTimer`)**:
+  * Models stay warm in RAM/GPU for **5 minutes (`300s`)** of idle by default across every backend.
+  * Added a **`> MEMORY_&_KEEP_WARM`** toggle in System Settings to disable Keep-Warm completely (`0s` immediate eviction right after each utterance finishes) plus a direct shortcut to `TOOL-06`.
+* **🛡️ New Optional `TOOL-06: VRAM_&_KEEP_WARM_GOVERNOR` + Persistent Foreground Service (`VramResidencyModuleWindow`, `PurrKeepWarmService`)**:
+  * Optional power-user module (ejected by default in Cartridge Bay ▸ `TOOLS`). Slamming `TOOL-06` unlocks live device RAM telemetry, manual Warm/Flush buttons, custom idle timers (`0s`, `1m`, `5m`, `15m`, `30m`, `∞ Pinned`), and `AUTO_WARM_ON_VOICE_SWITCH`.
+  * Includes an optional silent **`PERSISTENT_KEEP_WARM_NOTIFICATION`** Foreground Service (`WARM NOW` / `FLUSH RAM` / `TURN OFF` notification actions) to keep large models warm in RAM across apps; ejecting `TOOL-06` cleanly fail-closes back to the basic policy and stops the service. Manga Dub Studio & Audiobook Studio still evict VRAM safely before Vision LLMs or muxing.
+* **🗂️ `APPS` vs. `TOOLS` Overhaul Across Cartridge Bay & Modules Desktop (`PurrModels`, `ModelCatalogTab`, `PurrRulebookTab`)**:
+  * Added a 4th Cartridge Bay category (`TTS` | `CLONE` | `APPS` | `TOOLS`) separating the **7 Creative Studio Apps (`APP-01..APP-07`)** from the **6 Engine, Theme, API & Hardware Tools (`TOOL-01..TOOL-06`)** with zero breaking changes to saved `tool_*` IDs.
+  * Upgraded Tab 2 Modules Desktop with a compact **`ALL` | `APPS` | `TOOLS`** filter bar over two labeled sections (`> STUDIO_APPS` on top, `> ENGINE_&_SYSTEM_TOOLS` below).
+* **✅ Tests**: Updated and expanded unit tests (`PurrHeavyEnginesTest`, `PurrPremiumCatalogTest`, `PurrTextProcessorTest`) alongside `verify_project.py` and `align_sherpa_ort_abi.py --self-test`.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.6.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`, versionCode `53`).
+2. **`PURR-TTS_V2.6.0.apk`** — Mirror signed release APK for direct Android sideloading.
+
+---
+
 # 🌌 PURR-TTS v2.5.3 // The Clean Bus
 
 ### ✨ What's New since v2.5.2

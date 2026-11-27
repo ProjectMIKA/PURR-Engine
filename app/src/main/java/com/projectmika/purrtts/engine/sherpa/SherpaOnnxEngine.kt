@@ -23,6 +23,7 @@ import com.projectmika.purrtts.core.purr.PurrHardwareProbe
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.SherpaModelFamily
 import com.projectmika.purrtts.engine.PurrSynthesizer
+import com.projectmika.purrtts.engine.ResidencyTimer
 import com.projectmika.purrtts.engine.SynthesisOutcome
 import java.io.BufferedInputStream
 import java.io.File
@@ -34,13 +35,10 @@ import org.apache.commons.compress.archivers.tar.TarArchiveInputStream
 import org.apache.commons.compress.compressors.bzip2.BZip2CompressorInputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -62,6 +60,7 @@ class SherpaOnnxEngine(
     private val clonedVoicesProvider: () -> List<ClonedVoiceProfile>,
     private val smartOffloadProvider: () -> Boolean = { false },
     private val hardwareProfile: HardwareProfile = PurrHardwareProbe.detectDevice(),
+    private val idleTimeoutMsProvider: () -> Long = { IDLE_EVICTION_MS },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -77,7 +76,9 @@ class SherpaOnnxEngine(
     override val statusFlow: StateFlow<HardwareStatusBadge> = _statusFlow.asStateFlow()
 
     private val mutex = Mutex()
-    private var idleJob: Job? = null
+    private val residencyTimer = ResidencyTimer(scope, idleTimeoutMsProvider) { evictResources() }
+    val residentModelLabel: StateFlow<String?> = residencyTimer.residentModelLabel
+    val remainingWarmSeconds: StateFlow<Int> = residencyTimer.remainingWarmSeconds
     private var activeOfflineTts: OfflineTts? = null
     private var activeMountKey: String? = null
     private var activeSmartOffload: Boolean = false
@@ -239,15 +240,46 @@ class SherpaOnnxEngine(
         )
     }
 
-    override suspend fun warmup(profile: PurrProfile) {
-        mutex.withLock {
-            val target = resolveMountTarget(profile.primaryVoiceId, profile)
-            ensureFamilyLoadedLocked(
-                family = target.family,
-                subCartridgeId = target.subCartridgeId
-            )
+    private fun resolveEffectiveCloneEngineId(clonedVoice: ClonedVoiceProfile): String {
+        val preferredEngineId = clonedVoice.resolvedCloneEngineId
+        if (hasMinimumRequiredAssets(familyDir(clonedVoice.family, preferredEngineId), clonedVoice.family)) {
+            return preferredEngineId
         }
-        resetIdleTimer()
+        val siblingId = when (clonedVoice.family) {
+            SherpaModelFamily.POCKET_TTS -> if (preferredEngineId == "sub_pocket_fp32") "rom_pocket_tts" else "sub_pocket_fp32"
+            SherpaModelFamily.ZIPVOICE -> if (preferredEngineId == "sub_zipvoice_full") "rom_zipvoice" else "sub_zipvoice_full"
+            else -> preferredEngineId
+        }
+        return if (hasMinimumRequiredAssets(familyDir(clonedVoice.family, siblingId), clonedVoice.family)) siblingId else preferredEngineId
+    }
+
+    override suspend fun warmup(profile: PurrProfile) {
+        val loaded = mutex.withLock {
+            val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
+            val clonedVoice = clonedVoicesProvider().firstOrNull {
+                it.id == profile.primaryVoiceId || it.id == cleanVoiceId
+            }
+            if (clonedVoice != null) {
+                ensureFamilyLoadedLocked(
+                    family = clonedVoice.family,
+                    subCartridgeId = resolveEffectiveCloneEngineId(clonedVoice)
+                )
+            } else {
+                val target = resolveMountTarget(profile.primaryVoiceId, profile)
+                ensureFamilyLoadedLocked(
+                    family = target.family,
+                    subCartridgeId = target.subCartridgeId
+                )
+            }
+            activeOfflineTts != null
+        }
+        if (loaded) {
+            residencyTimer.scheduleOrRefresh(isWarmupGrace = true)
+        }
+    }
+
+    suspend fun applyResidencyPolicyNow() {
+        residencyTimer.applyPolicyNow { evictResources() }
     }
 
     override suspend fun synthesizeChunk(
@@ -257,23 +289,23 @@ class SherpaOnnxEngine(
         pitch: Float,
         profile: PurrProfile
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
-        resetIdleTimer()
+        residencyTimer.beginSynthesis()
+        try {
+            val clonedVoice = clonedVoicesProvider().firstOrNull { it.id == voiceId }
+            if (clonedVoice != null) {
+                return@withContext synthesizeCloned(
+                    text = text,
+                    clonedVoice = clonedVoice,
+                    speakingRate = speakingRate,
+                    pitch = pitch
+                )
+            }
 
-        val clonedVoice = clonedVoicesProvider().firstOrNull { it.id == voiceId }
-        if (clonedVoice != null) {
-            return@withContext synthesizeCloned(
-                text = text,
-                clonedVoice = clonedVoice,
-                speakingRate = speakingRate,
-                pitch = pitch
-            )
-        }
+            val mountTarget = resolveMountTarget(voiceId, profile)
+            val targetFamily = mountTarget.family
+            val subCartridgeId = mountTarget.subCartridgeId
 
-        val mountTarget = resolveMountTarget(voiceId, profile)
-        val targetFamily = mountTarget.family
-        val subCartridgeId = mountTarget.subCartridgeId
-
-        mutex.withLock {
+            mutex.withLock {
             ensureFamilyLoadedLocked(targetFamily, subCartridgeId)
             val tts = activeOfflineTts
             if (tts == null) {
@@ -358,6 +390,9 @@ class SherpaOnnxEngine(
                 hardwareBadge = activeBadge,
                 engineSummary = "sherpa-onnx • ${mountTarget.voiceDisplayName ?: targetFamily.label} (${finalGenerated.sampleRate}Hz -> 24kHz)$suffix"
             )
+            }
+        } finally {
+            residencyTimer.scheduleOrRefresh()
         }
     }
 
@@ -367,23 +402,11 @@ class SherpaOnnxEngine(
         speakingRate: Float,
         pitch: Float
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
-        resetIdleTimer()
+        residencyTimer.beginSynthesis()
+        try {
+            val effectiveEngineId = resolveEffectiveCloneEngineId(clonedVoice)
 
-        // If the exact cloning variant isn't installed (e.g. clone saved with base Pocket INT8
-        // while Pocket FP32 Studio is installed, or vice versa), fall back to sibling engine in family.
-        val preferredEngineId = clonedVoice.resolvedCloneEngineId
-        val effectiveEngineId = if (hasMinimumRequiredAssets(familyDir(clonedVoice.family, preferredEngineId), clonedVoice.family)) {
-            preferredEngineId
-        } else {
-            val siblingId = when (clonedVoice.family) {
-                SherpaModelFamily.POCKET_TTS -> if (preferredEngineId == "sub_pocket_fp32") "rom_pocket_tts" else "sub_pocket_fp32"
-                SherpaModelFamily.ZIPVOICE -> if (preferredEngineId == "sub_zipvoice_full") "rom_zipvoice" else "sub_zipvoice_full"
-                else -> preferredEngineId
-            }
-            if (hasMinimumRequiredAssets(familyDir(clonedVoice.family, siblingId), clonedVoice.family)) siblingId else preferredEngineId
-        }
-
-        mutex.withLock {
+            mutex.withLock {
             ensureFamilyLoadedLocked(clonedVoice.family, effectiveEngineId)
             val tts = activeOfflineTts
             if (tts == null) {
@@ -479,6 +502,9 @@ class SherpaOnnxEngine(
                 hardwareBadge = activeBadge,
                 engineSummary = "${clonedVoice.family.label} Cloned • ${clonedVoice.displayName}$suffix"
             )
+            }
+        } finally {
+            residencyTimer.scheduleOrRefresh()
         }
     }
 
@@ -490,6 +516,7 @@ class SherpaOnnxEngine(
             activeSmartOffload = false
             activeUsedNnapi = false
             _statusFlow.value = HardwareStatusBadge.IDLE
+            residencyTimer.markEvicted()
             Log.i(TAG, "[ONNX_EVICT] Released sherpa-onnx OfflineTts native memory.")
         }
     }
@@ -543,6 +570,31 @@ class SherpaOnnxEngine(
         return spec?.let { "${it.romCode} ${it.name}" } ?: family.label
     }
 
+    private fun shortMountLabelFor(family: SherpaModelFamily, subCartridgeId: String?): String = when (subCartridgeId) {
+        "rom_kokoro_fp32" -> "Kokoro 82M FP32"
+        "rom_kokoro_v11" -> "Kokoro v1.1"
+        "sub_pocket_fp32" -> "Pocket FP32"
+        "sub_zipvoice_full" -> "ZipVoice Full"
+        "rom_inflect_v2" -> "Inflect V2"
+        "rom_icefall_vits" -> "Icefall VITS"
+        "rom_coqui_vits" -> "Coqui VITS"
+        "rom_meta_mms" -> "Meta MMS"
+        "rom_vctk_studio" -> "VCTK Studio"
+        "rom_mimic3_neural" -> "Mimic3 Neural"
+        "rom_ljs_lexicon" -> "LJS Lexicon"
+        "rom_aishell3_zh" -> "AISHELL-3 174"
+        else -> when (family) {
+            SherpaModelFamily.KOKORO -> "Kokoro 82M"
+            SherpaModelFamily.KITTEN_TTS -> "KittenTTS"
+            SherpaModelFamily.SUPERTONIC_3 -> "Supertonic 3"
+            SherpaModelFamily.POCKET_TTS -> "Pocket TTS"
+            SherpaModelFamily.ZIPVOICE -> "ZipVoice"
+            SherpaModelFamily.MATCHA -> "Matcha"
+            SherpaModelFamily.PIPER -> "Piper VITS"
+            SherpaModelFamily.MELO_TTS -> "MeloTTS"
+        }
+    }
+
     private fun ensureFamilyLoadedLocked(
         family: SherpaModelFamily,
         subCartridgeId: String? = null,
@@ -557,6 +609,7 @@ class SherpaOnnxEngine(
         activeSmartOffload = smartOffload
         activeUsedNnapi = false
         lastMountError = null
+        residencyTimer.markEvicted()
 
         val dir = familyDir(family, subCartridgeId)
         fun scanNonEspeakFiles(root: File): List<File> = root.walkTopDown()
@@ -868,6 +921,7 @@ class SherpaOnnxEngine(
                 activeOfflineTts = nnapiAttempt.getOrThrow()
                 activeUsedNnapi = true
                 _statusFlow.value = HardwareStatusBadge.NPU_ACTIVE
+                residencyTimer.markMounted("${shortMountLabelFor(family, subCartridgeId)} (NPU)")
                 Log.i(TAG, "Mounted sherpa-onnx ${family.label} via NNAPI (Smart Offload) from ${dir.absolutePath}")
                 return
             }
@@ -917,6 +971,7 @@ class SherpaOnnxEngine(
         }
         activeOfflineTts = mountedTts
         _statusFlow.value = HardwareStatusBadge.CPU_NEON
+        residencyTimer.markMounted(shortMountLabelFor(family, subCartridgeId))
         Log.i(TAG, "Mounted sherpa-onnx ${family.label} cleanly from ${dir.absolutePath}")
     }
 
@@ -1062,14 +1117,6 @@ class SherpaOnnxEngine(
                 cleanId.startsWith("ljs_") ||
                 cleanId.startsWith("aishell3_") -> SherpaModelFamily.PIPER
             else -> defaultFamily
-        }
-    }
-
-    private fun resetIdleTimer() {
-        idleJob?.cancel()
-        idleJob = scope.launch {
-            delay(IDLE_EVICTION_MS)
-            evictResources()
         }
     }
 }

@@ -39,6 +39,7 @@ import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.ExportedAudioFile
 import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
+import com.projectmika.purrtts.core.purr.KeepWarmTimeoutPreset
 import com.projectmika.purrtts.core.purr.MikaStopConfig
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.OpenAiEndpointUtils
@@ -66,6 +67,7 @@ import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
 import com.projectmika.purrtts.core.purr.VoiceDescriptor
 import com.projectmika.purrtts.core.purr.VoiceDesignSpec
 import com.projectmika.purrtts.core.purr.VoiceGender
+import com.projectmika.purrtts.core.purr.VramResidencyPolicy
 import android.os.SystemClock
 import com.projectmika.purrtts.engine.CloneClipImporter
 import com.projectmika.purrtts.engine.TtsBackendRouter
@@ -86,8 +88,11 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
@@ -131,7 +136,10 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     val forgeState: StateFlow<PurrForgeState> = repository.state
     val discoveredSystemVoices: StateFlow<List<VoiceDescriptor>> = repository.discoveredSystemVoices
     val telemetry: StateFlow<TtsBackendRouter.LiveTelemetry> = backendRouter.telemetry
-    val vramRemainingSeconds: StateFlow<Int> = backendRouter.liteRtEngine.vramRemainingSeconds
+    val residencyState: StateFlow<TtsBackendRouter.ResidencySnapshot> = backendRouter.residencyFlow
+    val vramRemainingSeconds: StateFlow<Int> = backendRouter.residencyFlow
+        .map { it.remainingSeconds }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
     val hardwareProfile: HardwareProfile = backendRouter.hardwareProfile
     val modelCatalog: List<ModelBundleSpec> = catalogManager.catalog
     val mainCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
@@ -141,7 +149,11 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         !it.isSubCartridge && it.category == CartridgeCategory.CLONING
     }
     val toolCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
-        !it.isSubCartridge && (it.category == CartridgeCategory.TOOLS || it.id == "tool_clone_studio")
+        !it.isSubCartridge && (
+            it.category == CartridgeCategory.APPS ||
+                it.category == CartridgeCategory.TOOLS ||
+                it.id == "tool_clone_studio"
+            )
     }
 
     fun subCartridgesFor(parentId: String): List<ModelBundleSpec> =
@@ -521,9 +533,75 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         repository.setQwen3GpuOffload(enabled)
     }
 
+    fun warmSelectedEngine() {
+        viewModelScope.launch {
+            val outcome = backendRouter.warmSelectedProfile(repository.currentProfile)
+            showToast(outcome.message)
+        }
+    }
+
+    fun evictAllVramNow() {
+        viewModelScope.launch {
+            backendRouter.evictAllVram()
+            showToast("Flushed resident TTS weights from RAM/VRAM")
+        }
+    }
+
+    fun setBasicKeepWarmEnabled(enabled: Boolean) {
+        repository.updateVramResidency { cur ->
+            cur.copy(
+                basicKeepWarmEnabled = enabled,
+                moduleTimeoutPreset = if (enabled && cur.moduleTimeoutPreset == KeepWarmTimeoutPreset.IMMEDIATE_EVICT) {
+                    KeepWarmTimeoutPreset.FIVE_MIN
+                } else {
+                    cur.moduleTimeoutPreset
+                }
+            )
+        }
+        showToast(
+            if (enabled) "Keep-Warm enabled (5m idle default)"
+            else "Keep-Warm OFF — models evict right after speech"
+        )
+    }
+
+    fun setKeepWarmTimeoutPreset(preset: KeepWarmTimeoutPreset) {
+        repository.updateVramResidency { cur ->
+            cur.copy(
+                basicKeepWarmEnabled = preset != KeepWarmTimeoutPreset.IMMEDIATE_EVICT,
+                moduleTimeoutPreset = preset
+            )
+        }
+        showToast("Keep-Warm -> ${preset.displayLabel}")
+    }
+
+    fun setForegroundKeepWarmService(enabled: Boolean) {
+        repository.updateVramResidency { cur ->
+            val nextPreset = if (enabled && cur.moduleTimeoutPreset == KeepWarmTimeoutPreset.IMMEDIATE_EVICT) {
+                KeepWarmTimeoutPreset.ALWAYS_HOT
+            } else {
+                cur.moduleTimeoutPreset
+            }
+            cur.copy(
+                basicKeepWarmEnabled = if (enabled) true else cur.basicKeepWarmEnabled,
+                moduleTimeoutPreset = nextPreset,
+                foregroundKeepWarmService = enabled
+            )
+        }
+        showToast(
+            if (enabled) "Always-Hot Foreground Notification ON"
+            else "Always-Hot Foreground Notification OFF"
+        )
+    }
+
+    fun setAutoWarmOnVoiceSelect(enabled: Boolean) {
+        repository.updateVramResidency { it.copy(autoWarmOnVoiceSelect = enabled) }
+        showToast(if (enabled) "Auto-Warm on voice switch ON" else "Auto-Warm on voice switch OFF")
+    }
+
     fun selectEngineCartridge(cartridgeId: String) {
         repository.selectEngineCartridge(cartridgeId)
         showToast("Engine -> ${cartridgeId.uppercase()}")
+        maybeAutoWarmSelectedProfile()
     }
 
     fun selectPrimaryVoice(voice: VoiceDescriptor) {
@@ -536,6 +614,20 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
             )
         }
         showToast("Voice -> ${voice.displayName}")
+        maybeAutoWarmSelectedProfile()
+    }
+
+    private fun maybeAutoWarmSelectedProfile() {
+        val state = repository.state.value
+        if (VramResidencyPolicy.shouldAutoWarmOnSelect(state.vramResidency, repository.isVramResidencyModuleActive())) {
+            val profile = repository.currentProfile
+            val (_, canWarm) = backendRouter.selectedEngineTargetLabel(profile, state)
+            if (canWarm) {
+                viewModelScope.launch {
+                    backendRouter.warmSelectedProfile(profile)
+                }
+            }
+        }
     }
 
     fun selectDialogueVoice(voice: VoiceDescriptor) {
@@ -758,7 +850,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
                     audioTrack?.stop()
                     audioTrack?.release()
                 }
-                backendRouter.markIdle()
+                backendRouter.onUtteranceComplete()
                 _auditionProgress.value = null
                 _isPlayingPreview.value = false
             }
@@ -768,7 +860,7 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
     fun stopAudition() {
         activePlaybackJob?.cancel()
         backendRouter.proxyEngine.stopDirectAudition()
-        backendRouter.markIdle()
+        viewModelScope.launch { backendRouter.onUtteranceComplete() }
         _auditionProgress.value = null
         _isPlayingPreview.value = false
     }

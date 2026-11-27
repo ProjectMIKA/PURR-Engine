@@ -489,8 +489,8 @@ fun MangaDubStudioModuleWindowBody(
                     Text(
                         text = when {
                             expandEngineDeck -> "Tap to collapse local VLM weights & Qwen3 1.7B installer"
-                            isOpenAiToolActive -> "TOOL-12 OpenAI Vision API active (${enabledOpenAiEngines.size} saved) • Tap to install local VLMs"
-                            else -> "Tap to install local VLMs • Slam TOOL-12 in Cartridge Bay -> TOOLS for OpenAI Vision APIs"
+                            isOpenAiToolActive -> "TOOL-05 OpenAI Vision API active (${enabledOpenAiEngines.size} saved) • Tap to install local VLMs"
+                            else -> "Tap to install local VLMs • Slam TOOL-05 in Cartridge Bay -> TOOLS for OpenAI Vision APIs"
                         },
                         color = MikaColors.DimText,
                         fontFamily = FontFamily.Monospace,

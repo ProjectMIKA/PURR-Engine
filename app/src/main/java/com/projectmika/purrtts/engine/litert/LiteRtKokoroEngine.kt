@@ -12,20 +12,17 @@ import com.projectmika.purrtts.core.purr.PurrDefaultPresets
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.engine.PurrSynthesizer
+import com.projectmika.purrtts.engine.ResidencyTimer
 import com.projectmika.purrtts.engine.SynthesisOutcome
 import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -34,12 +31,13 @@ import kotlinx.coroutines.withContext
  * ✨ MIKA'S HARDWARE-ACCELERATED LITERT RUNTIME (KOKORO-82M GPU FP16) ✨
  *
  * Targets `litert-community/Kokoro-82M` (`kokoro_int8_gpu_fp16.litertlm`) + persistent OpenCL/QNN
- * `--cache_dir` and a 5-minute idle VRAM eviction timer so Android `lmkd` never terminates the service.
+ * `--cache_dir` and a configurable idle VRAM eviction timer so Android `lmkd` never terminates the service.
  * Returns empty PCM when the `.litertlm` cartridge is not slotted/loaded so `TtsBackendRouter`
  * fails soft to real speech (`CORE_OS` or `SherpaOnnx`) without synthetic tones.
  */
 class LiteRtKokoroEngine(
     private val context: Context,
+    private val idleTimeoutMsProvider: () -> Long = { IDLE_VRAM_EVICTION_MS },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -54,11 +52,11 @@ class LiteRtKokoroEngine(
     private val _statusFlow = MutableStateFlow(HardwareStatusBadge.IDLE)
     override val statusFlow: StateFlow<HardwareStatusBadge> = _statusFlow.asStateFlow()
 
-    private val _vramRemainingSeconds = MutableStateFlow(0)
-    val vramRemainingSeconds: StateFlow<Int> = _vramRemainingSeconds.asStateFlow()
-
     private val engineMutex = Mutex()
-    private var idleEvictionJob: Job? = null
+    private val residencyTimer = ResidencyTimer(scope, idleTimeoutMsProvider) { evictResources() }
+    val residentModelLabel: StateFlow<String?> = residencyTimer.residentModelLabel
+    val remainingWarmSeconds: StateFlow<Int> = residencyTimer.remainingWarmSeconds
+    val vramRemainingSeconds: StateFlow<Int> = residencyTimer.remainingWarmSeconds
 
     private var kokoroEngineHandle: AutoCloseable? = null
     private var g2pCompiledModel: CompiledModel? = null
@@ -91,7 +89,11 @@ class LiteRtKokoroEngine(
         engineMutex.withLock {
             ensureInitializedLocked()
         }
-        resetIdleEvictionTimer()
+        residencyTimer.scheduleOrRefresh(isWarmupGrace = true)
+    }
+
+    suspend fun applyResidencyPolicyNow() {
+        residencyTimer.applyPolicyNow { evictResources() }
     }
 
     override suspend fun synthesizeChunk(
@@ -115,9 +117,9 @@ class LiteRtKokoroEngine(
             )
         }
 
-        resetIdleEvictionTimer()
-
-        engineMutex.withLock {
+        residencyTimer.beginSynthesis()
+        try {
+            engineMutex.withLock {
             ensureInitializedLocked()
 
             val clampedPitch = pitch.coerceIn(0.88f, 1.12f)
@@ -162,6 +164,9 @@ class LiteRtKokoroEngine(
                 engineSummary = "LiteRT runtime unavailable — failing over",
                 isFallbackNeuralPreview = true
             )
+            }
+        } finally {
+            residencyTimer.scheduleOrRefresh()
         }
     }
 
@@ -177,7 +182,7 @@ class LiteRtKokoroEngine(
             g2pCompiledModel = null
 
             _statusFlow.value = HardwareStatusBadge.IDLE
-            _vramRemainingSeconds.value = 0
+            residencyTimer.markEvicted()
             Log.i(TAG, "[VRAM_EVICT] Released LiteRT GPU FP16 & NPU contexts cleanly.")
         }
     }
@@ -231,6 +236,18 @@ class LiteRtKokoroEngine(
 
         if (mediaPipeTtsHandle == null && isKokoroLmFileReady) {
             mediaPipeTtsHandle = tryInitMediaPipeTts(kokoroModelFile.absolutePath)
+        }
+
+        val mountedLabel = when {
+            (kokoroEngineHandle != null || mediaPipeTtsHandle != null) && g2pCompiledModel != null ->
+                "Kokoro LiteRT (NPU+GPU)"
+            kokoroEngineHandle != null || mediaPipeTtsHandle != null ->
+                if (_statusFlow.value == HardwareStatusBadge.CPU_NEON) "Kokoro LiteRT (CPU)" else "Kokoro LiteRT (GPU)"
+            g2pCompiledModel != null -> "Kokoro NPU G2P"
+            else -> null
+        }
+        if (mountedLabel != null) {
+            residencyTimer.markMounted(mountedLabel)
         }
     }
 
@@ -358,21 +375,5 @@ class LiteRtKokoroEngine(
                 }
             }
         }.getOrNull()
-    }
-
-    private fun resetIdleEvictionTimer() {
-        idleEvictionJob?.cancel()
-        idleEvictionJob = scope.launch {
-            var remainingMs = IDLE_VRAM_EVICTION_MS
-            while (remainingMs > 0 && isActive) {
-                _vramRemainingSeconds.value = (remainingMs / 1000L).toInt()
-                val step = minOf(1000L, remainingMs)
-                delay(step)
-                remainingMs -= step
-            }
-            if (isActive) {
-                evictResources()
-            }
-        }
     }
 }

@@ -21,6 +21,7 @@ import com.projectmika.purrtts.core.purr.PurrPhononTokenizer
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrSentimentScorer
 import com.projectmika.purrtts.engine.PurrSynthesizer
+import com.projectmika.purrtts.engine.ResidencyTimer
 import com.projectmika.purrtts.engine.SynthesisOutcome
 import java.io.File
 import java.io.FileInputStream
@@ -38,13 +39,10 @@ import kotlin.math.PI
 import kotlin.random.Random
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -66,6 +64,7 @@ class OnnxRuntimeEngine(
     private val clonedVoicesProvider: () -> List<ClonedVoiceProfile>,
     private val smartOffloadProvider: () -> Boolean = { false },
     private val hardwareProfile: HardwareProfile = PurrHardwareProbe.detectDevice(),
+    private val idleTimeoutMsProvider: () -> Long = { IDLE_EVICTION_MS },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -208,7 +207,9 @@ class OnnxRuntimeEngine(
     override val statusFlow: StateFlow<HardwareStatusBadge> = _statusFlow.asStateFlow()
 
     private val mutex = Mutex()
-    private var idleJob: Job? = null
+    private val residencyTimer = ResidencyTimer(scope, idleTimeoutMsProvider) { evictResources() }
+    val residentModelLabel: StateFlow<String?> = residencyTimer.residentModelLabel
+    val remainingWarmSeconds: StateFlow<Int> = residencyTimer.remainingWarmSeconds
     private val env: OrtEnvironment by lazy { OrtEnvironment.getEnvironment() }
 
     private var loadedFamily = LoadedFamily.NONE
@@ -277,18 +278,33 @@ class OnnxRuntimeEngine(
         get() = isSopranoInstalled() || isNeuTtsInstalled() || isChatterboxInstalled() || isPhononInstalled()
 
     override suspend fun warmup(profile: PurrProfile) {
-        mutex.withLock {
+        val mounted = mutex.withLock {
             val clean = profile.primaryVoiceId.substringAfter(':')
-            when {
+            val loaded = when {
                 clean.startsWith("soprano_") && isSopranoInstalled() -> ensureSopranoLoadedLocked()
                 clean.startsWith("neutts_") && isNeuTtsInstalled() -> ensureNeuTtsLoadedLocked()
                 clean.startsWith("phonon_") && isPhononInstalled() -> ensurePhononLoadedLocked()
                 (clean.startsWith("chatterbox_") || clonedVoicesProvider().any {
                     it.id == clean && it.resolvedCloneEngineId == SPEC_CHATTERBOX
                 }) && isChatterboxInstalled() -> ensureChatterboxLoadedLocked()
+                else -> false
             }
+            if (loaded) {
+                _statusFlow.value = if (activeSmartOffload && activeUsedNnapi) {
+                    HardwareStatusBadge.NPU_ACTIVE
+                } else {
+                    HardwareStatusBadge.CPU_NEON
+                }
+            }
+            loaded
         }
-        resetIdleTimer()
+        if (mounted) {
+            residencyTimer.scheduleOrRefresh(isWarmupGrace = true)
+        }
+    }
+
+    suspend fun applyResidencyPolicyNow() {
+        residencyTimer.applyPolicyNow { evictResources() }
     }
 
     override suspend fun synthesizeChunk(
@@ -314,10 +330,11 @@ class OnnxRuntimeEngine(
         profile: PurrProfile,
         singleChunkOnly: Boolean
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
-        resetIdleTimer()
-        if (text.isBlank()) {
-            return@withContext SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.IDLE, "Empty text chunk")
-        }
+        residencyTimer.beginSynthesis()
+        try {
+            if (text.isBlank()) {
+                return@withContext SynthesisOutcome(FloatArray(0), SAMPLE_RATE_HZ, HardwareStatusBadge.IDLE, "Empty text chunk")
+            }
 
         val cleanVoiceId = voiceId.substringAfter(':')
         val clonedCb = clonedVoicesProvider().firstOrNull {
@@ -385,6 +402,9 @@ class OnnxRuntimeEngine(
                 hardwareBadge = activeBadge,
                 engineSummary = summary
             )
+            }
+        } finally {
+            residencyTimer.scheduleOrRefresh()
         }
     }
 
@@ -392,6 +412,7 @@ class OnnxRuntimeEngine(
         mutex.withLock {
             closeAllSessionsLocked()
             _statusFlow.value = HardwareStatusBadge.IDLE
+            residencyTimer.markEvicted()
             Log.i(TAG, "[ONNX_NATIVE_EVICT] Released all ONNX Runtime sessions cleanly.")
         }
     }
@@ -515,6 +536,7 @@ class OnnxRuntimeEngine(
         loadedFamily = LoadedFamily.SOPRANO
         activeSmartOffload = smartOffload
         activeUsedNnapi = decoderUsedNnapi
+        residencyTimer.markMounted(if (decoderUsedNnapi && smartOffload) "Soprano 80M (NPU)" else "Soprano 80M")
         Log.i(TAG, "Loaded Soprano-80M ONNX (32kHz, smart=$smartOffload, nnapi=$decoderUsedNnapi) cleanly")
         return true
     }
@@ -707,6 +729,7 @@ class OnnxRuntimeEngine(
         loadedFamily = LoadedFamily.NEUTTS
         activeSmartOffload = smartOffload
         activeUsedNnapi = codecUsedNnapi
+        residencyTimer.markMounted(if (codecUsedNnapi && smartOffload) "NeuTTS Air (NPU)" else "NeuTTS Air")
         Log.i(TAG, "Loaded NeuTTS-2E INT8 + NeuCodec INT8 (smart=$smartOffload, nnapi=$codecUsedNnapi) cleanly")
         return true
     }
@@ -978,6 +1001,7 @@ class OnnxRuntimeEngine(
         loadedFamily = LoadedFamily.CHATTERBOX
         activeSmartOffload = smartOffload
         activeUsedNnapi = encNnapi || decNnapi
+        residencyTimer.markMounted(if (activeUsedNnapi && smartOffload) "Chatterbox Q4 (NPU)" else "Chatterbox Q4")
         Log.i(TAG, "Loaded Chatterbox-Turbo 350M Q4 (4 ONNX graphs, smart=$smartOffload, nnapi=$activeUsedNnapi) cleanly")
         return true
     }
@@ -1526,6 +1550,7 @@ class OnnxRuntimeEngine(
         loadedFamily = LoadedFamily.PHONON
         activeSmartOffload = smartOffload
         activeUsedNnapi = false
+        residencyTimer.markMounted(if (useFp32) "Phonon 31M FP32" else "Phonon 31M Q4")
         Log.i(TAG, "[ONNX_NATIVE_MOUNT] Mounted Phonon 31M (${if (useFp32) "FP32" else "Q4"})")
         return true
     }
@@ -1749,13 +1774,5 @@ class OnnxRuntimeEngine(
             engineSummary = "Phonon 31M $modeLabel ($voiceTag)",
             isFallbackNeuralPreview = false
         )
-    }
-
-    private fun resetIdleTimer() {
-        idleJob?.cancel()
-        idleJob = scope.launch {
-            delay(IDLE_EVICTION_MS)
-            evictResources()
-        }
     }
 }

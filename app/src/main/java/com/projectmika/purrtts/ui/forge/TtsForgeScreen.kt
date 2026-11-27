@@ -31,11 +31,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import android.app.Activity
 import android.view.WindowManager
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -71,12 +73,15 @@ import com.projectmika.purrtts.core.purr.ActionHandlingMode
 import com.projectmika.purrtts.core.purr.CartridgeCategory
 import com.projectmika.purrtts.core.purr.DownloadState
 import com.projectmika.purrtts.core.purr.AcademyEntry
+import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.ModelBundleSpec
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrUpdateGate
 import com.projectmika.purrtts.core.purr.PurrForgeState
 import com.projectmika.purrtts.core.purr.PurrProxyPresets
 import com.projectmika.purrtts.core.purr.TUTORIAL_VERSION
+import com.projectmika.purrtts.core.purr.VramResidencyPolicy
+import com.projectmika.purrtts.engine.TtsBackendRouter
 import androidx.compose.material3.HorizontalDivider
 import com.projectmika.purrtts.ui.theme.CartridgeSlamOverlay
 import com.projectmika.purrtts.ui.theme.CyberIconType
@@ -113,7 +118,8 @@ fun TtsForgeScreen(
     MikaColors.applyTheme(forgeState.themeConfig)
     val discoveredSystemVoices by viewModel.discoveredSystemVoices.collectAsState()
     val telemetry by viewModel.telemetry.collectAsState()
-    val vramSec by viewModel.vramRemainingSeconds.collectAsState()
+    val residency by viewModel.residencyState.collectAsState()
+    val vramSec = residency.remainingSeconds
     val toastMsg by viewModel.toastMessage.collectAsState()
     val cartridgeAnim by viewModel.cartridgeAnim.collectAsState()
     val testText by viewModel.testInputText.collectAsState()
@@ -243,7 +249,7 @@ fun TtsForgeScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(modifier = Modifier.weight(1f)) {
+                    Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                         Text(
                             text = "> PURR_TTS // ENGINE",
                             color = MikaColors.TerminalGreen,
@@ -255,19 +261,38 @@ fun TtsForgeScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         val purrActive = "tool_purr_engine" in forgeState.slottedCartridges
-                        Text(
-                            text = if (purrActive) "// Preset: ${activeProfile.name}" else "// PURR Engine: OFF (Bypassed)",
-                            color = if (purrActive) MikaColors.TerminalGreen.copy(alpha = 0.65f) else MikaColors.DimText,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                        val vramModuleSlotted = VramResidencyPolicy.TOOL_ID in forgeState.slottedCartridges
+                        val (targetLabel, canWarmTarget) = remember(activeProfile, forgeState.modelStates, forgeState.clonedVoices) {
+                            viewModel.backendRouter.selectedEngineTargetLabel(activeProfile, forgeState)
+                        }
+                        val openResidencyControls: () -> Unit = {
+                            if (vramModuleSlotted) {
+                                requestedOsToolId = VramResidencyPolicy.TOOL_ID
+                                activeTab = PurrTab.MODULES.ordinal
+                            } else {
+                                showSettingsSheet = true
+                            }
+                        }
+                        HeaderResidencyBar(
+                            purrActive = purrActive,
+                            residency = residency,
+                            targetLabel = targetLabel,
+                            canWarmTarget = canWarmTarget,
+                            basicKeepWarmEnabled = forgeState.vramResidency.basicKeepWarmEnabled,
+                            onInspectResidency = openResidencyControls,
+                            onWarm = { viewModel.warmSelectedEngine() },
+                            onFlush = { viewModel.evictAllVramNow() }
                         )
                     }
 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                        val headerBadge = if (telemetry.badge != HardwareStatusBadge.IDLE) {
+                            telemetry.badge
+                        } else {
+                            residency.residentBadge
+                        }
                         MikaStatusBadge(
-                            badge = telemetry.badge,
+                            badge = headerBadge,
                             vramCountdownSec = vramSec,
                             modifier = Modifier
                                 .width(70.dp)
@@ -821,6 +846,10 @@ fun TtsForgeScreen(
                                             viewModel.setMangaCloneHandoff(target)
                                             showCloneStudio = true
                                         },
+                                        onOpenCartridgeBayApps = {
+                                            cartridgeBayCategory = CartridgeCategory.APPS
+                                            activeTab = PurrTab.CARTRIDGE_BAY.ordinal
+                                        },
                                         onOpenCartridgeBayTools = {
                                             cartridgeBayCategory = CartridgeCategory.TOOLS
                                             activeTab = PurrTab.CARTRIDGE_BAY.ordinal
@@ -943,6 +972,7 @@ fun TtsForgeScreen(
 
         // ✨ SYSTEM SETTINGS SHEET (v1.5.0) — opened from the header cog.
         if (showSettingsSheet) {
+            val vramModuleSlotted = VramResidencyPolicy.TOOL_ID in forgeState.slottedCartridges
             MikaSettingsSheet(
                 versionName = com.projectmika.purrtts.BuildConfig.VERSION_NAME,
                 versionCode = com.projectmika.purrtts.BuildConfig.VERSION_CODE,
@@ -953,6 +983,22 @@ fun TtsForgeScreen(
                 hardwareSummary = "${viewModel.hardwareProfile.socLabel} • ${viewModel.hardwareProfile.recommendedStrategyLabel}",
                 qwen3GpuOffload = forgeState.qwen3GpuOffload,
                 onQwen3GpuOffloadToggle = { viewModel.setQwen3GpuOffload(it) },
+                basicKeepWarmEnabled = forgeState.vramResidency.basicKeepWarmEnabled,
+                onBasicKeepWarmToggle = { viewModel.setBasicKeepWarmEnabled(it) },
+                vramModuleSlotted = vramModuleSlotted,
+                effectiveKeepWarmSummary = VramResidencyPolicy.effectivePolicySummary(
+                    config = forgeState.vramResidency,
+                    moduleSlotted = vramModuleSlotted
+                ),
+                onOpenVramModuleOrBay = {
+                    if (vramModuleSlotted) {
+                        requestedOsToolId = VramResidencyPolicy.TOOL_ID
+                        activeTab = PurrTab.MODULES.ordinal
+                    } else {
+                        cartridgeBayCategory = CartridgeCategory.TOOLS
+                        activeTab = PurrTab.CARTRIDGE_BAY.ordinal
+                    }
+                },
                 onReplayTutorial = {
                     academyPatchnotesOnly = false
                     showAcademy = true
@@ -1400,4 +1446,153 @@ private fun SaveProfileDialog(
             }
         }
     }
+}
+
+@Composable
+private fun HeaderResidencyBar(
+    purrActive: Boolean,
+    residency: TtsBackendRouter.ResidencySnapshot,
+    targetLabel: String,
+    canWarmTarget: Boolean,
+    basicKeepWarmEnabled: Boolean,
+    onInspectResidency: () -> Unit,
+    onWarm: () -> Unit,
+    onFlush: () -> Unit
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(5.dp)
+    ) {
+        if (!purrActive) {
+            Text(
+                text = "// PURR Engine: OFF (Bypassed)",
+                color = MikaColors.DimText,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+        } else if (residency.isWarming) {
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .clip(CircleShape)
+                    .background(MikaColors.MikaAmber)
+            )
+            Text(
+                text = "WARMING: ${residency.warmingLabel ?: targetLabel}…",
+                color = MikaColors.MikaAmber,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+        } else if (residency.residentLabel != null) {
+            val isPinned = residency.remainingSeconds < 0
+            val hotColor = if (isPinned) MikaColors.SsrGold else MikaColors.TerminalGreen
+            val timerText = when {
+                residency.remainingSeconds < 0 -> "PIN∞"
+                residency.remainingSeconds > 0 -> "%d:%02d".format(
+                    residency.remainingSeconds / 60,
+                    residency.remainingSeconds % 60
+                )
+                else -> "0s"
+            }
+            Row(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clickable(onClick = onInspectResidency),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(hotColor)
+                )
+                Text(
+                    text = "HOT: ${residency.residentLabel} ($timerText)",
+                    color = hotColor,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            HeaderResidencyActionChip(
+                label = "FLUSH",
+                accent = MikaColors.DangerRed,
+                onClick = onFlush
+            )
+        } else if (canWarmTarget) {
+            Row(
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clickable(onClick = onInspectResidency),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(5.dp)
+                        .clip(CircleShape)
+                        .background(MikaColors.DimText.copy(alpha = 0.7f))
+                )
+                Text(
+                    text = "COLD: $targetLabel",
+                    color = MikaColors.CyanWhite.copy(alpha = 0.72f),
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.5.sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            HeaderResidencyActionChip(
+                label = "WARM",
+                accent = MikaColors.TerminalGreen,
+                onClick = onWarm
+            )
+        } else {
+            val keepLabel = if (basicKeepWarmEnabled) "5m" else "OFF"
+            Text(
+                text = "// $targetLabel • Warm:$keepLabel",
+                color = MikaColors.TerminalGreen.copy(alpha = 0.65f),
+                fontFamily = FontFamily.Monospace,
+                fontSize = 9.5.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .weight(1f, fill = false)
+                    .clickable(onClick = onInspectResidency)
+            )
+        }
+    }
+}
+
+@Composable
+private fun HeaderResidencyActionChip(
+    label: String,
+    accent: Color,
+    onClick: () -> Unit
+) {
+    Text(
+        text = label,
+        color = accent,
+        fontFamily = FontFamily.Monospace,
+        fontWeight = FontWeight.Black,
+        fontSize = 8.sp,
+        letterSpacing = 0.4.sp,
+        modifier = Modifier
+            .clip(RoundedCornerShape(3.dp))
+            .background(accent.copy(alpha = 0.16f))
+            .border(1.dp, accent.copy(alpha = 0.68f), RoundedCornerShape(3.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 5.dp, vertical = 1.dp)
+    )
 }

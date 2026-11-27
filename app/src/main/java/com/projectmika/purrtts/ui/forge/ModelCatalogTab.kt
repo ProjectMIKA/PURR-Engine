@@ -85,11 +85,13 @@ fun ModelCatalogTab(
     val mainCatalog = remember(modelCatalog) { modelCatalog.filter { !it.isSubCartridge } }
     val ttsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TTS } }
     val cloningCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.CLONING } }
+    val appsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.APPS } }
     val toolsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TOOLS } }
-    val categoryCatalog = remember(ttsCatalog, cloningCatalog, toolsCatalog, selectedCategory) {
+    val categoryCatalog = remember(ttsCatalog, cloningCatalog, appsCatalog, toolsCatalog, selectedCategory) {
         when (selectedCategory) {
             CartridgeCategory.TTS -> ttsCatalog
             CartridgeCategory.CLONING -> cloningCatalog
+            CartridgeCategory.APPS -> appsCatalog
             CartridgeCategory.TOOLS -> toolsCatalog
         }
     }
@@ -135,87 +137,50 @@ fun ModelCatalogTab(
     val categoryAccent = when (selectedCategory) {
         CartridgeCategory.TTS -> MikaColors.NeonCyan
         CartridgeCategory.CLONING -> MikaColors.NeonPurple
+        CartridgeCategory.APPS -> MikaColors.SsrGold
         CartridgeCategory.TOOLS -> MikaColors.NeonPink
     }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
 
-        // 0. 3-Category Switcher: TTS | CLONING | TOOLS
+        // 0. 4-Category Switcher: TTS | CLONE | APPS | TOOLS
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
         ) {
-            val isTts = selectedCategory == CartridgeCategory.TTS
-            val isCloning = selectedCategory == CartridgeCategory.CLONING
-            val isTools = selectedCategory == CartridgeCategory.TOOLS
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (isTts) MikaColors.TerminalGreen.copy(alpha = 0.16f) else MikaColors.PanelBg)
-                    .border(1.5.dp, if (isTts) MikaColors.TerminalGreen else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
-                    .clickable { onSelectCategory(CartridgeCategory.TTS) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MikaCyberIcon(type = CyberIconType.MIC_WAVE, tint = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText, size = 12.dp)
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "TTS (${ttsCatalog.size})",
-                    color = if (isTts) MikaColors.TerminalGreen else MikaColors.DimText,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 9.5.sp,
-                    letterSpacing = 0.5.sp,
-                    maxLines = 1
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (isCloning) MikaColors.NeonPurple.copy(alpha = 0.18f) else MikaColors.PanelBg)
-                    .border(1.5.dp, if (isCloning) MikaColors.NeonPurple else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
-                    .clickable { onSelectCategory(CartridgeCategory.CLONING) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MikaCyberIcon(type = CyberIconType.DNA_CLONE, tint = if (isCloning) MikaColors.NeonPurple else MikaColors.DimText, size = 12.dp)
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "CLONE (${cloningCatalog.size})",
-                    color = if (isCloning) MikaColors.NeonPurple else MikaColors.DimText,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 9.5.sp,
-                    letterSpacing = 0.5.sp,
-                    maxLines = 1
-                )
-            }
-            Row(
-                modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(6.dp))
-                    .background(if (isTools) MikaColors.NeonPink.copy(alpha = 0.16f) else MikaColors.PanelBg)
-                    .border(1.5.dp, if (isTools) MikaColors.NeonPink else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
-                    .clickable { onSelectCategory(CartridgeCategory.TOOLS) }
-                    .padding(vertical = 10.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MikaCyberIcon(type = CyberIconType.WRENCH_TOOL, tint = if (isTools) MikaColors.NeonPink else MikaColors.DimText, size = 12.dp)
-                Spacer(modifier = Modifier.width(5.dp))
-                Text(
-                    text = "TOOLS (${toolsCatalog.size})",
-                    color = if (isTools) MikaColors.NeonPink else MikaColors.DimText,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 9.5.sp,
-                    letterSpacing = 0.5.sp,
-                    maxLines = 1
-                )
+            val categoryTabs = listOf(
+                Triple(CartridgeCategory.TTS, "TTS (${ttsCatalog.size})", CyberIconType.MIC_WAVE to MikaColors.TerminalGreen),
+                Triple(CartridgeCategory.CLONING, "CLONE (${cloningCatalog.size})", CyberIconType.DNA_CLONE to MikaColors.NeonPurple),
+                Triple(CartridgeCategory.APPS, "APPS (${appsCatalog.size})", CyberIconType.WINDOW_FRAME to MikaColors.SsrGold),
+                Triple(CartridgeCategory.TOOLS, "TOOLS (${toolsCatalog.size})", CyberIconType.WRENCH_TOOL to MikaColors.NeonPink)
+            )
+            categoryTabs.forEach { (cat, label, iconAndAccent) ->
+                val isSelected = selectedCategory == cat
+                val (icon, activeColor) = iconAndAccent
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(6.dp))
+                        .background(if (isSelected) activeColor.copy(alpha = 0.16f) else MikaColors.PanelBg)
+                        .border(1.5.dp, if (isSelected) activeColor else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
+                        .clickable { onSelectCategory(cat) }
+                        .padding(horizontal = 4.dp, vertical = 9.dp),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    MikaCyberIcon(type = icon, tint = if (isSelected) activeColor else MikaColors.DimText, size = 11.dp)
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Text(
+                        text = label,
+                        color = if (isSelected) activeColor else MikaColors.DimText,
+                        fontFamily = FontFamily.Monospace,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 8.5.sp,
+                        letterSpacing = 0.2.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
         }
 
@@ -234,6 +199,7 @@ fun ModelCatalogTab(
                         type = when (selectedCategory) {
                             CartridgeCategory.TTS -> CyberIconType.BUS_PLUG
                             CartridgeCategory.CLONING -> CyberIconType.DNA_CLONE
+                            CartridgeCategory.APPS -> CyberIconType.WINDOW_FRAME
                             CartridgeCategory.TOOLS -> CyberIconType.WRENCH_TOOL
                         },
                         tint = categoryAccent,
@@ -243,6 +209,7 @@ fun ModelCatalogTab(
                         text = when (selectedCategory) {
                             CartridgeCategory.TTS -> "TTS_BUS // ${categoryCatalog.size}-BAY RACK"
                             CartridgeCategory.CLONING -> "CLONE_BUS // ${categoryCatalog.size}-BAY RACK"
+                            CartridgeCategory.APPS -> "APP_BUS // ${categoryCatalog.size}-STUDIO RACK"
                             CartridgeCategory.TOOLS -> "TOOL_BUS // ${categoryCatalog.size}-MODULE RACK"
                         },
                         color = categoryAccent,
@@ -321,6 +288,7 @@ fun ModelCatalogTab(
                                     text = when (selectedCategory) {
                                         CartridgeCategory.TTS -> "%02d".format(globalIdx + 1)
                                         CartridgeCategory.CLONING -> "C${globalIdx + 1}"
+                                        CartridgeCategory.APPS -> "A${globalIdx + 1}"
                                         CartridgeCategory.TOOLS -> "T${globalIdx + 1}"
                                     },
                                     color = if (isSlotted) MikaColors.PrimaryText else MikaColors.DimText,
@@ -365,7 +333,8 @@ fun ModelCatalogTab(
                 text = when (selectedCategory) {
                     CartridgeCategory.TTS -> "// Download & slam core TTS engines. Tap EXPAND on any hub cartridge to reveal its nested sub-modules and accelerator chips."
                     CartridgeCategory.CLONING -> "// Dedicated zero-shot cloning bay (Pocket, ZipVoice, Chatterbox-Turbo, Qwen3 Base) + Clone Studio workshop. Tap EXPAND on hubs for studio weights."
-                    CartridgeCategory.TOOLS -> "// Slam or eject built-in OS Tool Modules. Ejecting P.U.R.R. ENGINE or DSP RACK removes its icon from the Modules tab and turns off its pipeline!"
+                    CartridgeCategory.APPS -> "// Creative studios & labs (Manga Dub, Audiobook .M4B, Podcast Script, SRT Batch, Exporter, VoiceDesign, Benchmark). Expand APP-07 for Vision LLMs."
+                    CartridgeCategory.TOOLS -> "// Engine pipeline, theme, API & hardware settings (P.U.R.R. Core, DSP Rack, Symbol Shield, Neon Theme, OpenAI Vision API, VRAM Keep-Warm)."
                 },
                 color = MikaColors.DimText,
                 fontFamily = FontFamily.Monospace,
@@ -622,7 +591,12 @@ fun ModelCatalogTab(
                 bundleState.state == DownloadState.INSTALLED ||
                 standaloneSubInstalled
             val isSlotted = isInstalled && spec.id in forgeState.slottedCartridges
-            val isToolCartridge = spec.isBuiltInOsCartridge && (spec.category == CartridgeCategory.TOOLS || spec.id == "tool_clone_studio")
+            val isAppCartridge = spec.isBuiltInOsCartridge && spec.category == CartridgeCategory.APPS
+            val isToolCartridge = spec.isBuiltInOsCartridge && (
+                spec.category == CartridgeCategory.TOOLS ||
+                    spec.category == CartridgeCategory.APPS ||
+                    spec.id == "tool_clone_studio"
+                )
             val isCloningCartridge = spec.category == CartridgeCategory.CLONING
             val accent = MikaColors.resolveAccent(Color(spec.accentHex))
             val sizeLabel = when {
@@ -1318,6 +1292,7 @@ fun ModelCatalogTab(
                     }
                     Text(
                         text = when {
+                            isAppCartridge -> "${spec.romCode} // STUDIO APP"
                             isToolCartridge -> "${spec.romCode} // TOOL MODULE"
                             spec.isBuiltInOsCartridge -> "${spec.romCode} // OS BINDER"
                             else -> "SHA-256: ${spec.expectedSha256.take(10)}..."

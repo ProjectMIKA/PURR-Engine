@@ -514,4 +514,52 @@ class PurrHeavyEnginesTest {
             repoDir.deleteRecursively()
         }
     }
+
+    @Test
+    fun `vram residency policy defaults to 5m keep warm and fail-closes TOOL-13 when ejected`() {
+        val defaultCfg = VramResidencyConfig()
+        assertTrue(defaultCfg.basicKeepWarmEnabled)
+        assertEquals(300, VramResidencyPolicy.effectiveTimeoutSeconds(defaultCfg, moduleSlotted = false))
+        assertEquals(300_000L, VramResidencyPolicy.effectiveTimeoutMs(defaultCfg, moduleSlotted = false))
+        assertFalse(VramResidencyPolicy.shouldRunForegroundService(defaultCfg, moduleSlotted = false))
+        assertFalse(VramResidencyPolicy.shouldAutoWarmOnSelect(defaultCfg, moduleSlotted = false))
+
+        // Basic keep-warm OFF evicts immediately regardless of TOOL-13 presets
+        val pinnedWithBasicOff = VramResidencyConfig(
+            basicKeepWarmEnabled = false,
+            moduleTimeoutPreset = KeepWarmTimeoutPreset.ALWAYS_HOT,
+            foregroundKeepWarmService = true,
+            autoWarmOnVoiceSelect = true
+        )
+        assertEquals(0, VramResidencyPolicy.effectiveTimeoutSeconds(pinnedWithBasicOff, moduleSlotted = true))
+        assertEquals(0L, VramResidencyPolicy.effectiveTimeoutMs(pinnedWithBasicOff, moduleSlotted = true))
+        assertFalse(VramResidencyPolicy.shouldRunForegroundService(pinnedWithBasicOff, moduleSlotted = true))
+        assertFalse(VramResidencyPolicy.shouldAutoWarmOnSelect(pinnedWithBasicOff, moduleSlotted = true))
+
+        // When TOOL-13 is slotted + basic ON: infinity pin + foreground notification + auto-warm active
+        val pinnedCfg = pinnedWithBasicOff.copy(basicKeepWarmEnabled = true)
+        assertEquals(-1, VramResidencyPolicy.effectiveTimeoutSeconds(pinnedCfg, moduleSlotted = true))
+        assertEquals(-1L, VramResidencyPolicy.effectiveTimeoutMs(pinnedCfg, moduleSlotted = true))
+        assertTrue(VramResidencyPolicy.shouldRunForegroundService(pinnedCfg, moduleSlotted = true))
+        assertTrue(VramResidencyPolicy.shouldAutoWarmOnSelect(pinnedCfg, moduleSlotted = true))
+
+        // Ejecting TOOL-13 immediately reverts policy back to safe 5m default and stops foreground service
+        assertEquals(300, VramResidencyPolicy.effectiveTimeoutSeconds(pinnedCfg, moduleSlotted = false))
+        assertFalse(VramResidencyPolicy.shouldRunForegroundService(pinnedCfg, moduleSlotted = false))
+        assertFalse(VramResidencyPolicy.shouldAutoWarmOnSelect(pinnedCfg, moduleSlotted = false))
+
+        // Repository keeps TOOL-13 ejected by default and does not auto-slot it on load
+        val repoDir = Files.createTempDirectory("purr_vram_policy").toFile()
+        try {
+            val repo = PurrProfileRepository(repoDir)
+            assertFalse(repo.isVramResidencyModuleActive())
+            repo.updateVramResidency { pinnedCfg }
+            assertTrue(repo.state.value.vramResidency.foregroundKeepWarmService)
+            val reloaded = PurrProfileRepository(repoDir)
+            assertFalse(reloaded.isVramResidencyModuleActive())
+            assertTrue(reloaded.state.value.vramResidency.foregroundKeepWarmService)
+        } finally {
+            repoDir.deleteRecursively()
+        }
+    }
 }

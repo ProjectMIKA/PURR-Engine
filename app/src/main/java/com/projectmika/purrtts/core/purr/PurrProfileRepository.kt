@@ -120,6 +120,10 @@ class PurrProfileRepository(filesDir: File) {
         updateState { s -> s.copy(qwen3GpuOffload = enabled) }
     }
 
+    fun updateVramResidency(transform: (VramResidencyConfig) -> VramResidencyConfig) {
+        updateState { s -> s.copy(vramResidency = transform(s.vramResidency)) }
+    }
+
     fun saveAsNewProfile(name: String) {
         val cleanName = name.trim()
         if (cleanName.isEmpty()) return
@@ -219,6 +223,8 @@ class PurrProfileRepository(filesDir: File) {
     fun isMangaDubStudioModuleActive(): Boolean = isCartridgeSlotted("tool_manga_dub_studio")
 
     fun isOpenAiVisionModuleActive(): Boolean = isCartridgeSlotted("tool_openai_vision_api")
+
+    fun isVramResidencyModuleActive(): Boolean = isCartridgeSlotted(VramResidencyPolicy.TOOL_ID)
 
     fun selectEngineCartridge(cartridgeId: String) {
         val spec = PurrDefaultPresets.modelCatalog().firstOrNull { it.id == cartridgeId }

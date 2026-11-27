@@ -268,9 +268,12 @@ fun MikaStatusBadge(
 
     // ✨ MARQUEE (v1.5.0): label + optional VRAM countdown compose the display string; overflow
     // scrolls as a hold -> scroll -> hold -> return bounce inside the fixed slot.
-    val countdown = if (vramCountdownSec > 0 && badge != HardwareStatusBadge.IDLE) {
-        " %d:%02d".format(vramCountdownSec / 60, vramCountdownSec % 60)
-    } else ""
+    val countdown = when {
+        badge == HardwareStatusBadge.IDLE -> ""
+        vramCountdownSec < 0 -> " PIN"
+        vramCountdownSec > 0 -> " %d:%02d".format(vramCountdownSec / 60, vramCountdownSec % 60)
+        else -> ""
+    }
     val display = badge.terminalLabel + countdown
 
     val marqueeTextStyle = remember {
@@ -1719,7 +1722,8 @@ enum class OsModuleIconType {
     VOICE_BENCHMARK,
     SRT_BATCH_STUDIO,
     MANGA_DUB_STUDIO,
-    OPENAI_VISION_HUB
+    OPENAI_VISION_HUB,
+    VRAM_RESIDENCY
 }
 
 /**
@@ -2122,6 +2126,37 @@ fun MikaOsModuleIcon(
                     drawCircle(MikaColors.TerminalGreen.copy(alpha = activeAlpha), radius = nr, center = Offset(w * 0.50f, h * 0.14f))
                     drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = nr, center = Offset(w * 0.24f, h * 0.22f))
                     drawCircle(MikaColors.SsrGold.copy(alpha = activeAlpha), radius = nr, center = Offset(w * 0.76f, h * 0.22f))
+                }
+
+                OsModuleIconType.VRAM_RESIDENCY -> {
+                    // Cybernetic Memory Chip + Keep-Warm Flame/Core Pin
+                    drawRoundRect(
+                        color = drawColor,
+                        topLeft = Offset(w * 0.22f, h * 0.22f),
+                        size = Size(w * 0.56f, h * 0.56f),
+                        cornerRadius = CornerRadius(3.dp.toPx()),
+                        style = stroke
+                    )
+                    // Gold/thermal core die inside chip
+                    drawRoundRect(
+                        color = MikaColors.SsrGold.copy(alpha = activeAlpha),
+                        topLeft = Offset(w * 0.36f, h * 0.36f),
+                        size = Size(w * 0.28f, h * 0.28f),
+                        cornerRadius = CornerRadius(1.8f.dp.toPx()),
+                        style = thinStroke
+                    )
+                    drawCircle(
+                        color = MikaColors.TerminalGreen.copy(alpha = activeAlpha),
+                        radius = (3.0f * s).dp.toPx(),
+                        center = Offset(w * 0.50f, h * 0.50f)
+                    )
+                    // Chip pins along all 4 sides
+                    listOf(0.35f, 0.50f, 0.65f).forEach { p ->
+                        drawLine(drawColor, Offset(w * p, h * 0.11f), Offset(w * p, h * 0.22f), strokeWidth = (1.6f * s).dp.toPx())
+                        drawLine(drawColor, Offset(w * p, h * 0.78f), Offset(w * p, h * 0.89f), strokeWidth = (1.6f * s).dp.toPx())
+                        drawLine(drawColor, Offset(w * 0.11f, h * p), Offset(w * 0.22f, h * p), strokeWidth = (1.6f * s).dp.toPx())
+                        drawLine(drawColor, Offset(w * 0.78f, h * p), Offset(w * 0.89f, h * p), strokeWidth = (1.6f * s).dp.toPx())
+                    }
                 }
             }
         }

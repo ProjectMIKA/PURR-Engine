@@ -10,18 +10,16 @@ import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrProfile
 import com.projectmika.purrtts.core.purr.PurrSentimentScorer
 import com.projectmika.purrtts.engine.PurrSynthesizer
+import com.projectmika.purrtts.engine.ResidencyTimer
 import com.projectmika.purrtts.engine.SynthesisOutcome
 import java.io.File
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -39,6 +37,7 @@ class Qwen3TtsEngine(
     // (Settings ▸ HARDWARE_OFFLOAD) — provided live so a mid-session toggle re-mounts the
     // engine on the next synthesis, same pattern as `clonedVoicesProvider`.
     private val gpuOffloadProvider: () -> Boolean = { false },
+    private val idleTimeoutMsProvider: () -> Long = { IDLE_EVICTION_MS },
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 ) : PurrSynthesizer {
 
@@ -119,7 +118,9 @@ class Qwen3TtsEngine(
     override val statusFlow: StateFlow<HardwareStatusBadge> = _statusFlow.asStateFlow()
 
     private val mutex = Mutex()
-    private var idleJob: Job? = null
+    private val residencyTimer = ResidencyTimer(scope, idleTimeoutMsProvider) { evictResources() }
+    val residentModelLabel: StateFlow<String?> = residencyTimer.residentModelLabel
+    val remainingWarmSeconds: StateFlow<Int> = residencyTimer.remainingWarmSeconds
     private var activeHandle: Long = 0L
     private var activeSpecId: String? = null
     private var activeInstructSupport: Boolean = false
@@ -158,14 +159,23 @@ class Qwen3TtsEngine(
             isSpecDownloaded(SPEC_DESIGN_17B)
 
     override suspend fun warmup(profile: PurrProfile) {
-        mutex.withLock {
+        val loaded = mutex.withLock {
             val cleanVoiceId = profile.primaryVoiceId.substringAfter(':')
-            val targetSpec = resolveSpecForVoice(cleanVoiceId)
+            val isClone = clonedVoicesProvider().any {
+                it.id == cleanVoiceId && it.resolvedCloneEngineId == SPEC_BASE_CLONE_06B
+            }
+            val targetSpec = if (isClone) SPEC_BASE_CLONE_06B else resolveSpecForVoice(cleanVoiceId)
             val userWantsGpu = gpuOffloadProvider()
             if (!userWantsGpu) gpuOffloadDisabledForSession = false
-            ensureEngineLoadedLocked(targetSpec, userWantsGpu && !gpuOffloadDisabledForSession)
+            ensureEngineLoadedLocked(targetSpec, userWantsGpu && !gpuOffloadDisabledForSession) != 0L
         }
-        resetIdleTimer()
+        if (loaded) {
+            residencyTimer.scheduleOrRefresh(isWarmupGrace = true)
+        }
+    }
+
+    suspend fun applyResidencyPolicyNow() {
+        residencyTimer.applyPolicyNow { evictResources() }
     }
 
     override suspend fun synthesizeChunk(
@@ -175,34 +185,35 @@ class Qwen3TtsEngine(
         pitch: Float,
         profile: PurrProfile
     ): SynthesisOutcome = withContext(Dispatchers.IO) {
-        resetIdleTimer()
-        if (text.isBlank()) {
-            return@withContext SynthesisOutcome(
-                pcmFloat24k = FloatArray(0),
-                sampleRateHz = SAMPLE_RATE_HZ,
-                hardwareBadge = HardwareStatusBadge.IDLE,
-                engineSummary = "Empty text chunk"
-            )
-        }
+        residencyTimer.beginSynthesis()
+        try {
+            if (text.isBlank()) {
+                return@withContext SynthesisOutcome(
+                    pcmFloat24k = FloatArray(0),
+                    sampleRateHz = SAMPLE_RATE_HZ,
+                    hardwareBadge = HardwareStatusBadge.IDLE,
+                    engineSummary = "Empty text chunk"
+                )
+            }
 
-        if (!Qwen3NativeBridge.isLoaded) {
-            return@withContext SynthesisOutcome(
-                pcmFloat24k = FloatArray(0),
-                sampleRateHz = SAMPLE_RATE_HZ,
-                hardwareBadge = HardwareStatusBadge.IDLE,
-                engineSummary = "Qwen3 native JNI runtime unavailable on this ABI",
-                isFallbackNeuralPreview = true
-            )
-        }
+            if (!Qwen3NativeBridge.isLoaded) {
+                return@withContext SynthesisOutcome(
+                    pcmFloat24k = FloatArray(0),
+                    sampleRateHz = SAMPLE_RATE_HZ,
+                    hardwareBadge = HardwareStatusBadge.IDLE,
+                    engineSummary = "Qwen3 native JNI runtime unavailable on this ABI",
+                    isFallbackNeuralPreview = true
+                )
+            }
 
-        val cleanVoiceId = voiceId.substringAfter(':')
-        val clonedVoice = clonedVoicesProvider().firstOrNull {
-            it.id == cleanVoiceId && it.resolvedCloneEngineId == SPEC_BASE_CLONE_06B
-        }
-        val targetSpec = if (clonedVoice != null) SPEC_BASE_CLONE_06B else resolveSpecForVoice(cleanVoiceId)
-        val nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
+            val cleanVoiceId = voiceId.substringAfter(':')
+            val clonedVoice = clonedVoicesProvider().firstOrNull {
+                it.id == cleanVoiceId && it.resolvedCloneEngineId == SPEC_BASE_CLONE_06B
+            }
+            val targetSpec = if (clonedVoice != null) SPEC_BASE_CLONE_06B else resolveSpecForVoice(cleanVoiceId)
+            val nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
 
-        mutex.withLock {
+            mutex.withLock {
             if (!isSpecDownloaded(targetSpec)) {
                 return@withContext SynthesisOutcome(
                     pcmFloat24k = FloatArray(0),
@@ -314,6 +325,9 @@ class Qwen3TtsEngine(
                 hardwareBadge = badge,
                 engineSummary = label
             )
+            }
+        } finally {
+            residencyTimer.scheduleOrRefresh()
         }
     }
 
@@ -411,6 +425,7 @@ class Qwen3TtsEngine(
                 _statusFlow.value = HardwareStatusBadge.IDLE
                 Log.i(TAG, "[QWEN3_EVICT] Destroyed native LunavoxEngine instance.")
             }
+            residencyTimer.markEvicted()
         }
     }
 
@@ -418,6 +433,15 @@ class Qwen3TtsEngine(
         cleanVoiceId == "qwen3_design_custom" -> SPEC_DESIGN_17B
         cleanVoiceId == "qwen3_base_clone_default" -> SPEC_BASE_CLONE_06B
         else -> SPEC_CUSTOM_06B
+    }
+
+    private fun shortLabelForMountedSpec(specId: String, useGpu: Boolean): String {
+        val base = when (specId) {
+            SPEC_DESIGN_17B -> "Qwen3 1.7B Design"
+            SPEC_BASE_CLONE_06B -> "Qwen3 0.6B Clone"
+            else -> "Qwen3 0.6B"
+        }
+        return "$base (${if (useGpu) "GPU" else "CPU"})"
     }
 
     private fun ensureEngineLoadedLocked(specId: String, gpuOffload: Boolean): Long {
@@ -429,6 +453,7 @@ class Qwen3TtsEngine(
             activeHandle = 0L
             activeSpecId = null
             activeInstructSupport = false
+            residencyTimer.markEvicted()
         }
 
         val dir = modelDirForSpec(specId)
@@ -452,6 +477,7 @@ class Qwen3TtsEngine(
                 parseInstructSupport(File(dir, "model_profile.json").readText())
             }.getOrDefault(false)
             _statusFlow.value = if (effectiveGpu) HardwareStatusBadge.GPU_FP16 else HardwareStatusBadge.CPU_NEON
+            residencyTimer.markMounted(shortLabelForMountedSpec(specId, effectiveGpu))
             Log.i(TAG, "Mounted Qwen3-TTS [$specId] (instruct=$activeInstructSupport, gpu=${if (effectiveGpu) "Adreno OpenCL" else "off"}) from ${dir.absolutePath}")
         }
         return handle
@@ -469,14 +495,6 @@ class Qwen3TtsEngine(
             "SADNESS" -> "Quiet, melancholy and soft tone"
             "FLUSTERED" -> "Shy, flustered and hesitant tone"
             else -> ""
-        }
-    }
-
-    private fun resetIdleTimer() {
-        idleJob?.cancel()
-        idleJob = scope.launch {
-            delay(IDLE_EVICTION_MS)
-            evictResources()
         }
     }
 }

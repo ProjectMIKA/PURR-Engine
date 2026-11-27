@@ -18,6 +18,7 @@ class PurrPremiumCatalogTest {
     private val subTtsChips = catalog.filter { it.isSubCartridge && it.category == CartridgeCategory.TTS }
     private val mainCloningModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.CLONING }
     private val subCloningChips = catalog.filter { it.isSubCartridge && it.category == CartridgeCategory.CLONING }
+    private val appsModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.APPS }
     private val toolsModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
 
     @Test
@@ -42,38 +43,55 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `tools category hosts TOOL-01 through TOOL-12 with TOOL-12 disabled by default plus Vision sub-cartridges`() {
-        assertEquals(12, toolsModules.size)
+    fun `apps and tools categories host APP-01..07 and TOOL-01..06 with optional tools disabled by default plus Vision sub-cartridges`() {
+        assertEquals(7, appsModules.size)
         assertEquals(
-            (1..12).map { idx -> "TOOL-%02d".format(idx) },
+            (1..7).map { idx -> "APP-%02d".format(idx) },
+            appsModules.map { it.romCode }
+        )
+        assertEquals(6, toolsModules.size)
+        assertEquals(
+            (1..6).map { idx -> "TOOL-%02d".format(idx) },
             toolsModules.map { it.romCode }
         )
         val defaultState = PurrForgeState()
         val themeTool = toolsModules.first { it.id == "tool_theme_engine" }
         assertTrue(themeTool.isBuiltInOsCartridge)
         assertEquals(CartridgeCategory.TOOLS, themeTool.category)
+        assertEquals("TOOL-04", themeTool.romCode)
         assertTrue("tool_theme_engine" in defaultState.slottedCartridges)
 
         val studioIds = setOf(
+            "tool_audio_exporter",
+            "tool_voice_design",
+            "tool_audiobook_constructor",
             "tool_script_studio",
             "tool_voice_benchmark",
             "tool_srt_batch_studio",
             "tool_manga_dub_studio"
         )
         studioIds.forEach { id ->
-            val mod = toolsModules.first { it.id == id }
+            val mod = appsModules.first { it.id == id }
             assertTrue(mod.isBuiltInOsCartridge)
-            assertEquals(CartridgeCategory.TOOLS, mod.category)
+            assertEquals(CartridgeCategory.APPS, mod.category)
             assertTrue(id in defaultState.slottedCartridges)
         }
 
-        // TOOL-12 OpenAI Vision API Hub is built-in/installed, optional, and DISABLED by default
+        // TOOL-05 OpenAI Vision API Hub is built-in/installed, optional, and DISABLED by default
         val openAiTool = toolsModules.first { it.id == "tool_openai_vision_api" }
         assertTrue(openAiTool.isBuiltInOsCartridge)
         assertEquals(CartridgeCategory.TOOLS, openAiTool.category)
-        assertEquals("TOOL-12", openAiTool.romCode)
+        assertEquals("TOOL-05", openAiTool.romCode)
         assertEquals(DownloadState.INSTALLED, defaultState.modelStates["tool_openai_vision_api"]?.state)
         assertFalse("tool_openai_vision_api" in defaultState.slottedCartridges)
+
+        // TOOL-06 VRAM & Keep-Warm Governor is built-in/installed, optional, and DISABLED by default
+        val vramTool = toolsModules.first { it.id == VramResidencyPolicy.TOOL_ID }
+        assertTrue(vramTool.isBuiltInOsCartridge)
+        assertEquals(CartridgeCategory.TOOLS, vramTool.category)
+        assertEquals("TOOL-06", vramTool.romCode)
+        assertEquals(DownloadState.INSTALLED, defaultState.modelStates[VramResidencyPolicy.TOOL_ID]?.state)
+        assertFalse(VramResidencyPolicy.TOOL_ID in defaultState.slottedCartridges)
 
         // Pre-configured providers include NanoGPT, OpenRouter, Clinepass + Custom at the bottom
         val providers = OpenAiVisionProviderPreset.entries

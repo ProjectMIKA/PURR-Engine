@@ -133,6 +133,7 @@ enum class SherpaModelFamily(val label: String) {
 enum class CartridgeCategory(val label: String) {
     TTS("TTS_ENGINES"),
     CLONING("VOICE_CLONING"),
+    APPS("STUDIO_APPS"),
     TOOLS("TOOL_MODULES")
 }
 
@@ -296,6 +297,59 @@ data class DspConfig(
     val normalizePeak: Boolean = true,
     val useFloat32Callback: Boolean = false
 )
+
+@Serializable
+enum class KeepWarmTimeoutPreset(
+    val seconds: Int,
+    val shortLabel: String,
+    val displayLabel: String
+) {
+    IMMEDIATE_EVICT(0, "OFF", "0s // Evict After Speech"),
+    ONE_MIN(60, "1M", "1 Min Keep-Warm"),
+    FIVE_MIN(300, "5M", "5 Min Keep-Warm (Default)"),
+    FIFTEEN_MIN(900, "15M", "15 Min Keep-Warm"),
+    THIRTY_MIN(1800, "30M", "30 Min Keep-Warm"),
+    ALWAYS_HOT(-1, "PINNED", "∞ Pinned // Always Hot")
+}
+
+@Serializable
+data class VramResidencyConfig(
+    val basicKeepWarmEnabled: Boolean = true,
+    val moduleTimeoutPreset: KeepWarmTimeoutPreset = KeepWarmTimeoutPreset.FIVE_MIN,
+    val foregroundKeepWarmService: Boolean = false,
+    val autoWarmOnVoiceSelect: Boolean = false
+)
+
+object VramResidencyPolicy {
+    const val TOOL_ID = "tool_vram_residency"
+
+    fun effectiveTimeoutSeconds(config: VramResidencyConfig, moduleSlotted: Boolean): Int {
+        if (!config.basicKeepWarmEnabled) return 0
+        if (!moduleSlotted) return 300
+        return config.moduleTimeoutPreset.seconds
+    }
+
+    fun effectiveTimeoutMs(config: VramResidencyConfig, moduleSlotted: Boolean): Long {
+        val sec = effectiveTimeoutSeconds(config, moduleSlotted)
+        return if (sec < 0) -1L else sec * 1000L
+    }
+
+    fun shouldRunForegroundService(config: VramResidencyConfig, moduleSlotted: Boolean): Boolean =
+        moduleSlotted && config.basicKeepWarmEnabled && config.foregroundKeepWarmService
+
+    fun shouldAutoWarmOnSelect(config: VramResidencyConfig, moduleSlotted: Boolean): Boolean =
+        moduleSlotted && config.basicKeepWarmEnabled && config.autoWarmOnVoiceSelect
+
+    fun effectivePolicySummary(config: VramResidencyConfig, moduleSlotted: Boolean): String {
+        val sec = effectiveTimeoutSeconds(config, moduleSlotted)
+        return when {
+            sec == 0 -> "0s // Evict After Speech"
+            sec < 0 -> "∞ Pinned // Always Hot"
+            sec == 300 && !moduleSlotted -> "5m Default Idle Keep-Warm"
+            else -> config.moduleTimeoutPreset.displayLabel
+        }
+    }
+}
 
 @Serializable
 enum class OpenAiVisionProviderPreset(
@@ -926,6 +980,12 @@ data class PurrForgeState(
             state = DownloadState.INSTALLED,
             sha256Verified = true,
             localPath = "builtin://tool/openai_vision_api"
+        ),
+        "tool_vram_residency" to ModelBundleState(
+            specId = "tool_vram_residency",
+            state = DownloadState.INSTALLED,
+            sha256Verified = true,
+            localPath = "builtin://tool/vram_residency"
         )
     ),
     val slottedCartridges: Set<String> = setOf(
@@ -971,7 +1031,8 @@ data class PurrForgeState(
     // is purely optional per Master's law. OFF = n_gpu_layers 0 → byte-identical CPU behavior;
     // ON = n_gpu_layers -1 → llama.cpp offloads every layer it can (unsupported tensor types
     // and devices without OpenCL fall back to CPU automatically, never fail-open).
-    val qwen3GpuOffload: Boolean = false
+    val qwen3GpuOffload: Boolean = false,
+    val vramResidency: VramResidencyConfig = VramResidencyConfig()
 )
 
 /**
@@ -3556,7 +3617,7 @@ object PurrDefaultPresets {
         ),
         ModelBundleSpec(
             id = "tool_audio_exporter",
-            romCode = "TOOL-04",
+            romCode = "APP-01",
             badge = "WAV_DOWNLOAD",
             accentHex = 0xFFFFD700,
             name = "AUDIO_MEDIA_EXPORTER",
@@ -3570,12 +3631,12 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Multi-Chunk Audiobook Stitcher & WAV Mastering • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Audio Media Exporter OS Module for rendering & downloading mastered .WAV speech files.",
-            category = CartridgeCategory.TOOLS
+            unlocksSummary = "ENABLES: Audio Media Exporter App (`APP-01`) for rendering & downloading mastered .WAV speech files.",
+            category = CartridgeCategory.APPS
         ),
         ModelBundleSpec(
             id = "tool_voice_design",
-            romCode = "TOOL-05",
+            romCode = "APP-02",
             badge = "1.7B_PROMPT_LAB",
             accentHex = 0xFFFF007F,
             name = "QWEN3_VOICE_DESIGN",
@@ -3589,12 +3650,12 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Qwen3-TTS 1.7B VoiceDesign Prompt Studio • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Qwen3 VoiceDesign Studio OS Module for crafting and saving custom prompt-driven voices.",
-            category = CartridgeCategory.TOOLS
+            unlocksSummary = "ENABLES: Qwen3 VoiceDesign Studio App (`APP-02`) for crafting and saving custom prompt-driven voices.",
+            category = CartridgeCategory.APPS
         ),
         ModelBundleSpec(
             id = "tool_audiobook_constructor",
-            romCode = "TOOL-06",
+            romCode = "APP-03",
             badge = "M4B_BOOK_FORGE",
             accentHex = 0xFF38BDF8,
             name = "AUDIOBOOK_CONSTRUCTOR",
@@ -3606,14 +3667,14 @@ object PurrDefaultPresets {
             expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
             approximateSizeMb = 0,
             isArchiveTarBz2 = false,
-            hardwareAccelNote = "Multi-Format Ebook Parser + Resumable .M4B Chapter Muxer • Optional Tool",
+            hardwareAccelNote = "Multi-Format Ebook Parser + Resumable .M4B Chapter Muxer • Optional App",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Audiobook Constructor OS Module for chapter-by-chapter resumable .M4B creation.",
-            category = CartridgeCategory.TOOLS
+            unlocksSummary = "ENABLES: Audiobook Constructor App (`APP-03`) for chapter-by-chapter resumable .M4B creation.",
+            category = CartridgeCategory.APPS
         ),
         ModelBundleSpec(
             id = "tool_theme_engine",
-            romCode = "TOOL-07",
+            romCode = "TOOL-04",
             badge = "NEON_SKIN_LAB",
             accentHex = 0xFF00E5FF,
             name = "NEON_THEME_ENGINE",
@@ -3627,13 +3688,13 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "WCAG Contrast-Guarded Neon & Retro Theme Engine • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Neon Theme Engine OS Module for full-app Retro / Neon Glow customization.",
+            unlocksSummary = "ENABLES: Neon Theme Engine Tool (`TOOL-04`) for full-app Retro / Neon Glow customization.",
             category = CartridgeCategory.TOOLS,
             releaseOrder = 14
         ),
         ModelBundleSpec(
             id = "tool_script_studio",
-            romCode = "TOOL-08",
+            romCode = "APP-04",
             badge = "DIALOGUE_FORGE",
             accentHex = 0xFFFF107A,
             name = "MULTI_VOICE_SCRIPT_STUDIO",
@@ -3647,13 +3708,13 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Multi-Voice Cast Router & Mastered Scene Stitcher • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Multi-Voice Script & Podcast Studio OS Module (`TOOL-08`).",
-            category = CartridgeCategory.TOOLS,
+            unlocksSummary = "ENABLES: Multi-Voice Script & Podcast Studio App (`APP-04`).",
+            category = CartridgeCategory.APPS,
             releaseOrder = 16
         ),
         ModelBundleSpec(
             id = "tool_voice_benchmark",
-            romCode = "TOOL-09",
+            romCode = "APP-05",
             badge = "AB_BENCHMARK",
             accentHex = 0xFF00FF9D,
             name = "VOICE_AB_BENCHMARK_LAB",
@@ -3667,13 +3728,13 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Precision RTF / Latency Profiler & Phonetic Stress Corpus • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Voice A/B Benchmark & Phonetic Lab OS Module (`TOOL-09`).",
-            category = CartridgeCategory.TOOLS,
+            unlocksSummary = "ENABLES: Voice A/B Benchmark & Phonetic Lab App (`APP-05`).",
+            category = CartridgeCategory.APPS,
             releaseOrder = 16
         ),
         ModelBundleSpec(
             id = "tool_srt_batch_studio",
-            romCode = "TOOL-10",
+            romCode = "APP-06",
             badge = "SRT_CAPTION_FORGE",
             accentHex = 0xFFFFB703,
             name = "SRT_SUBTITLE_BATCH_STUDIO",
@@ -3687,13 +3748,13 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Sample-Exact Timecode Generator (.SRT / .VTT + .WAV) • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: SRT Subtitle & Batch Queue Studio OS Module (`TOOL-10`).",
-            category = CartridgeCategory.TOOLS,
+            unlocksSummary = "ENABLES: SRT Subtitle & Batch Queue Studio App (`APP-06`).",
+            category = CartridgeCategory.APPS,
             releaseOrder = 16
         ),
         ModelBundleSpec(
             id = "tool_manga_dub_studio",
-            romCode = "TOOL-11",
+            romCode = "APP-07",
             badge = "MANGA_DUB_FORGE",
             accentHex = 0xFFFF3366,
             name = "MANGA_DUB_STUDIO",
@@ -3707,8 +3768,8 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "BFS Panel Slicer + Multi-VLM Per-Panel OCR + .MP4 Renderer • Ejectable",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: Manga Dub & Motion-Comic Studio OS Module (`TOOL-11`). Select from 6 Vision LLMs below.",
-            category = CartridgeCategory.TOOLS,
+            unlocksSummary = "ENABLES: Manga Dub & Motion-Comic Studio App (`APP-07`). Select from 6 Vision LLMs below.",
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
@@ -3726,10 +3787,10 @@ object PurrDefaultPresets {
             approximateSizeMb = 2232,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "LiteRT-LM GPU/NPU Vision + Thinking (2B)",
-            unlocksSummary = "UNLOCKS: Gemma 4 E2B Vision & Thinking Director for TOOL-11.",
+            unlocksSummary = "UNLOCKS: Gemma 4 E2B Vision & Thinking Director for APP-07.",
             isSubCartridge = true,
             parentCartridgeId = "tool_manga_dub_studio",
-            category = CartridgeCategory.TOOLS,
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
@@ -3747,10 +3808,10 @@ object PurrDefaultPresets {
             approximateSizeMb = 3158,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "High-Capacity 4B LiteRT-LM GPU/NPU Vision + Thinking • 8GB+ RAM",
-            unlocksSummary = "UNLOCKS: Gemma 4 E4B High-Accuracy Vision & Thinking Director for TOOL-11.",
+            unlocksSummary = "UNLOCKS: Gemma 4 E4B High-Accuracy Vision & Thinking Director for APP-07.",
             isSubCartridge = true,
             parentCartridgeId = "tool_manga_dub_studio",
-            category = CartridgeCategory.TOOLS,
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
@@ -3768,10 +3829,10 @@ object PurrDefaultPresets {
             approximateSizeMb = 3006,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "24-Layer ViT + Qwen 3.5 2B INT8 OCR Specialist",
-            unlocksSummary = "UNLOCKS: Qwen 3.5 VL 2B Vision Director for TOOL-11.",
+            unlocksSummary = "UNLOCKS: Qwen 3.5 VL 2B Vision Director for APP-07.",
             isSubCartridge = true,
             parentCartridgeId = "tool_manga_dub_studio",
-            category = CartridgeCategory.TOOLS,
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
@@ -3789,10 +3850,10 @@ object PurrDefaultPresets {
             approximateSizeMb = 2243,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "SigLIP2 Tower + Liquid Hybrid 3B INT4 Fast Mobile VLM",
-            unlocksSummary = "UNLOCKS: Liquid LFM 2.5 VL 3B Vision Director for TOOL-11.",
+            unlocksSummary = "UNLOCKS: Liquid LFM 2.5 VL 3B Vision Director for APP-07.",
             isSubCartridge = true,
             parentCartridgeId = "tool_manga_dub_studio",
-            category = CartridgeCategory.TOOLS,
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
@@ -3810,10 +3871,10 @@ object PurrDefaultPresets {
             approximateSizeMb = 1243,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Lightweight 0.8B ViT + GatedDeltaNet Hybrid VLM",
-            unlocksSummary = "UNLOCKS: Qwen 3.5 VL 0.8B Fast Vision Director for TOOL-11.",
+            unlocksSummary = "UNLOCKS: Qwen 3.5 VL 0.8B Fast Vision Director for APP-07.",
             isSubCartridge = true,
             parentCartridgeId = "tool_manga_dub_studio",
-            category = CartridgeCategory.TOOLS,
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
@@ -3831,15 +3892,15 @@ object PurrDefaultPresets {
             approximateSizeMb = 705,
             isArchiveTarBz2 = false,
             hardwareAccelNote = "Ultra-Compact 705 MB InternViT GPU/CPU VLM",
-            unlocksSummary = "UNLOCKS: InternVL3 1B Ultra-Light Vision Director for TOOL-11.",
+            unlocksSummary = "UNLOCKS: InternVL3 1B Ultra-Light Vision Director for APP-07.",
             isSubCartridge = true,
             parentCartridgeId = "tool_manga_dub_studio",
-            category = CartridgeCategory.TOOLS,
+            category = CartridgeCategory.APPS,
             releaseOrder = 17
         ),
         ModelBundleSpec(
             id = "tool_openai_vision_api",
-            romCode = "TOOL-12",
+            romCode = "TOOL-05",
             badge = "CLOUD_VISION_API",
             accentHex = 0xFF00E5FF,
             name = "OPENAI_VISION_API_HUB",
@@ -3853,9 +3914,29 @@ object PurrDefaultPresets {
             isArchiveTarBz2 = false,
             hardwareAccelNote = "OpenAI-Compatible Vision API Hub • Disabled by Default",
             isBuiltInOsCartridge = true,
-            unlocksSummary = "ENABLES: OpenAI Vision API Hub (`TOOL-12`) & saved cloud/custom Vision LLMs in Manga Dub Studio.",
+            unlocksSummary = "ENABLES: OpenAI Vision API Hub (`TOOL-05`) & saved cloud/custom Vision LLMs in Manga Dub Studio.",
             category = CartridgeCategory.TOOLS,
             releaseOrder = 18
+        ),
+        ModelBundleSpec(
+            id = "tool_vram_residency",
+            romCode = "TOOL-06",
+            badge = "KEEP_HOT_GOVERNOR",
+            accentHex = 0xFFFFB703,
+            name = "VRAM_&_KEEP_WARM_GOVERNOR",
+            subtitle = "RAM/GPU/NPU Preload, Custom Keep-Warm Timers & Persistent Notification",
+            description = "Optional memory residency governor (ejected by default). Pre-warm heavy neural engines like Qwen3 1.7B VoiceDesign into RAM/GPU before speaking, tune idle eviction from 0s to ∞ Pinned, auto-warm on voice selection, and run an optional persistent Android Foreground Service notification so lmkd never evicts warm weights in the background.",
+            backend = BackendType.CORE_OS,
+            downloadUrl = "builtin://tool/vram_residency",
+            fileName = "vram_residency.tool",
+            expectedSha256 = "0000000000000000000000000000000000000000000000000000000000000000",
+            approximateSizeMb = 0,
+            isArchiveTarBz2 = false,
+            hardwareAccelNote = "RAM/GPU/NPU Residency Governor + Optional Foreground Service • Disabled by Default",
+            isBuiltInOsCartridge = true,
+            unlocksSummary = "ENABLES: VRAM & Keep-Warm Governor (`TOOL-06`) with manual preload, ∞ Pinning & Always-Hot notification.",
+            category = CartridgeCategory.TOOLS,
+            releaseOrder = 19
         )
     )
 }

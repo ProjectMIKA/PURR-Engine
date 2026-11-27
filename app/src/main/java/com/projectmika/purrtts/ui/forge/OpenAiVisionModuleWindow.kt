@@ -100,7 +100,7 @@ fun OpenAiVisionModuleWindowBody(
         )
         Spacer(modifier = Modifier.height(4.dp))
         Text(
-            text = "Configure any OpenAI-compatible Vision LLM (API key + model). Saved engines appear in Manga Dub Studio's LLM dropdown while TOOL-12 is slotted.",
+            text = "Configure any OpenAI-compatible Vision LLM (API key + model). Saved engines appear in Manga Dub Studio's LLM dropdown while TOOL-05 is slotted.",
             color = MikaColors.CyanWhite.copy(alpha = 0.80f),
             fontFamily = FontFamily.Monospace,
             fontSize = 9.sp,

@@ -94,14 +94,91 @@ private enum class ActiveOsModule(
     val title: String,
     val subtitle: String,
     val badge: String,
+    val isStudioApp: Boolean,
     val iconType: OsModuleIconType,
     private val accentResolver: () -> Color
 ) {
+    // --- STUDIO APPS (Top Desktop Section when viewing ALL / APPS) ---
+    MANGA_DUB_STUDIO(
+        toolCartridgeId = "tool_manga_dub_studio",
+        title = "MANGA DUB STUDIO",
+        subtitle = "CBZ Vision Cast & .MP4 Dubs",
+        badge = "APP-07",
+        isStudioApp = true,
+        iconType = OsModuleIconType.MANGA_DUB_STUDIO,
+        accentResolver = { MikaColors.NeonPink }
+    ),
+    AUDIOBOOK_CONSTRUCTOR(
+        toolCartridgeId = "tool_audiobook_constructor",
+        title = "AUDIOBOOK CONSTRUCTOR",
+        subtitle = "EPUB/PDF -> Chaptered .M4B",
+        badge = "APP-03",
+        isStudioApp = true,
+        iconType = OsModuleIconType.AUDIOBOOK_CONSTRUCTOR,
+        accentResolver = { MikaColors.NeonCyan }
+    ),
+    SCRIPT_STUDIO(
+        toolCartridgeId = "tool_script_studio",
+        title = "SCRIPT & PODCAST STUDIO",
+        subtitle = "Multi-Voice Cast & Scene WAV",
+        badge = "APP-04",
+        isStudioApp = true,
+        iconType = OsModuleIconType.SCRIPT_STUDIO,
+        accentResolver = { MikaColors.NeonPink }
+    ),
+    SRT_BATCH_STUDIO(
+        toolCartridgeId = "tool_srt_batch_studio",
+        title = "SRT SUBTITLE & BATCH",
+        subtitle = "Timed .SRT/.VTT + Batch WAV",
+        badge = "APP-06",
+        isStudioApp = true,
+        iconType = OsModuleIconType.SRT_BATCH_STUDIO,
+        accentResolver = { MikaColors.SsrGold }
+    ),
+    AUDIO_EXPORTER(
+        toolCartridgeId = "tool_audio_exporter",
+        title = "AUDIO MEDIA EXPORTER",
+        subtitle = "Text/Audiobook -> Mastered WAV",
+        badge = "APP-01",
+        isStudioApp = true,
+        iconType = OsModuleIconType.AUDIO_EXPORTER,
+        accentResolver = { MikaColors.SsrGold }
+    ),
+    VOICE_DESIGN(
+        toolCartridgeId = "tool_voice_design",
+        title = "QWEN3 VOICEDESIGN STUDIO",
+        subtitle = "1.7B Structured Prompt Lab",
+        badge = "APP-02",
+        isStudioApp = true,
+        iconType = OsModuleIconType.VOICE_DESIGN,
+        accentResolver = { MikaColors.NeonPink }
+    ),
+    VOICE_BENCHMARK(
+        toolCartridgeId = "tool_voice_benchmark",
+        title = "VOICE A/B BENCHMARK",
+        subtitle = "RTF Meter & Phonetic Stress Lab",
+        badge = "APP-05",
+        isStudioApp = true,
+        iconType = OsModuleIconType.VOICE_BENCHMARK,
+        accentResolver = { MikaColors.TerminalGreen }
+    ),
+    CLONE_STUDIO(
+        toolCartridgeId = "tool_clone_studio",
+        title = "VOICE CLONE STUDIO",
+        subtitle = "3-12s Zero-Shot Recorder & Clones",
+        badge = "CLN-05",
+        isStudioApp = true,
+        iconType = OsModuleIconType.CLONE_STUDIO,
+        accentResolver = { MikaColors.NeonPurple }
+    ),
+
+    // --- ENGINE & SYSTEM TOOLS (Bottom Desktop Section when viewing ALL / TOOLS) ---
     PURR_ENGINE(
         toolCartridgeId = "tool_purr_engine",
         title = "P.U.R.R. ENGINE",
         subtitle = "Vibe Presets, Slang, MIKASTOP & Rulebook",
         badge = "TOOL-01",
+        isStudioApp = false,
         iconType = OsModuleIconType.PURR_CORE,
         accentResolver = { MikaColors.NeonPink }
     ),
@@ -110,6 +187,7 @@ private enum class ActiveOsModule(
         title = "ACOUSTIC DSP RACK",
         subtitle = "120ms Tail Taper, EQ & 10 Voice FX",
         badge = "TOOL-02",
+        isStudioApp = false,
         iconType = OsModuleIconType.DSP_RACK,
         accentResolver = { MikaColors.NeonCyan }
     ),
@@ -118,91 +196,45 @@ private enum class ActiveOsModule(
         title = "SYMBOL & CHUNK SHIELD",
         subtitle = "Audiobook Sanitizer & Loose Chunks",
         badge = "TOOL-03",
+        isStudioApp = false,
         iconType = OsModuleIconType.SYMBOL_SHIELD,
         accentResolver = { MikaColors.TerminalGreen }
-    ),
-    CLONE_STUDIO(
-        toolCartridgeId = "tool_clone_studio",
-        title = "VOICE CLONE STUDIO",
-        subtitle = "3-12s Zero-Shot Recorder & Clones",
-        badge = "CLN-05",
-        iconType = OsModuleIconType.CLONE_STUDIO,
-        accentResolver = { MikaColors.NeonPurple }
-    ),
-    AUDIO_EXPORTER(
-        toolCartridgeId = "tool_audio_exporter",
-        title = "AUDIO MEDIA EXPORTER",
-        subtitle = "Text/Audiobook -> Mastered WAV",
-        badge = "TOOL-04",
-        iconType = OsModuleIconType.AUDIO_EXPORTER,
-        accentResolver = { MikaColors.SsrGold }
-    ),
-    VOICE_DESIGN(
-        toolCartridgeId = "tool_voice_design",
-        title = "QWEN3 VOICEDESIGN STUDIO",
-        subtitle = "1.7B Structured Prompt Lab",
-        badge = "TOOL-05",
-        iconType = OsModuleIconType.VOICE_DESIGN,
-        accentResolver = { MikaColors.NeonPink }
-    ),
-    AUDIOBOOK_CONSTRUCTOR(
-        toolCartridgeId = "tool_audiobook_constructor",
-        title = "AUDIOBOOK CONSTRUCTOR",
-        subtitle = "EPUB/PDF/TXT -> Chaptered .M4B",
-        badge = "TOOL-06",
-        iconType = OsModuleIconType.AUDIOBOOK_CONSTRUCTOR,
-        accentResolver = { MikaColors.NeonCyan }
     ),
     THEME_ENGINE(
         toolCartridgeId = "tool_theme_engine",
         title = "NEON THEME ENGINE",
         subtitle = "Retro / Neon Glow Skin & Contrast",
-        badge = "TOOL-07",
+        badge = "TOOL-04",
+        isStudioApp = false,
         iconType = OsModuleIconType.THEME_ENGINE,
         accentResolver = { MikaColors.NeonCyan }
-    ),
-    SCRIPT_STUDIO(
-        toolCartridgeId = "tool_script_studio",
-        title = "SCRIPT & PODCAST STUDIO",
-        subtitle = "Multi-Voice Cast & Scene WAV",
-        badge = "TOOL-08",
-        iconType = OsModuleIconType.SCRIPT_STUDIO,
-        accentResolver = { MikaColors.NeonPink }
-    ),
-    VOICE_BENCHMARK(
-        toolCartridgeId = "tool_voice_benchmark",
-        title = "VOICE A/B BENCHMARK",
-        subtitle = "RTF Meter & Phonetic Stress Lab",
-        badge = "TOOL-09",
-        iconType = OsModuleIconType.VOICE_BENCHMARK,
-        accentResolver = { MikaColors.TerminalGreen }
-    ),
-    SRT_BATCH_STUDIO(
-        toolCartridgeId = "tool_srt_batch_studio",
-        title = "SRT SUBTITLE & BATCH",
-        subtitle = "Timed .SRT/.VTT + Batch WAV",
-        badge = "TOOL-10",
-        iconType = OsModuleIconType.SRT_BATCH_STUDIO,
-        accentResolver = { MikaColors.SsrGold }
-    ),
-    MANGA_DUB_STUDIO(
-        toolCartridgeId = "tool_manga_dub_studio",
-        title = "MANGA DUB STUDIO",
-        subtitle = "CBZ Vision Cast & .MP4 Dubs",
-        badge = "TOOL-11",
-        iconType = OsModuleIconType.MANGA_DUB_STUDIO,
-        accentResolver = { MikaColors.NeonPink }
     ),
     OPENAI_VISION_HUB(
         toolCartridgeId = "tool_openai_vision_api",
         title = "OPENAI VISION API",
         subtitle = "NanoGPT, OpenRouter, Clinepass & Custom",
-        badge = "TOOL-12",
+        badge = "TOOL-05",
+        isStudioApp = false,
         iconType = OsModuleIconType.OPENAI_VISION_HUB,
         accentResolver = { MikaColors.NeonCyan }
+    ),
+    VRAM_RESIDENCY(
+        toolCartridgeId = "tool_vram_residency",
+        title = "VRAM & KEEP-WARM",
+        subtitle = "Preload, Timers & Always-Hot Service",
+        badge = "TOOL-06",
+        isStudioApp = false,
+        iconType = OsModuleIconType.VRAM_RESIDENCY,
+        accentResolver = { MikaColors.SsrGold }
     );
 
     fun accentColor(): Color = accentResolver()
+}
+
+private enum class ModuleDesktopFilter(val label: String) {
+    ALL("ALL"),
+    APPS("APPS"),
+    TOOLS("TOOLS")
 }
 
 /**
@@ -221,6 +253,7 @@ fun PurrRulebookTab(
     onOpenSaveDialog: () -> Unit,
     onOpenCloneStudio: () -> Unit,
     onLaunchCloneForMangaCharacter: (MangaCloneHandoffTarget) -> Unit = {},
+    onOpenCartridgeBayApps: () -> Unit = {},
     onOpenCartridgeBayTools: () -> Unit,
     onOpenCartridgeBayTts: () -> Unit,
     requestedToolId: String? = null,
@@ -229,6 +262,7 @@ fun PurrRulebookTab(
     val activeModules = remember(forgeState.slottedCartridges) {
         ActiveOsModule.entries.filter { it.toolCartridgeId in forgeState.slottedCartridges }
     }
+    var desktopFilter by remember { mutableStateOf(ModuleDesktopFilter.ALL) }
     var openedModule by remember { mutableStateOf<ActiveOsModule?>(null) }
 
     LaunchedEffect(requestedToolId, activeModules) {
@@ -295,44 +329,100 @@ fun PurrRulebookTab(
                 label = "osModuleWindowTransition"
             ) { targetModule ->
                 if (targetModule == null) {
-                    // Cyberdeck OS Desktop Icon Grid (2 columns)
-                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                        activeModules.chunked(2).forEach { rowModules ->
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                            ) {
-                                rowModules.forEach { mod ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        OsDesktopAppTile(
-                                            module = mod,
-                                            statusNote = when (mod) {
-                                                ActiveOsModule.PURR_ENGINE -> activeProfile.name
-                                                ActiveOsModule.DSP_RACK -> activeProfile.dspConfig.effectPreset.label
-                                                ActiveOsModule.SYMBOL_SHIELD -> if (activeProfile.enableSymbolShield) "SHIELD ACTIVE" else "BYPASSED"
-                                                ActiveOsModule.CLONE_STUDIO -> "${forgeState.clonedVoices.count { !it.isMangaOnly }} CLONED"
-                                                ActiveOsModule.AUDIO_EXPORTER -> "${forgeState.exportedAudioFiles.size} EXPORTS"
-                                                ActiveOsModule.VOICE_DESIGN -> "${forgeState.savedVoiceDesigns.size} DESIGNS"
-                                                ActiveOsModule.AUDIOBOOK_CONSTRUCTOR -> "EPUB/PDF -> .M4B"
-                                                ActiveOsModule.THEME_ENGINE -> if (forgeState.themeConfig.mode == PurrThemeMode.NEON_GLOW) {
-                                                    "NEON ${PurrThemeEngine.formatHexRgb(forgeState.themeConfig.neonPrimaryHex)}"
-                                                } else {
-                                                    "RETRO"
-                                                }
-                                                ActiveOsModule.SCRIPT_STUDIO -> "MULTI-CAST WAV"
-                                                ActiveOsModule.VOICE_BENCHMARK -> "A/B RTF LAB"
-                                                ActiveOsModule.SRT_BATCH_STUDIO -> ".SRT/.VTT QUEUE"
-                                                ActiveOsModule.MANGA_DUB_STUDIO -> "CBZ -> .MP4 DUB"
-                                                ActiveOsModule.OPENAI_VISION_HUB -> "${forgeState.savedOpenAiVisionEngines.size} SAVED"
-                                            },
-                                            onClick = { openedModule = mod }
-                                        )
-                                    }
-                                }
-                                if (rowModules.size == 1) {
-                                    Spacer(modifier = Modifier.weight(1f))
+                    val activeApps = remember(activeModules) { activeModules.filter { it.isStudioApp } }
+                    val activeTools = remember(activeModules) { activeModules.filter { !it.isStudioApp } }
+                    val residency = viewModel.residencyState.collectAsState().value
+
+                    fun statusNoteFor(mod: ActiveOsModule): String = when (mod) {
+                        ActiveOsModule.PURR_ENGINE -> activeProfile.name
+                        ActiveOsModule.DSP_RACK -> activeProfile.dspConfig.effectPreset.label
+                        ActiveOsModule.SYMBOL_SHIELD -> if (activeProfile.enableSymbolShield) "SHIELD ACTIVE" else "BYPASSED"
+                        ActiveOsModule.CLONE_STUDIO -> "${forgeState.clonedVoices.count { !it.isMangaOnly }} CLONED"
+                        ActiveOsModule.AUDIO_EXPORTER -> "${forgeState.exportedAudioFiles.size} EXPORTS"
+                        ActiveOsModule.VOICE_DESIGN -> "${forgeState.savedVoiceDesigns.size} DESIGNS"
+                        ActiveOsModule.AUDIOBOOK_CONSTRUCTOR -> "EPUB/PDF -> .M4B"
+                        ActiveOsModule.THEME_ENGINE -> if (forgeState.themeConfig.mode == PurrThemeMode.NEON_GLOW) {
+                            "NEON ${PurrThemeEngine.formatHexRgb(forgeState.themeConfig.neonPrimaryHex)}"
+                        } else {
+                            "RETRO"
+                        }
+                        ActiveOsModule.SCRIPT_STUDIO -> "MULTI-CAST WAV"
+                        ActiveOsModule.VOICE_BENCHMARK -> "A/B RTF LAB"
+                        ActiveOsModule.SRT_BATCH_STUDIO -> ".SRT/.VTT QUEUE"
+                        ActiveOsModule.MANGA_DUB_STUDIO -> "CBZ -> .MP4 DUB"
+                        ActiveOsModule.OPENAI_VISION_HUB -> "${forgeState.savedOpenAiVisionEngines.size} SAVED"
+                        ActiveOsModule.VRAM_RESIDENCY -> when {
+                            residency.residentLabel != null && residency.remainingSeconds < 0 -> "PINNED ∞"
+                            residency.residentLabel != null -> "HOT • ${residency.residentLabel}"
+                            else -> "${forgeState.vramResidency.moduleTimeoutPreset.shortLabel} IDLE"
+                        }
+                    }
+
+                    // Compact Desktop Filter Bar: ALL | APPS | TOOLS
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            val filterItems = listOf(
+                                Triple(ModuleDesktopFilter.ALL, "ALL (${activeModules.size})", MikaColors.NeonCyan),
+                                Triple(ModuleDesktopFilter.APPS, "APPS (${activeApps.size})", MikaColors.SsrGold),
+                                Triple(ModuleDesktopFilter.TOOLS, "TOOLS (${activeTools.size})", MikaColors.NeonPink)
+                            )
+                            filterItems.forEach { (filter, label, accent) ->
+                                val selected = desktopFilter == filter
+                                Row(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(if (selected) accent.copy(alpha = 0.16f) else MikaColors.PanelBg)
+                                        .border(1.2.dp, if (selected) accent else MikaColors.SubtleBorder, RoundedCornerShape(6.dp))
+                                        .clickable { desktopFilter = filter }
+                                        .padding(vertical = 8.dp, horizontal = 6.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(
+                                        text = label,
+                                        color = if (selected) accent else MikaColors.DimText,
+                                        fontFamily = FontFamily.Monospace,
+                                        fontWeight = FontWeight.Black,
+                                        fontSize = 9.5.sp,
+                                        letterSpacing = 0.5.sp,
+                                        maxLines = 1
+                                    )
                                 }
                             }
+                        }
+
+                        if (desktopFilter == ModuleDesktopFilter.ALL || desktopFilter == ModuleDesktopFilter.APPS) {
+                            ModuleDesktopSectionGrid(
+                                headerTitle = "> STUDIO_APPS (${activeApps.size})",
+                                bayActionLabel = "+ APP BAY",
+                                accent = MikaColors.SsrGold,
+                                modules = activeApps,
+                                emptyMessage = "All Studio Apps are ejected — open Cartridge Bay ▸ APPS to slam them back in.",
+                                statusNoteFor = ::statusNoteFor,
+                                onOpenModule = { openedModule = it },
+                                onOpenBay = onOpenCartridgeBayApps
+                            )
+                        }
+
+                        if (desktopFilter == ModuleDesktopFilter.ALL) {
+                            HorizontalDivider(color = MikaColors.SubtleBorder.copy(alpha = 0.7f))
+                        }
+
+                        if (desktopFilter == ModuleDesktopFilter.ALL || desktopFilter == ModuleDesktopFilter.TOOLS) {
+                            ModuleDesktopSectionGrid(
+                                headerTitle = "> ENGINE_&_SYSTEM_TOOLS (${activeTools.size})",
+                                bayActionLabel = "+ TOOL BAY",
+                                accent = MikaColors.NeonPink,
+                                modules = activeTools,
+                                emptyMessage = "All System Tools are ejected — open Cartridge Bay ▸ TOOLS to enable them.",
+                                statusNoteFor = ::statusNoteFor,
+                                onOpenModule = { openedModule = it },
+                                onOpenBay = onOpenCartridgeBayTools
+                            )
                         }
                     }
                 } else {
@@ -602,8 +692,94 @@ fun PurrRulebookTab(
                                     forgeState = forgeState,
                                     viewModel = viewModel
                                 )
+                                ActiveOsModule.VRAM_RESIDENCY -> {
+                                    val residency by viewModel.residencyState.collectAsState()
+                                    VramResidencyModuleWindowBody(
+                                        forgeState = forgeState,
+                                        activeProfile = activeProfile,
+                                        residency = residency,
+                                        viewModel = viewModel
+                                    )
+                                }
                             }
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ModuleDesktopSectionGrid(
+    headerTitle: String,
+    bayActionLabel: String,
+    accent: Color,
+    modules: List<ActiveOsModule>,
+    emptyMessage: String,
+    statusNoteFor: (ActiveOsModule) -> String,
+    onOpenModule: (ActiveOsModule) -> Unit,
+    onOpenBay: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = headerTitle,
+                color = accent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 10.5.sp,
+                letterSpacing = 0.6.sp
+            )
+            Text(
+                text = bayActionLabel,
+                color = MikaColors.TerminalGreen,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Bold,
+                fontSize = 9.sp,
+                modifier = Modifier.clickable(onClick = onOpenBay)
+            )
+        }
+        if (modules.isEmpty()) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(MikaColors.PanelBg)
+                    .border(1.dp, accent.copy(alpha = 0.35f), RoundedCornerShape(8.dp))
+                    .clickable(onClick = onOpenBay)
+                    .padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text(
+                    text = emptyMessage,
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 9.5.sp,
+                    lineHeight = 13.sp
+                )
+            }
+        } else {
+            modules.chunked(2).forEach { rowModules ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    rowModules.forEach { mod ->
+                        Box(modifier = Modifier.weight(1f)) {
+                            OsDesktopAppTile(
+                                module = mod,
+                                statusNote = statusNoteFor(mod),
+                                onClick = { onOpenModule(mod) }
+                            )
+                        }
+                    }
+                    if (rowModules.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
