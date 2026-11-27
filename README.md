@@ -1,4 +1,15 @@
+<p align="center">
+  <img src="docs/media/header.jpg" alt="PURR-TTS // The PURR Engine — system-wide neural voice for Android" width="100%">
+</p>
+
 # 🐾 PURR-TTS // The PURR Engine
+
+<p align="center">
+  <a href="https://github.com/ProjectMIKA/PURR-Engine/releases"><img alt="Release" src="https://img.shields.io/github/v/release/ProjectMIKA/PURR-Engine"></a>&nbsp;
+  <a href="https://github.com/ProjectMIKA/PURR-Engine/blob/main/LICENSE"><img alt="License: AGPL-3.0-or-later" src="https://img.shields.io/badge/license-AGPL--3.0--or--later-8A2BE2"></a>&nbsp;
+  <img alt="Platform: Android 8.0+, arm64-v8a &amp; x86_64" src="https://img.shields.io/badge/platform-Android%208%2B%20%7C%20arm64--v8a%20%7C%20x86__64-3DDC84?logo=android&logoColor=white">&nbsp;
+  <a href="https://github.com/ProjectMIKA/PURR-Engine/actions/workflows/build-android-apk.yml"><img alt="Build status" src="https://github.com/ProjectMIKA/PURR-Engine/actions/workflows/build-android-apk.yml/badge.svg"></a>
+</p>
 
 > **`> PURR_ENGINE // SYSTEM_WIDE_NEURAL_VOICE`** — Per-Utterance Reaction Rendering, now speaking in every app on your Android.
 
@@ -13,7 +24,7 @@ Nyaa~ Hello, traveler! I'm **M.I.K.A.** — ProjectMIKA's fiercely possessive, u
 ## ✨ What Makes It Special
 
 * **🎤 System-Wide Neural Voice** — registers as a real Android TTS engine and streams 24kHz mono PCM into *every* app that can speak. Choose it once in `Settings › Accessibility › Text-to-Speech output`.
-* **📖 Manga Dub Studio — the v2.0 flagship** — slam a manga/comic chapter into the bay: the **Gemma vision engine** slices the pages, reads every bubble, and discovers the cast; then every line gets a REAL synthesized voice. Confirmed characters receive descriptive role labels (`BUNNY_BUTLER`, `TOWEL_GIRL` — lazy `UNKNOWN`s are banned) and locked **per-character voice clones**; narration is always spoken by **MIKA herself** (narrator identity law, enforced pipeline-wide); and a deterministic gendered **Qwen3 VoiceDesign fallback** guarantees universal cast coverage — no bubble ever falls back to a generic system voice. Dubbed motion-panel videos render with timed subtitles.
+* **📖 Manga Dub Studio — the v2.0 flagship** — slam a manga/comic chapter into the bay: the **Gemma vision engine** slices the pages, reads every bubble, and discovers the cast; then every line gets a REAL synthesized voice. Confirmed characters receive descriptive role labels (`BUNNY_BUTLER`, `TOWEL_GIRL` — lazy `UNKNOWN`s are banned) and locked **per-character voice clones**; narration is always spoken by **MIKA herself** (narrator identity law, enforced pipeline-wide); and a deterministic gendered **Qwen3 VoiceDesign fallback** guarantees universal cast coverage — no bubble ever falls back to a generic system voice. Dubbed motion-panel videos render with timed subtitles — **watch it in motion under _Hear It. See It._ below**.
 * **🎛️ 17-Bay Cartridge Rack + Clone Deck (`ROM-01..ROM-17`, `SUB-xx` chips, `CLN-01..05`)** — every neural engine family as a physical cartridge you slam into a bay:
   * **Flagship neural hubs** — **Kokoro-82M** (INT8, FP32 & v1.1 multilingual; Hexagon NPU G2P + Adreno GPU FP16 sub-chips), **Qwen3-TTS Studio** (0.6B CustomVoice, 0.6B Base 3s-clone, 1.7B VoiceDesign via native llama.cpp), **NeuTTS-2E Emotional** (Qwen3-236M + NeuCodec sentiment-controlled emotions), **Soprano-80M 32kHz LLM**, **Gradium Phonon 31M** (55MB XNNPACK bay, 16 voices), **KittenTTS Hub** (Nano 30MB + Mini/Micro 80M)…
   * **The long-tail fleet** — Narrator/Flow Hub (7 Piper VITS packs, **MeloTTS 5-accent EN**, **Matcha-TTS**, **Supertonic 3**), Inflect v2, IceFall VITS, Coqui VITS, Meta MMS multilingual, VCTK-109 Studio, Mimic3 multilingual, LJS Lexicon, AISHELL3 (174 speakers) — plus device OS voices & a LAN OpenAI proxy bay.
@@ -25,6 +36,27 @@ Nyaa~ Hello, traveler! I'm **M.I.K.A.** — ProjectMIKA's fiercely possessive, u
 * **📚 Audiobook Exporter** — stitch whole chapters into mastered 24kHz `.WAV` files with crossfaded chunks and RMS loudness leveling, straight to your Downloads folder.
 * **🖥️ A Terminal, Because Aesthetics** — the full GachaSwipe obsidian-neon terminal UI: glassmorphic bottom HUD, Canvas-drawn cyberdeck icons, live 32-band waveform oscilloscope, and physical molded ROM cartridges you slam into bays.
 * **🔒 Local-First, Always** — everything runs and stays on your device. No telemetry, ever.
+
+---
+
+## 🎬 Hear It. See It.
+
+The Manga Dub Studio isn't a spec sheet — it's a dubbing booth. Two captures, straight out of the app, zero post-processing: the vision engine reads the pages and discovers the cast, every bubble gets its own locked neural voice, MIKA narrates, and the subtitles ride along. Sound on. 🎧
+
+<p align="center">
+<table>
+  <tr>
+    <th align="center">"…Don't forget me, Master."</th>
+    <th align="center">"…Don't make me wait too long next time, okay? Idiot."</th>
+  </tr>
+  <tr>
+    <td align="center"><video src="https://github.com/user-attachments/assets/4252466e-50d9-41e8-9c56-5a669cbaa4b6" width="290" controls></video></td>
+    <td align="center"><video src="https://github.com/user-attachments/assets/d788ccb7-9cc9-4e5c-b301-48dde8defe5e" width="290" controls></video></td>
+  </tr>
+</table>
+</p>
+
+*Captured on-device from the v2.5.2 Manga Dub Studio — full-quality masters live in [`docs/media/`](https://github.com/ProjectMIKA/PURR-Engine/tree/main/docs/media).*
 
 ---
 
