@@ -78,8 +78,9 @@ jobs:
           git -C "$TP_DIR/zonos3" sparse-checkout set servers/ggml model/src/zonos3/registries
           git -C "$TP_DIR/zonos3" submodule update --init --depth 1 servers/ggml/ggml
           # z3 carries 12 ggml patches (GPU impls + the ggml_conv_1d_implicit API that
-          # zac.cpp needs to COMPILE). Apply them like upstream does (idempotent).
-          for p in "$TP_DIR/zonos3/servers/ggml/patches"/*.patch; do
+          # zac.cpp needs to COMPILE). Apply them like upstream does (idempotent, ABSOLUTE paths).
+          PATCHES_ABS="$(pwd)/$TP_DIR/zonos3/servers/ggml/patches"
+          for p in "$PATCHES_ABS"/*.patch; do
             if git -C "$TP_DIR/zonos3/servers/ggml/ggml" apply --reverse --check "$p" 2>/dev/null; then
               echo "already applied: $(basename "$p")"
             else
