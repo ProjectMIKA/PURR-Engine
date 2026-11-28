@@ -224,7 +224,7 @@ if(EXISTS "${Z3}/src/zonos3.h")
     target_include_directories(purr_z3_audio PUBLIC "${Z3}/src" "${Z3}/ggml/include" PRIVATE "${Z3}/vendor")
     target_link_libraries(purr_z3_audio PUBLIC purr_z3_ggml purr_z3_text)
 
-    target_link_libraries(purr_zonos3_jni PRIVATE purr_z3_core purr_z3_audio)
+    target_link_libraries(purr_zonos3_jni PRIVATE purr_z3_core purr_z3_audio c++_shared)
 else()
     message(STATUS "Zonos3 sources not vendored — building stub adapter (fail-soft)")
 endif()
