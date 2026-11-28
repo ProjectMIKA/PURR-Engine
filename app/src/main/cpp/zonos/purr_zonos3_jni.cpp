@@ -33,12 +33,15 @@ jfloatArray float_array(JNIEnv* env, const float* pcm, int len) {
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_projectmika_purrtts_engine_zonos3_Zonos3NativeBridge_nativeCreate(
-    JNIEnv* env, jobject /*thiz*/, jstring modelDir, jstring nativeLibDir, jint nThreads) {
+    JNIEnv* env, jobject /*thiz*/, jstring modelDir, jstring spkEncoderPath, jstring nativeLibDir,
+    jint nThreads) {
     char err[512] = {0};
     const std::string dir = jstr(env, modelDir);
+    const std::string spkPath = jstr(env, spkEncoderPath);
     const std::string libDir = jstr(env, nativeLibDir);
     return static_cast<jlong>(
-        z3_create(dir.c_str(), libDir.c_str(), static_cast<int>(nThreads), err, sizeof(err)));
+        z3_create(dir.c_str(), spkPath.c_str(), libDir.c_str(), static_cast<int>(nThreads), err,
+                  sizeof(err)));
 }
 
 extern "C" JNIEXPORT jfloatArray JNICALL

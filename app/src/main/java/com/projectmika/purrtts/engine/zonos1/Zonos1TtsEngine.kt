@@ -40,8 +40,9 @@ class Zonos1TtsEngine(
         private const val NATIVE_RATE_HZ = 44100
         private const val IDLE_EVICTION_MS = 5 * 60 * 1000L
 
-        // ✨ v2.7.2: honest user-facing stub copy — the native runtime ships in v2.8 (bring-up gate).
-        private const val NATIVE_PENDING_MESSAGE = "ZONOS native engine is arriving in the next update"
+        // ✨ v2.8.0: Zyphra never published a ZONOS1 native runtime (HF GGUF README's repo link
+        // 404s; no such repo in the org). This tier stays staged until upstream ships one.
+        private const val NATIVE_PENDING_MESSAGE = "ZONOS1 native runtime isn't published upstream yet — try ZONOS3-Mini"
 
         const val SPEC_ZONOS1 = "rom_zonos1_studio"
         const val SPEC_Q4_LITE = "sub_zonos1_q4_lite"

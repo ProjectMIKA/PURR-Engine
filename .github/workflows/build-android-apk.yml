@@ -71,6 +71,15 @@ jobs:
           rm -rf /tmp/ort-android.aar "$TP_DIR/onnxruntime/headers"
           ls -la "$TP_DIR/onnxruntime/include" "$TP_DIR/lunavox/src"
 
+      - name: Fetch ZONOS3 Native Engine Sources (zonos3.cpp + pinned ggml submodule)
+        run: |
+          TP_DIR="app/src/main/cpp/third_party"
+          git clone --depth 1 --filter=blob:none --sparse https://github.com/Zyphra/ZONOS3-Mini.git "$TP_DIR/zonos3"
+          git -C "$TP_DIR/zonos3" sparse-checkout set servers/ggml model/src/zonos3/registries
+          git -C "$TP_DIR/zonos3" submodule update --init --depth 1 servers/ggml/ggml
+          ls "$TP_DIR/zonos3/servers/ggml/src/zonos3.h" "$TP_DIR/zonos3/servers/ggml/ggml/include/ggml.h"
+          ls "$TP_DIR/zonos3/model/src/zonos3/registries/"
+
       - name: Verify project manifests & structure
         run: python3 scripts/verify_project.py
 

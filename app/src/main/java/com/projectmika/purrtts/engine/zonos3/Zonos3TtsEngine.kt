@@ -294,7 +294,12 @@ class Zonos3TtsEngine(
         if (!isSpecDownloaded(specId)) return 0L
         val nThreads = Runtime.getRuntime().availableProcessors().coerceIn(2, 6)
         val libDir = Zonos3NativeBridge.nativeLibDir(context)
-        val handle = Zonos3NativeBridge.nativeCreate(dir.absolutePath, libDir, nThreads)
+        // ✨ v2.8.0: the MECT-B2 encoder may live in the SUB-18C chip dir — pass it explicitly.
+        val spkEncoderPath = File(modelDirForSpec(SPEC_CLONE_CHIP), "spk-encoder.gguf")
+            .takeIf { it.exists() }
+            ?.absolutePath
+            ?: File(dir, "spk-encoder.gguf").takeIf { it.exists() }?.absolutePath.orEmpty()
+        val handle = Zonos3NativeBridge.nativeCreate(dir.absolutePath, spkEncoderPath, libDir, nThreads)
         if (handle != 0L) {
             activeHandle = handle
             activeSpecId = specId

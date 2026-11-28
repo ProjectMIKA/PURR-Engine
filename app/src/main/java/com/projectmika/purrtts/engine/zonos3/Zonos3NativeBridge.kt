@@ -35,7 +35,7 @@ object Zonos3NativeBridge {
     fun nativeLibDir(context: Context): String =
         context.applicationInfo?.nativeLibraryDir.orEmpty()
 
-    external fun nativeCreate(modelDir: String, nativeLibDir: String, nThreads: Int): Long
+    external fun nativeCreate(modelDir: String, spkEncoderPath: String, nativeLibDir: String, nThreads: Int): Long
 
     /**
      * Synthesizes [text] with the 192-d speaker embedding at [voiceEmbeddingPath]

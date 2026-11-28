@@ -1,18 +1,18 @@
-// ✨ MIKA'S ZONOS3 ADAPTER CONTRACT (v2.7.0) ✨
-// C surface implemented by zonos3_engine_adapter.cpp. When the vendored
-// zonos3.cpp runtime lands in third_party/zonos3, wire these six functions to
-// its engine entry points (backbone prompt build → 15Hz codebooks → ZAC-1
-// decode → 44.1kHz iSTFT) and drop the PURR_ZONOS3_VENDORED branch in CMake.
+// ✨ MIKA'S ZONOS3 ADAPTER CONTRACT (v2.8.0) ✨
+// C surface implemented by zonos3_engine_adapter.cpp on the vendored zonos3.cpp
+// ggml engine (third_party/zonos3/servers/ggml). Session = backbone + ZAC codec
+// (+ optional MECT-B2 speaker encoder). Synthesis mirrors zonos3-cli --tts.
 #pragma once
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Creates a session over modelDir (backbone-ptq.gguf + zac-keep2.gguf
-// [+ spk-encoder.gguf + steer.gguf]). Returns 0 on failure.
-long long z3_create(const char* model_dir, const char* lib_dir, int threads,
-                    char* err, int err_len);
+// Creates a session over modelDir (backbone-ptq.gguf + zac-keep2.gguf + optional
+// steer.gguf). spkEncoderPath may be "" → falls back to modelDir/spk-encoder.gguf.
+// Returns 0 on failure.
+long long z3_create(const char* model_dir, const char* spk_encoder_path, const char* lib_dir,
+                    int threads, char* err, int err_len);
 
 // Synthesizes one utterance with the .npy speaker embedding at embeddingPath
 // (empty string = neutral speaker). emotionAxes: {joy, love, anger, sadness,

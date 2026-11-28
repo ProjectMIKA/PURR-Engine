@@ -130,18 +130,18 @@ target_link_libraries(purr_qwen3_jni PRIVATE
 )
 
 # =============================================================================
-# ✨ MIKA'S ZONOS NATIVE ENGINES (v2.7.0) — fail-soft like everything else ✨
-# Builds libpurr_zonos3_jni.so + libpurr_zonos1_jni.so from the JNI glue in ./zonos
-# plus an adapter that links the vendored Zyphra runtimes when present:
-#   third_party/zonos3  ← servers/ggml of github.com/Zyphra/ZONOS3-Mini (zonos3.cpp)
-#   third_party/zonos1  ← github.com/Zyphra/zonos1.cpp
-# Fetch with scripts/fetch_zonos_sources.sh. When the sources are absent the
-# adapters compile to honest stubs that surface "runtime not vendored" through
-# nativeGetLastError() — the Kotlin engines then fail soft exactly like an
-# unsupported ABI, and the legacy rack stays byte-identical.
+# ✨ MIKA'S ZONOS3 NATIVE ENGINE (v2.8.0) — real build when sources are vendored ✨
+# third_party/zonos3 ← sparse checkout of github.com/Zyphra/ZONOS3-Mini
+# (servers/ggml + model/src/zonos3/registries; ggml submodule inited by CI).
+# Synthesis path (mirrors zonos3-cli): zonos3_build_prompt → zonos3_generate →
+# zac_decode → gain. NO Rust textnorm / espeak / server-core needed for this path.
+# ggml is REUSED from the llama.cpp build above (b8470) — one ggml in the APK, no
+# symbol clash. If the pinned SHAs ever diverge on a ggml API, fall back to a
+# renamed static copy of the zonos3 ggml submodule.
+# Absent sources → stub adapter, same fail-soft contract as before.
 # =============================================================================
 set(ZONOS3_ROOT "${THIRD_PARTY_DIR}/zonos3")
-set(ZONOS1_ROOT "${THIRD_PARTY_DIR}/zonos1")
+set(Z3 "${ZONOS3_ROOT}/servers/ggml")
 
 add_library(purr_zonos3_jni SHARED
     "${CMAKE_CURRENT_SOURCE_DIR}/zonos/purr_zonos3_jni.cpp"
@@ -150,15 +150,59 @@ add_library(purr_zonos3_jni SHARED
 target_include_directories(purr_zonos3_jni PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/zonos")
 target_link_libraries(purr_zonos3_jni PRIVATE Threads::Threads dl log m)
 set_target_properties(purr_zonos3_jni PROPERTIES VERSION "" SOVERSION "")
-if(EXISTS "${ZONOS3_ROOT}/servers/ggml")
-    message(STATUS "Zonos3 sources found at ${ZONOS3_ROOT}/servers/ggml — enabling real runtime adapter")
+
+if(EXISTS "${Z3}/src/zonos3.h")
+    message(STATUS "Zonos3 sources found at ${Z3} — building real engine")
     target_compile_definitions(purr_zonos3_jni PRIVATE PURR_ZONOS3_VENDORED=1)
-    target_include_directories(purr_zonos3_jni PRIVATE
-        "${ZONOS3_ROOT}/servers/ggml"
-        "${ZONOS3_ROOT}/servers/ggml/ggml/include")
-    # The vendored build exports the zonos3 inference entry points as a static
-    # library target `zonos3_engine` (see servers/ggml/CMakeLists.txt) — link it.
-    target_link_libraries(purr_zonos3_jni PRIVATE zonos3_engine ggml ggml-base ggml-cpu)
+
+    # Embeds a repository JSON registry as generated/<header> (upstream helper).
+    function(purr_z3_embed_json source symbol header)
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${source})
+        file(READ ${source} _hex HEX)
+        string(LENGTH "${_hex}" _hex_len)
+        math(EXPR _len "${_hex_len} / 2")
+        string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," _bytes "${_hex}")
+        set(ZONOS3_EMBED_SOURCE ${source})
+        set(ZONOS3_EMBED_SYMBOL ${symbol})
+        set(ZONOS3_EMBED_LEN ${_len})
+        set(ZONOS3_EMBED_BYTES ${_bytes})
+        configure_file("${Z3}/src/embed-json.h.in"
+            "${CMAKE_CURRENT_BINARY_DIR}/zonos3_gen/${header}" @ONLY)
+    endfunction()
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/zonos3_gen")
+    purr_z3_embed_json("${ZONOS3_ROOT}/model/src/zonos3/registries/languages.json"
+        zonos3_languages_json zonos3-languages-json.h)
+    purr_z3_embed_json("${ZONOS3_ROOT}/model/src/zonos3/registries/generation.json"
+        zonos3_generation_json zonos3-generation-json.h)
+    purr_z3_embed_json("${ZONOS3_ROOT}/model/src/zonos3/registries/short_text.json"
+        zonos3_short_text_json zonos3-short-text-json.h)
+
+    add_library(purr_z3_text STATIC "${Z3}/src/zonos3-text.cpp")
+    target_include_directories(purr_z3_text PUBLIC "${Z3}/src")
+
+    add_library(purr_z3_lmdb STATIC "${Z3}/vendor/lmdb/mdb.c" "${Z3}/vendor/lmdb/midl.c")
+    target_include_directories(purr_z3_lmdb PUBLIC "${Z3}/vendor/lmdb")
+    target_link_libraries(purr_z3_lmdb PUBLIC Threads::Threads)
+    target_compile_options(purr_z3_lmdb PRIVATE -w)
+
+    add_library(purr_z3_core STATIC
+        "${Z3}/src/zonos3.cpp" "${Z3}/src/zonos3-graph.cpp" "${Z3}/src/zonos3-sampler.cpp"
+        "${Z3}/src/zonos3-prompt.cpp" "${Z3}/src/zonos3-tokenizer.cpp" "${Z3}/src/zonos3-steer.cpp"
+        "${Z3}/src/zonos3-languages.cpp" "${Z3}/src/zonos3-generation.cpp"
+        "${Z3}/src/zonos3-phonemes.cpp" "${Z3}/src/zonos3-laci.cpp"
+        "${Z3}/src/zonos3-span-follow.cpp" "${Z3}/src/zonos3-short-text.cpp"
+        "${Z3}/src/zonos3-accent.cpp" "${Z3}/src/zonos3-edit.cpp")
+    target_include_directories(purr_z3_core PUBLIC "${Z3}/src"
+        PRIVATE "${Z3}/vendor" "${CMAKE_CURRENT_BINARY_DIR}/zonos3_gen")
+    target_link_libraries(purr_z3_core PUBLIC ggml purr_z3_text purr_z3_lmdb ${CMAKE_DL_LIBS})
+
+    add_library(purr_z3_audio STATIC
+        "${Z3}/src/zac.cpp" "${Z3}/src/zac-encoder.cpp" "${Z3}/src/ssl-encoder.cpp"
+        "${Z3}/src/spk-encoder.cpp" "${Z3}/src/audio-decode.cpp" "${Z3}/src/wav.cpp")
+    target_include_directories(purr_z3_audio PUBLIC "${Z3}/src" PRIVATE "${Z3}/vendor")
+    target_link_libraries(purr_z3_audio PUBLIC ggml purr_z3_text)
+
+    target_link_libraries(purr_zonos3_jni PRIVATE purr_z3_core purr_z3_audio ggml)
 else()
     message(STATUS "Zonos3 sources not vendored — building stub adapter (fail-soft)")
 endif()
