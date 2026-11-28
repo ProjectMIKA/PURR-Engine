@@ -641,13 +641,8 @@ class TtsBackendRouter(
             it.id == voiceId || it.id == cleanId
         }
         if (cloned != null) {
-            return when (cloned.resolvedCloneEngineId) {
-                "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
-                "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
-                "sub_zonos3_clone" -> BackendType.ZONOS3_NATIVE
-                "rom_zonos1_studio" -> BackendType.ZONOS1_NATIVE
-                else -> BackendType.SHERPA_ONNX
-            }
+            // ✨ v2.7.2: single-source clone→backend map (PurrCloneEngineMap) — no more drift.
+            return PurrCloneEngineMap.targetBackend(cloned.resolvedCloneEngineId)
         }
 
         // Route Qwen3 VoiceDesign / Base / Custom voices straight to QWEN3_NATIVE whenever their

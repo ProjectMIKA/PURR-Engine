@@ -339,25 +339,18 @@ class PurrProfileRepository(filesDir: File) {
         }
     }
 
-    private fun resolveCloneTargetCartridge(engineId: String): String = when (engineId) {
-        "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
-        "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
-        "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
-        else -> "rom_pocket_tts"
-    }
+    private fun resolveCloneTargetCartridge(engineId: String): String =
+        PurrCloneEngineMap.targetCartridge(engineId)
 
     fun registerClonedVoice(voice: ClonedVoiceProfile) {
         val engineId = voice.resolvedCloneEngineId
         val targetCart = resolveCloneTargetCartridge(engineId)
-        val targetBackend = when (engineId) {
-            "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
-            "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
-            else -> BackendType.SHERPA_ONNX
-        }
+        val targetBackend = PurrCloneEngineMap.targetBackend(engineId)
         updateState { s ->
             val updatedClones = s.clonedVoices.filterNot { it.id == voice.id } + voice
-            val nextEnabledSubs = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
-                s.enabledSubCartridges + engineId
+            val requiredSub = PurrCloneEngineMap.requiredSubCartridge(engineId)
+            val nextEnabledSubs = if (requiredSub != null) {
+                s.enabledSubCartridges + requiredSub
             } else {
                 s.enabledSubCartridges
             }
@@ -402,8 +395,9 @@ class PurrProfileRepository(filesDir: File) {
         val targetCart = resolveCloneTargetCartridge(engineId)
         updateState { s ->
             val updatedClones = s.clonedVoices.filterNot { it.id == voice.id } + voice
-            val nextEnabledSubs = if (!voice.isMangaOnly && engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) {
-                s.enabledSubCartridges + engineId
+            val nextEnabledSubs = if (!voice.isMangaOnly) {
+                val requiredSub = PurrCloneEngineMap.requiredSubCartridge(engineId)
+                if (requiredSub != null) s.enabledSubCartridges + requiredSub else s.enabledSubCartridges
             } else {
                 s.enabledSubCartridges
             }
@@ -609,25 +603,11 @@ class PurrProfileRepository(filesDir: File) {
             .filter { includeMangaClones || !it.isMangaOnly }
             .map { c ->
                 val engineId = c.resolvedCloneEngineId
-                val cartId = when (engineId) {
-                    "sub_qwen3_base_06b" -> "sub_qwen3_base_06b"
-                    "sub_chatterbox_turbo" -> "sub_chatterbox_turbo"
-                    "rom_zipvoice", "sub_zipvoice_full" -> "rom_zipvoice"
-                    else -> "rom_pocket_tts"
-                }
-                val requiredSub = if (engineId in setOf("sub_pocket_fp32", "sub_zipvoice_full")) engineId else null
-                val backend = when (engineId) {
-                    "sub_qwen3_base_06b" -> BackendType.QWEN3_NATIVE
-                    "sub_chatterbox_turbo" -> BackendType.ONNX_NATIVE
-                    else -> BackendType.SHERPA_ONNX
-                }
-                val engineTag = when (engineId) {
-                    "sub_qwen3_base_06b" -> "Qwen3 0.6B Base"
-                    "sub_chatterbox_turbo" -> "Chatterbox-Turbo"
-                    "sub_pocket_fp32" -> "Pocket FP32"
-                    "sub_zipvoice_full" -> "ZipVoice Full"
-                    else -> c.family.label
-                }
+                // ✨ v2.7.2: resolve through ONE map so new engines can never drift into Pocket.
+                val cartId = PurrCloneEngineMap.targetCartridge(engineId)
+                val requiredSub = PurrCloneEngineMap.requiredSubCartridge(engineId)
+                val backend = PurrCloneEngineMap.targetBackend(engineId)
+                val engineTag = PurrCloneEngineMap.engineLabel(engineId, c.family)
                 VoiceDescriptor(
                     id = c.id,
                     displayName = "Clone ($engineTag) // ${c.displayName}",

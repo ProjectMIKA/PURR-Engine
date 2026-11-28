@@ -996,7 +996,12 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         transcript: String,
         tagsRaw: String,
         wavPathOverride: String? = null,
-        cloneEngineId: String = if (family == SherpaModelFamily.ZIPVOICE) "rom_zipvoice" else "rom_pocket_tts"
+        cloneEngineId: String = when (family) {
+            SherpaModelFamily.ZIPVOICE -> "rom_zipvoice"
+            SherpaModelFamily.ZONOS3 -> "sub_zonos3_clone"
+            SherpaModelFamily.ZONOS1 -> "rom_zonos1_studio"
+            else -> "rom_pocket_tts"
+        }
     ): Boolean {
         val cleanName = displayName.trim().ifEmpty { "Mika Clone" }
         val existingImportedPath = _importedCloneWavPath.value?.takeIf { File(it).exists() && File(it).length() > 44L }

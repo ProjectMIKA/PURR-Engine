@@ -1,3 +1,21 @@
+# 🌌 PURR-TTS v2.7.2 // Clone Alignment
+
+### ✨ What's New since v2.7.1
+
+Clones land on the right deck now: a single **Clone Engine Map** replaces three hand-copied engine→cartridge/backend lists that had silently fallen behind — Zonos clones were bucketing under Pocket TTS. Plus honest in-app copy while the Zonos native runtimes finish their bring-up. 🧭🐾
+
+* **🧭 `PurrCloneEngineMap` — one source of truth (`core/purr`)**: `targetCartridge` / `targetBackend` / `requiredSubCartridge` / `engineLabel` for every clone engine (Pocket, ZipVoice, Chatterbox, Qwen3-Base, **ZONOS3-Mini 60s**, **ZONOS1 Studio**). `PurrProfileRepository` (register + background upsert + voice derivation) and `TtsBackendRouter.resolveBackendForVoice` all resolve through it — new engines can never drift into the Pocket bucket again. **Existing clones heal automatically** on next launch (mapping is derived at read time, never stored).
+* **🩹 Registration polish**: ZONOS3 clones auto-slot `ROM-18` and auto-enable the `SUB-18C` clone chip; ZONOS1 clones auto-slot `ROM-19`; voice cards now read `Clone (ZONOS3-Mini 60s) // …` and `Clone (ZONOS1 Studio) // …` under their own engine headers.
+* **⏳ Honest staging copy**: while the official native runtimes finish their bring-up (v2.8), the Zonos engines say “ZONOS native engine is arriving in the next update” instead of developer CLI hints.
+* **🧪 TESTS**: new `PurrCloneEngineMap` suite — Zonos routing + legacy mappings proven byte-identical (Pocket/ZipVoice/Qwen3/Chatterbox unchanged).
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.7.2_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`).
+
+---
+
+
 # 🌌 PURR-TTS v2.7.1 // Taxonomy Lock
 
 ### ✨ What's New since v2.7.0

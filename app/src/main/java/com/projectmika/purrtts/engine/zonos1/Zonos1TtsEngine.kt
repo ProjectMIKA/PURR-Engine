@@ -40,6 +40,9 @@ class Zonos1TtsEngine(
         private const val NATIVE_RATE_HZ = 44100
         private const val IDLE_EVICTION_MS = 5 * 60 * 1000L
 
+        // ✨ v2.7.2: honest user-facing stub copy — the native runtime ships in v2.8 (bring-up gate).
+        private const val NATIVE_PENDING_MESSAGE = "ZONOS native engine is arriving in the next update"
+
         const val SPEC_ZONOS1 = "rom_zonos1_studio"
         const val SPEC_Q4_LITE = "sub_zonos1_q4_lite"
     }
@@ -100,7 +103,7 @@ class Zonos1TtsEngine(
         try {
             if (text.isBlank()) return@withContext emptyOutcome("Empty text chunk")
             if (!Zonos1NativeBridge.isLoaded) {
-                return@withContext emptyOutcome("Zonos1 native JNI runtime unavailable on this ABI")
+                return@withContext emptyOutcome(NATIVE_PENDING_MESSAGE)
             }
             if (!isSpecDownloaded()) {
                 return@withContext emptyOutcome("Zonos1 cartridge (ROM-19) not downloaded yet")
@@ -231,8 +234,10 @@ class Zonos1TtsEngine(
         isFallbackNeuralPreview = true
     )
 
-    private fun lastError(): String =
-        runCatching { Zonos1NativeBridge.nativeGetLastError(activeHandle) }
+    private fun lastError(): String {
+        val raw = runCatching { Zonos1NativeBridge.nativeGetLastError(activeHandle) }
             .getOrDefault("")
             .ifBlank { "unknown" }
+        return if (raw.contains("not vendored", ignoreCase = true)) NATIVE_PENDING_MESSAGE else raw
+    }
 }

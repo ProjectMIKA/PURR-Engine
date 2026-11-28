@@ -42,6 +42,9 @@ class Zonos3TtsEngine(
         private const val NATIVE_RATE_HZ = 44100
         private const val IDLE_EVICTION_MS = 5 * 60 * 1000L
 
+        // ✨ v2.7.2: honest user-facing stub copy — the native runtime ships in v2.8 (bring-up gate).
+        private const val NATIVE_PENDING_MESSAGE = "ZONOS native engine is arriving in the next update"
+
         const val SPEC_ZONOS3 = "rom_zonos3_mini"
         const val SPEC_CLONE_CHIP = "sub_zonos3_clone"
 
@@ -142,7 +145,7 @@ class Zonos3TtsEngine(
         try {
             if (text.isBlank()) return@withContext emptyOutcome("Empty text chunk")
             if (!Zonos3NativeBridge.isLoaded) {
-                return@withContext emptyOutcome("Zonos3 native JNI runtime unavailable on this ABI")
+                return@withContext emptyOutcome(NATIVE_PENDING_MESSAGE)
             }
             if (!isSpecDownloaded(SPEC_ZONOS3)) {
                 return@withContext emptyOutcome("Zonos3 cartridge (ROM-18) not downloaded yet")
@@ -225,10 +228,12 @@ class Zonos3TtsEngine(
         isFallbackNeuralPreview = true
     )
 
-    private fun lastError(): String =
-        runCatching { Zonos3NativeBridge.nativeGetLastError(activeHandle) }
+    private fun lastError(): String {
+        val raw = runCatching { Zonos3NativeBridge.nativeGetLastError(activeHandle) }
             .getOrDefault("")
             .ifBlank { "unknown" }
+        return if (raw.contains("not vendored", ignoreCase = true)) NATIVE_PENDING_MESSAGE else raw
+    }
 
     private fun resolveLanguageHint(cleanVoiceId: String, cloned: ClonedVoiceProfile?, text: String): String {
         if (cloned != null) return detectLanguageHint(text, cloned.languageCode)

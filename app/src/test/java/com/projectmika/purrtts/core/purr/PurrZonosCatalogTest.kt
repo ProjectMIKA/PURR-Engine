@@ -115,4 +115,26 @@ class PurrZonosCatalogTest {
         assertEquals("fr", Zonos3TtsEngine.detectLanguageHint("bonjour", "fr-FR"))
         assertEquals("en", Zonos3TtsEngine.detectLanguageHint("hello there", "en-US"))
     }
+
+    @Test
+    fun `clone engine map routes zonos clones to their own decks backends and labels`() {
+        assertEquals("rom_zonos3_mini", PurrCloneEngineMap.targetCartridge("sub_zonos3_clone"))
+        assertEquals("rom_zonos1_studio", PurrCloneEngineMap.targetCartridge("rom_zonos1_studio"))
+        assertEquals(BackendType.ZONOS3_NATIVE, PurrCloneEngineMap.targetBackend("sub_zonos3_clone"))
+        assertEquals(BackendType.ZONOS1_NATIVE, PurrCloneEngineMap.targetBackend("rom_zonos1_studio"))
+        assertEquals("sub_zonos3_clone", PurrCloneEngineMap.requiredSubCartridge("sub_zonos3_clone"))
+        assertEquals(null, PurrCloneEngineMap.requiredSubCartridge("rom_zonos1_studio"))
+        assertEquals("ZONOS3-Mini 60s", PurrCloneEngineMap.engineLabel("sub_zonos3_clone", SherpaModelFamily.ZONOS3))
+        assertEquals("ZONOS1 Studio", PurrCloneEngineMap.engineLabel("rom_zonos1_studio", SherpaModelFamily.ZONOS1))
+        // Legacy mappings must stay byte-identical (no regression for the older engines).
+        assertEquals("rom_pocket_tts", PurrCloneEngineMap.targetCartridge("unknown_engine"))
+        assertEquals(BackendType.SHERPA_ONNX, PurrCloneEngineMap.targetBackend("unknown_engine"))
+        assertEquals(null, PurrCloneEngineMap.requiredSubCartridge("unknown_engine"))
+        assertEquals("sub_qwen3_base_06b", PurrCloneEngineMap.targetCartridge("sub_qwen3_base_06b"))
+        assertEquals("rom_zipvoice", PurrCloneEngineMap.targetCartridge("sub_zipvoice_full"))
+        assertEquals("rom_zipvoice", PurrCloneEngineMap.targetCartridge("rom_zipvoice"))
+        assertEquals("rom_pocket_tts", PurrCloneEngineMap.targetCartridge("sub_pocket_fp32"))
+        assertEquals("sub_pocket_fp32", PurrCloneEngineMap.requiredSubCartridge("sub_pocket_fp32"))
+        assertEquals("ZipVoice Full", PurrCloneEngineMap.engineLabel("sub_zipvoice_full", SherpaModelFamily.ZIPVOICE))
+    }
 }
