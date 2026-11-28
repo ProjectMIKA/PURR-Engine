@@ -8,6 +8,7 @@ import com.projectmika.purrtts.core.purr.DspConfig
 import com.projectmika.purrtts.core.purr.HardwareProfile
 import com.projectmika.purrtts.core.purr.HardwareStatusBadge
 import com.projectmika.purrtts.core.purr.PurrChunk
+import com.projectmika.purrtts.core.purr.PurrCloneEngineMap
 import com.projectmika.purrtts.core.purr.PurrDefaultPresets
 import com.projectmika.purrtts.core.purr.PurrDspProcessor
 import com.projectmika.purrtts.core.purr.PurrForgeState
