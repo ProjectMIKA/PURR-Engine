@@ -184,12 +184,10 @@ if(EXISTS "${Z3}/src/zonos3.h")
     # (scripts/fetch_zonos_sources.sh --build-ggml), hidden visibility so the static ggml
     # never clashes with the packaged libggml.so at runtime.
     set(Z3_GGML_PREBUILD "${ZONOS3_ROOT}/ggml-ndk-build/${ANDROID_ABI}")
-    find_library(Z3_GGML_BASE NAMES ggml-base PATHS "${Z3_GGML_PREBUILD}" "${Z3_GGML_PREBUILD}/src"
-        NO_DEFAULT_PATH)
-    find_library(Z3_GGML_CPU NAMES ggml-cpu PATHS "${Z3_GGML_PREBUILD}" "${Z3_GGML_PREBUILD}/src"
-        NO_DEFAULT_PATH)
-    if(NOT Z3_GGML_BASE OR NOT Z3_GGML_CPU)
-        message(FATAL_ERROR "zonos3 pinned ggml prebuild missing for ${ANDROID_ABI} — run scripts/fetch_zonos_sources.sh --build-ggml")
+    set(Z3_GGML_BASE "${Z3_GGML_PREBUILD}/src/libggml-base.a")
+    set(Z3_GGML_CPU "${Z3_GGML_PREBUILD}/src/libggml-cpu.a")
+    if(NOT EXISTS "${Z3_GGML_BASE}" OR NOT EXISTS "${Z3_GGML_CPU}")
+        message(FATAL_ERROR "zonos3 pinned ggml prebuild missing for ${ANDROID_ABI} at ${Z3_GGML_PREBUILD}/src — run scripts/fetch_zonos_sources.sh --build-ggml")
     endif()
     add_library(purr_z3_ggml_base STATIC IMPORTED GLOBAL)
     set_target_properties(purr_z3_ggml_base PROPERTIES IMPORTED_LOCATION "${Z3_GGML_BASE}"
