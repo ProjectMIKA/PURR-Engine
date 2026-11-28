@@ -180,6 +180,26 @@ if(EXISTS "${Z3}/src/zonos3.h")
     add_library(purr_z3_text STATIC "${Z3}/src/zonos3-text.cpp")
     target_include_directories(purr_z3_text PUBLIC "${Z3}/src")
 
+    # zonos3's PINNED ggml is newer than llama's b8470 — prebuilt per-ABI by the workflow
+    # (scripts/fetch_zonos_sources.sh --build-ggml), hidden visibility so the static ggml
+    # never clashes with the packaged libggml.so at runtime.
+    set(Z3_GGML_PREBUILD "${ZONOS3_ROOT}/ggml-ndk-build/${ANDROID_ABI}")
+    find_library(Z3_GGML_BASE NAMES ggml-base PATHS "${Z3_GGML_PREBUILD}" "${Z3_GGML_PREBUILD}/src"
+        NO_DEFAULT_PATH)
+    find_library(Z3_GGML_CPU NAMES ggml-cpu PATHS "${Z3_GGML_PREBUILD}" "${Z3_GGML_PREBUILD}/src"
+        NO_DEFAULT_PATH)
+    if(NOT Z3_GGML_BASE OR NOT Z3_GGML_CPU)
+        message(FATAL_ERROR "zonos3 pinned ggml prebuild missing for ${ANDROID_ABI} — run scripts/fetch_zonos_sources.sh --build-ggml")
+    endif()
+    add_library(purr_z3_ggml_base STATIC IMPORTED GLOBAL)
+    set_target_properties(purr_z3_ggml_base PROPERTIES IMPORTED_LOCATION "${Z3_GGML_BASE}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Z3}/ggml/include")
+    add_library(purr_z3_ggml_cpu STATIC IMPORTED GLOBAL)
+    set_target_properties(purr_z3_ggml_cpu PROPERTIES IMPORTED_LOCATION "${Z3_GGML_CPU}"
+        INTERFACE_INCLUDE_DIRECTORIES "${Z3}/ggml/include")
+    add_library(purr_z3_ggml INTERFACE)
+    target_link_libraries(purr_z3_ggml INTERFACE purr_z3_ggml_cpu purr_z3_ggml_base)
+
     add_library(purr_z3_lmdb STATIC "${Z3}/vendor/lmdb/mdb.c" "${Z3}/vendor/lmdb/midl.c")
     target_include_directories(purr_z3_lmdb PUBLIC "${Z3}/vendor/lmdb")
     target_link_libraries(purr_z3_lmdb PUBLIC Threads::Threads)
@@ -192,17 +212,17 @@ if(EXISTS "${Z3}/src/zonos3.h")
         "${Z3}/src/zonos3-phonemes.cpp" "${Z3}/src/zonos3-laci.cpp"
         "${Z3}/src/zonos3-span-follow.cpp" "${Z3}/src/zonos3-short-text.cpp"
         "${Z3}/src/zonos3-accent.cpp" "${Z3}/src/zonos3-edit.cpp")
-    target_include_directories(purr_z3_core PUBLIC "${Z3}/src"
+    target_include_directories(purr_z3_core PUBLIC "${Z3}/src" "${Z3}/ggml/include"
         PRIVATE "${Z3}/vendor" "${CMAKE_CURRENT_BINARY_DIR}/zonos3_gen")
-    target_link_libraries(purr_z3_core PUBLIC ggml purr_z3_text purr_z3_lmdb ${CMAKE_DL_LIBS})
+    target_link_libraries(purr_z3_core PUBLIC purr_z3_ggml purr_z3_text purr_z3_lmdb ${CMAKE_DL_LIBS})
 
     add_library(purr_z3_audio STATIC
         "${Z3}/src/zac.cpp" "${Z3}/src/zac-encoder.cpp" "${Z3}/src/ssl-encoder.cpp"
         "${Z3}/src/spk-encoder.cpp" "${Z3}/src/audio-decode.cpp" "${Z3}/src/wav.cpp")
-    target_include_directories(purr_z3_audio PUBLIC "${Z3}/src" PRIVATE "${Z3}/vendor")
-    target_link_libraries(purr_z3_audio PUBLIC ggml purr_z3_text)
+    target_include_directories(purr_z3_audio PUBLIC "${Z3}/src" "${Z3}/ggml/include" PRIVATE "${Z3}/vendor")
+    target_link_libraries(purr_z3_audio PUBLIC purr_z3_ggml purr_z3_text)
 
-    target_link_libraries(purr_zonos3_jni PRIVATE purr_z3_core purr_z3_audio ggml)
+    target_link_libraries(purr_zonos3_jni PRIVATE purr_z3_core purr_z3_audio)
 else()
     message(STATUS "Zonos3 sources not vendored — building stub adapter (fail-soft)")
 endif()

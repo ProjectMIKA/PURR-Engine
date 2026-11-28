@@ -79,6 +79,17 @@ jobs:
           git -C "$TP_DIR/zonos3" submodule update --init --depth 1 servers/ggml/ggml
           ls "$TP_DIR/zonos3/servers/ggml/src/zonos3.h" "$TP_DIR/zonos3/servers/ggml/ggml/include/ggml.h"
           ls "$TP_DIR/zonos3/model/src/zonos3/registries/"
+          NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
+          for ABI in arm64-v8a x86_64; do
+            cmake -S "$TP_DIR/zonos3/servers/ggml/ggml" -B "$TP_DIR/zonos3/ggml-ndk-build/$ABI" \
+              -DCMAKE_TOOLCHAIN_FILE="$NDK/build/cmake/android.toolchain.cmake" \
+              -DANDROID_ABI="$ABI" -DANDROID_PLATFORM=android-24 \
+              -DGGML_NATIVE=OFF -DGGML_OPENMP=OFF -DGGML_BUILD_TESTS=OFF -DGGML_BUILD_EXAMPLES=OFF \
+              -DBUILD_SHARED_LIBS=OFF -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_FLAGS="-fvisibility=hidden -fPIC" -DCMAKE_CXX_FLAGS="-fvisibility=hidden -fPIC"
+            cmake --build "$TP_DIR/zonos3/ggml-ndk-build/$ABI" --target ggml-base ggml-cpu -j 4
+            ls "$TP_DIR/zonos3/ggml-ndk-build/$ABI/src/"*.a || ls "$TP_DIR/zonos3/ggml-ndk-build/$ABI/"*.a
+          done
 
       - name: Verify project manifests & structure
         run: python3 scripts/verify_project.py
