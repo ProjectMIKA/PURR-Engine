@@ -299,7 +299,9 @@ class PurrTextProcessorTest {
             "tool_script_studio",
             "tool_voice_benchmark",
             "tool_srt_batch_studio",
-            "tool_manga_dub_studio"
+            "tool_manga_dub_studio",
+            // ✨ TAXONOMY LAW (v2.7.1): Clone Studio is an app — canonical home APPS.
+            "tool_clone_studio"
         )
         val apps = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.APPS }
         assertEquals(expectedApps, apps.map { it.id }.toSet())
@@ -320,7 +322,7 @@ class PurrTextProcessorTest {
 
         val cloning = catalog.filter { it.category == CartridgeCategory.CLONING && !it.isSubCartridge }
         assertEquals(
-            setOf("rom_pocket_tts", "rom_zipvoice", "sub_chatterbox_turbo", "sub_qwen3_base_06b", "tool_clone_studio"),
+            setOf("rom_pocket_tts", "rom_zipvoice", "sub_chatterbox_turbo", "sub_qwen3_base_06b", "rom_zonos1_studio"),
             cloning.map { it.id }.toSet()
         )
         assertTrue("tool_clone_studio" in defaultState.slottedCartridges)
