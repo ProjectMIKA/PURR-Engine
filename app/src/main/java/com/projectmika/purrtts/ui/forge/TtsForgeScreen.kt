@@ -879,7 +879,6 @@ fun TtsForgeScreen(
                                     ModelCatalogTab(
                                         forgeState = forgeState,
                                         modelCatalog = viewModel.modelCatalog,
-                                        vramRemainingSec = vramSec,
                                         selectedCategory = cartridgeBayCategory,
                                         onSelectCategory = { cartridgeBayCategory = it },
                                         viewModel = viewModel,

@@ -22,11 +22,11 @@ class PurrPremiumCatalogTest {
     private val toolsModules = catalog.filter { !it.isSubCartridge && it.category == CartridgeCategory.TOOLS }
 
     @Test
-    fun `top level tts catalog forms a 19-hub rack ROM-01 through ROM-19`() {
-        assertEquals(19, mainTtsHubs.size)
+    fun `top level tts catalog forms an 18-hub rack ROM-01 through ROM-18`() {
+        assertEquals(18, mainTtsHubs.size)
         val codes = mainTtsHubs.map { it.romCode }
         assertEquals(
-            (1..19).map { idx -> "ROM-%02d".format(idx) },
+            (1..18).map { idx -> "ROM-%02d".format(idx) },
             codes
         )
         val expectedIds = setOf(
@@ -38,19 +38,16 @@ class PurrPremiumCatalogTest {
             "rom_vits_ljs",
             "rom_aishell3_zh",
             "rom_phonon_31m",
-            "rom_zonos3_mini",
-            "rom_zonos1_studio"
+            "rom_zonos3_mini"
         )
         assertTrue(mainTtsHubs.map { it.id }.toSet().containsAll(expectedIds))
     }
 
     @Test
     fun `apps and tools categories host APP-01 through 07 and TOOL-01 through 06 with optional tools disabled by default plus Vision sub-cartridges`() {
-        assertEquals(7, appsModules.size)
-        assertEquals(
-            (1..7).map { idx -> "APP-%02d".format(idx) },
-            appsModules.map { it.romCode }
-        )
+        assertEquals(8, appsModules.size)
+        val expectedAppCodes = (1..7).map { idx -> "APP-%02d".format(idx) } + "CLN-05"
+        assertEquals(expectedAppCodes.sorted(), appsModules.map { it.romCode }.sorted())
         assertEquals(6, toolsModules.size)
         assertEquals(
             (1..6).map { idx -> "TOOL-%02d".format(idx) },
@@ -163,21 +160,30 @@ class PurrPremiumCatalogTest {
     }
 
     @Test
-    fun `dedicated cloning category hosts CLN-01 through CLN-05 and studio sub-upgrades`() {
+    fun `cloning-first deck hosts CLN-01 through CLN-04 plus ZONOS1 studio and the workshop`() {
         assertEquals(5, mainCloningModules.size)
         assertEquals(
-            listOf("CLN-01", "CLN-02", "CLN-03", "CLN-04", "CLN-05"),
+            listOf("CLN-01", "CLN-02", "CLN-03", "CLN-04", "ROM-19"),
             mainCloningModules.map { it.romCode }
         )
         assertEquals(
-            setOf("rom_pocket_tts", "rom_zipvoice", "sub_chatterbox_turbo", "sub_qwen3_base_06b", "tool_clone_studio"),
+            setOf("rom_pocket_tts", "rom_zipvoice", "sub_chatterbox_turbo", "sub_qwen3_base_06b", "rom_zonos1_studio"),
             mainCloningModules.map { it.id }.toSet()
         )
         assertEquals(
-            setOf("sub_pocket_fp32", "sub_zipvoice_full"),
+            setOf("sub_pocket_fp32", "sub_zipvoice_full", "sub_zonos1_q4_lite"),
             subCloningChips.map { it.id }.toSet()
         )
-        assertTrue(mainCloningModules.first { it.id == "tool_clone_studio" }.isBuiltInOsCartridge)
+        // Clone Studio is software: canonical home APPS, cross-listed into CLONING.
+        val studio = catalog.first { it.id == "tool_clone_studio" }
+        assertEquals(CartridgeCategory.APPS, studio.category)
+        assertEquals("CLN-05", studio.romCode)
+        assertTrue(CartridgeCategory.CLONING in studio.additionalCategories)
+        assertTrue(studio.isBuiltInOsCartridge)
+        // Cross-listed clone chip from a TTS hub keeps its TTS home.
+        val zonosChip = catalog.first { it.id == "sub_zonos3_clone" }
+        assertEquals(CartridgeCategory.TTS, zonosChip.category)
+        assertTrue(CartridgeCategory.CLONING in zonosChip.additionalCategories)
     }
 
     @Test

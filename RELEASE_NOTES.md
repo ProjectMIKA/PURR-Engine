@@ -1,3 +1,23 @@
+# 🌌 PURR-TTS v2.7.1 // Taxonomy Lock
+
+### ✨ What's New since v2.7.0
+
+The Cartridge Bay gets a real librarian: a **Classification Law** that puts every cartridge where it belongs, a **cross-listed clone deck**, and a decluttered rack footer. 🔭🗂️✨
+
+* **📜 THE CARTRIDGE TAXONOMY LAW**: **cloning-first engines** (they need a reference clip to speak — even ones that ship voices) live in **CLONE**; **TTS-only / TTS-first engines** live in **TTS**, with clone capability shipping as **cross-listed chips**; **studio software** lives in **APPS**. Every cartridge keeps exactly ONE canonical home — download state, ids, and routing are untouched (no reinstalls, no migration).
+  * **ROM-19 ZONOS1_STUDIO moved to the CLONE deck** — zero default voices, clone-first tier; **SUB-19A Q4_K Lite** follows its hub.
+  * **SUB-18C ZONOS3 Clone Chip cross-lists into CLONE** as a standalone add-on card (badged "↳ home: ROM-18 (TTS tab)") while remaining nested under ROM-18 in the TTS tab — one download, two views.
+  * **CLN-05 Voice Clone Studio moved to APPS** (software, not weights — the modules desktop already special-cased it) and cross-lists back into CLONE so cloners still find the workshop where they live.
+* **🧹 Rack Declutter (`ModelCatalogTab`)**: removed the per-rack `VRAM Guard` / `CLONE STUDIO` / `EVICT_VRAM` footer strip — engine state lives in the header residency bar, eviction lives in the header FLUSH chip + `TOOL-06` governor (+ the automatic residency policy), and the studio opens from its own cartridge card in two tabs plus the modules desktop. One job per surface.
+* **🧪 RACK INVARIANTS UPDATED**: TTS rack = 18 hubs (`ROM-01..18`), CLONE deck = `CLN-01..04` + `ROM-19` (+ `SUB-C1A/C2A/19A` chips), APPS = 8 tiles (`APP-01..07` + `CLN-05`), with cross-list assertions in both catalog test suites.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.7.1_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`).
+
+---
+
+
 # 🌌 PURR-TTS v2.7.0 // Zonos Rising
 
 ### ✨ What's New since v2.6.1

@@ -74,7 +74,6 @@ import com.projectmika.purrtts.ui.theme.MikaTagPill
 fun ModelCatalogTab(
     forgeState: PurrForgeState,
     modelCatalog: List<ModelBundleSpec>,
-    vramRemainingSec: Int,
     selectedCategory: CartridgeCategory,
     onSelectCategory: (CartridgeCategory) -> Unit,
     viewModel: TtsForgeViewModel,
@@ -83,10 +82,15 @@ fun ModelCatalogTab(
     onOpenModulesTab: () -> Unit
 ) {
     val mainCatalog = remember(modelCatalog) { modelCatalog.filter { !it.isSubCartridge } }
-    val ttsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TTS } }
-    val cloningCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.CLONING } }
-    val appsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.APPS } }
-    val toolsCatalog = remember(mainCatalog) { mainCatalog.filter { it.category == CartridgeCategory.TOOLS } }
+    // ✨ TAXONOMY LAW (v2.7.1): a spec appears in a tab when it IS its primary category OR it
+    // opted into the tab via additionalCategories (cross-listing — ids/state stay single).
+    fun specsFor(category: CartridgeCategory): List<ModelBundleSpec> = mainCatalog.filter {
+        it.category == category || category in it.additionalCategories
+    }
+    val ttsCatalog = remember(mainCatalog) { specsFor(CartridgeCategory.TTS) }
+    val cloningCatalog = remember(mainCatalog) { specsFor(CartridgeCategory.CLONING) }
+    val appsCatalog = remember(mainCatalog) { specsFor(CartridgeCategory.APPS) }
+    val toolsCatalog = remember(mainCatalog) { specsFor(CartridgeCategory.TOOLS) }
     val categoryCatalog = remember(ttsCatalog, cloningCatalog, appsCatalog, toolsCatalog, selectedCategory) {
         when (selectedCategory) {
             CartridgeCategory.TTS -> ttsCatalog
@@ -98,6 +102,17 @@ fun ModelCatalogTab(
     val subCartridgesByParent = remember(modelCatalog) {
         modelCatalog.filter { it.isSubCartridge && !it.parentCartridgeId.isNullOrBlank() }
             .groupBy { it.parentCartridgeId!! }
+    }
+    // ✨ TAXONOMY LAW (v2.7.1): cross-listed chips whose PARENT hub lives in another tab render
+    // standalone in this one (SUB-18C ZONOS3 Clone Chip in CLONE) — one spec, one home, no dupes.
+    val foreignCrossListedSubs = remember(modelCatalog, selectedCategory) {
+        modelCatalog.filter { sub ->
+            sub.isSubCartridge &&
+                selectedCategory in sub.additionalCategories &&
+                modelCatalog.none { parent ->
+                    parent.id == sub.parentCartridgeId && parent.category == selectedCategory
+                }
+        }
     }
     fun isSpecOrStandaloneSubInstalled(spec: ModelBundleSpec): Boolean {
         if (spec.isBuiltInOsCartridge || forgeState.modelStates[spec.id]?.state == DownloadState.INSTALLED) {
@@ -333,7 +348,7 @@ fun ModelCatalogTab(
                 text = when (selectedCategory) {
                     CartridgeCategory.TTS -> "// Download & slam core TTS engines. Tap EXPAND on any hub cartridge to reveal its nested sub-modules and accelerator chips."
                     CartridgeCategory.CLONING -> "// Dedicated zero-shot cloning bay (Pocket, ZipVoice, Chatterbox-Turbo, Qwen3 Base) + Clone Studio workshop. Tap EXPAND on hubs for studio weights."
-                    CartridgeCategory.APPS -> "// Creative studios & labs (Manga Dub, Audiobook .M4B, Podcast Script, SRT Batch, Exporter, VoiceDesign, Benchmark). Expand APP-07 for Vision LLMs."
+                    CartridgeCategory.APPS -> "// Creative studios & labs (Clone Studio, Manga Dub, Audiobook .M4B, Podcast Script, SRT Batch, Exporter, VoiceDesign, Benchmark). Expand APP-07 for Vision LLMs."
                     CartridgeCategory.TOOLS -> "// Engine pipeline, theme, API & hardware settings (P.U.R.R. Core, DSP Rack, Symbol Shield, Neon Theme, OpenAI Vision API, VRAM Keep-Warm)."
                 },
                 color = MikaColors.DimText,
@@ -341,35 +356,6 @@ fun ModelCatalogTab(
                 fontSize = 9.5.sp,
                 lineHeight = 14.sp
             )
-
-            Spacer(modifier = Modifier.height(8.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (vramRemainingSec > 0) "VRAM Guard: ${vramRemainingSec}s" else "VRAM: 0 MB resident",
-                    color = MikaColors.DimText,
-                    fontFamily = FontFamily.Monospace,
-                    fontSize = 9.sp
-                )
-                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    MikaTagPill(
-                        label = "CLONE STUDIO",
-                        selected = true,
-                        activeColor = MikaColors.NeonPurple,
-                        leadingIcon = CyberIconType.DNA_CLONE,
-                        onClick = onOpenCloneStudio
-                    )
-                    MikaTagPill(
-                        label = "EVICT_VRAM",
-                        selected = true,
-                        activeColor = MikaColors.DangerRed,
-                        onClick = { viewModel.evictAllVramNow() }
-                    )
-                }
-            }
         }
 
         // 1b. Sleek Single-Row Cyberdeck HUD Bar for Filter & Sort Dropdowns (persisted)
@@ -1302,6 +1288,42 @@ fun ModelCatalogTab(
                         fontSize = 8.5.sp
                     )
                 }
+            }
+        }
+
+        // ✨ TAXONOMY LAW (v2.7.1): clone-capable chips from TTS hubs (e.g. SUB-18C ZONOS3 Clone
+        // Chip) surface in the CLONE tab as standalone add-ons — canonical home stays nested
+        // under ROM-18 in the TTS tab (one spec, one download state, two views).
+        if (foreignCrossListedSubs.isNotEmpty()) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = "// CROSS-LISTED ADD-ON CHIPS (${foreignCrossListedSubs.size})",
+                color = categoryAccent,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.Black,
+                fontSize = 9.sp,
+                letterSpacing = 0.4.sp
+            )
+            foreignCrossListedSubs.forEach { subSpec ->
+                val subState = forgeState.modelStates[subSpec.id] ?: ModelBundleState(specId = subSpec.id)
+                val subInstalled = subState.state == DownloadState.INSTALLED
+                val subEnabled = subInstalled && subSpec.id in forgeState.enabledSubCartridges
+                val parentRomCode = subSpec.parentCartridgeId?.let { pid ->
+                    modelCatalog.firstOrNull { it.id == pid }?.romCode ?: pid
+                } ?: "parent hub"
+                Text(
+                    text = "↳ home: $parentRomCode (TTS tab) — installs & toggles the same chip",
+                    color = MikaColors.DimText,
+                    fontFamily = FontFamily.Monospace,
+                    fontSize = 8.sp
+                )
+                SubCartridgeCard(
+                    subSpec = subSpec,
+                    subState = subState,
+                    isInstalled = subInstalled,
+                    isEnabled = subEnabled,
+                    viewModel = viewModel
+                )
             }
         }
     }

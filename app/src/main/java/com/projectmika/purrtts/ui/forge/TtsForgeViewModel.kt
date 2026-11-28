@@ -146,14 +146,13 @@ class TtsForgeViewModel(application: Application) : AndroidViewModel(application
         !it.isSubCartridge && (it.category == CartridgeCategory.TTS || (it.category == CartridgeCategory.CLONING && !it.isBuiltInOsCartridge))
     }
     val cloningCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
-        !it.isSubCartridge && it.category == CartridgeCategory.CLONING
+        !it.isSubCartridge && (it.category == CartridgeCategory.CLONING ||
+            CartridgeCategory.CLONING in it.additionalCategories)
     }
+    // ✨ TAXONOMY LAW (v2.7.1): Clone Studio now lives in APPS categorically — the old
+    // hardcoded `tool_clone_studio` id smuggle is retired.
     val toolCartridgeCatalog: List<ModelBundleSpec> = modelCatalog.filter {
-        !it.isSubCartridge && (
-            it.category == CartridgeCategory.APPS ||
-                it.category == CartridgeCategory.TOOLS ||
-                it.id == "tool_clone_studio"
-            )
+        !it.isSubCartridge && (it.category == CartridgeCategory.APPS || it.category == CartridgeCategory.TOOLS)
     }
 
     fun subCartridgesFor(parentId: String): List<ModelBundleSpec> =

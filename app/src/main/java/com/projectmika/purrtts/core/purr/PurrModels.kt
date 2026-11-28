@@ -864,6 +864,9 @@ data class ModelBundleSpec(
     // Qwen3-TTS, Chatterbox-Turbo, NeuTTS-2E, and Soprano-80M.
     val extraAssets: List<BundleAssetFile> = emptyList(),
     val category: CartridgeCategory = CartridgeCategory.TTS,
+    // ✨ TAXONOMY LAW (v2.7.1): every spec keeps exactly ONE canonical home; this set lets it
+    // ALSO appear in other category tabs without duplicating the spec (ids/state stay single).
+    val additionalCategories: Set<CartridgeCategory> = emptySet(),
     // Monotonic release order so users can sort cartridges by NEWEST in the Cartridge Bay.
     val releaseOrder: Int = 0
 )
@@ -2436,6 +2439,16 @@ object PurrDefaultPresets {
      * - `CartridgeCategory.CLONING`: CLN-01..CLN-05 dedicated voice cloning engines & Clone Studio.
      * - `CartridgeCategory.TOOLS`: TOOL-01..TOOL-07 built-in Cyberdeck OS modules.
      */
+    // =========================================================================
+    // ✨ THE CARTRIDGE TAXONOMY LAW (v2.7.1) ✨
+    // CLONING-first engines (need a reference clip to be useful — even ones that
+    // ship default voices) live in CLONING. TTS-only / TTS-first engines (speak
+    // from built-in voices) live in TTS; any clone capability ships as a chip
+    // that cross-lists into CLONING via `additionalCategories`. Studio software
+    // (Clone Studio) lives in APPS and cross-lists into CLONING. One canonical
+    // home per spec — ids and download state stay single; cross-listing is a
+    // display concern only.
+    // =========================================================================
     fun modelCatalog(): List<ModelBundleSpec> = listOf(
         // =========================================================================
         // 14 MAIN TTS HUB CARTRIDGES (ROM-01 .. ROM-14)
@@ -3127,7 +3140,10 @@ object PurrDefaultPresets {
             hardwareAccelNote = "24kHz Mono Reference Recorder & STFT Denoiser • Ejectable",
             isBuiltInOsCartridge = true,
             unlocksSummary = "ENABLES: Voice Clone Studio OS Module for reference recording, clip import & cloning.",
-            category = CartridgeCategory.CLONING,
+            // ✨ TAXONOMY LAW (v2.7.1): the Clone Studio is software, not weights — canonical home
+            // is APPS; it cross-lists into CLONING so cloners still find the workshop there.
+            category = CartridgeCategory.APPS,
+            additionalCategories = setOf(CartridgeCategory.CLONING),
             releaseOrder = 4
         ),
 
@@ -4164,6 +4180,8 @@ object PurrDefaultPresets {
             isSubCartridge = true,
             parentCartridgeId = "rom_zonos3_mini",
             category = CartridgeCategory.TTS,
+            // ✨ TAXONOMY LAW (v2.7.1): clone-capable chip — also listed in the CLONE deck.
+            additionalCategories = setOf(CartridgeCategory.CLONING),
             releaseOrder = 20
         ),
         ModelBundleSpec(
@@ -4186,7 +4204,9 @@ object PurrDefaultPresets {
                 BundleAssetFile("dac.gguf", "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/dac.gguf", "b5330fc112cfac5e7bae511a5083915ce5028899de4d7a4193dcc5874063532c", 254172448L),
                 BundleAssetFile("spk-encoder.gguf", "https://huggingface.co/Zyphra/ZONOS1-GGUF/resolve/main/spk-encoder.gguf", "6c0b99f9b876afcd733a37d21a64d2760e37249a55f37a72113d45b3a7a19532", 198062240L)
             ),
-            category = CartridgeCategory.TTS,
+            // ✨ TAXONOMY LAW (v2.7.1): ZONOS1 has ZERO standalone voices — it needs a reference
+            // clip to speak, so its primary home is CLONING (the cloning-first deck).
+            category = CartridgeCategory.CLONING,
             releaseOrder = 21
         ),
         ModelBundleSpec(
@@ -4207,7 +4227,7 @@ object PurrDefaultPresets {
             unlocksSummary = "SWAPS: ROM-19 to the compact Q4_K backbone when slotted.",
             isSubCartridge = true,
             parentCartridgeId = "rom_zonos1_studio",
-            category = CartridgeCategory.TTS,
+            category = CartridgeCategory.CLONING,
             releaseOrder = 21
         )
     )

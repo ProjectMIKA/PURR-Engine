@@ -46,6 +46,8 @@ class PurrZonosCatalogTest {
         val cloneChip = subs.first { it.id == "sub_zonos3_clone" }
         assertTrue(cloneChip.downloadUrl.endsWith("/gguf/spk-encoder.gguf"))
         assertEquals(43, cloneChip.approximateSizeMb)
+        assertEquals(CartridgeCategory.TTS, cloneChip.category)
+        assertTrue(CartridgeCategory.CLONING in cloneChip.additionalCategories)
     }
 
     @Test
@@ -53,6 +55,8 @@ class PurrZonosCatalogTest {
         val hub = catalog.first { it.id == "rom_zonos1_studio" }
         assertEquals("ROM-19", hub.romCode)
         assertEquals(BackendType.ZONOS1_NATIVE, hub.backend)
+        // ✨ TAXONOMY LAW (v2.7.1): ZONOS1 is cloning-first — its primary home is the CLONE deck.
+        assertEquals(CartridgeCategory.CLONING, hub.category)
         assertTrue(hub.downloadUrl.endsWith("/zonos1-q8_0.gguf"))
         assertEquals(1685, hub.approximateSizeMb)
         val assets = hub.extraAssets.map { it.relativePath }
@@ -61,6 +65,7 @@ class PurrZonosCatalogTest {
 
         val q4 = catalog.first { it.id == "sub_zonos1_q4_lite" }
         assertEquals("SUB-19A", q4.romCode)
+        assertEquals(CartridgeCategory.CLONING, q4.category)
         assertEquals("rom_zonos1_studio", q4.parentCartridgeId)
         assertTrue(q4.downloadUrl.endsWith("/zonos1-q4_k.gguf"))
         assertEquals(897, q4.approximateSizeMb)
