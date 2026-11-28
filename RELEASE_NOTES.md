@@ -1,3 +1,21 @@
+# 🌌 PURR-TTS v2.8.0 // Zonos Speaks
+
+### ✨ What's New since v2.7.2
+
+The real thing: **ZONOS3-Mini now synthesizes on-device** — the official Zyphra ggml engine is vendored into the build, wired through a native adapter, and speaks 44.1kHz neural audio in PURR's 24kHz pipeline. ROM-18's 11 default voices and 60-second clone chips are no longer staging copy. 🦁🎙️⚡
+
+* **🧬 Real `zonos3.cpp` engine, vendored + pinned**: CI sparse-clones `Zyphra/ZONOS3-Mini` (servers/ggml + registry JSONs + the pinned ggml submodule with its 12 upstream patches), pre-builds that pinned ggml per-ABI with hidden visibility (no clash with llama's `libggml.so`), and compiles the engine into `libpurr_zonos3_jni.so`.
+* **🎙️ Full synthesis path in the adapter**: `zonos3_build_prompt` → `zonos3_generate` (KV-cache sampling) → silence-prefill codes → `zac_decode` at 44.1kHz → prefill trim → decoder gain → soft-limit → PURR's 24kHz resample. Speaker cloning runs `spk_embed` (MECT-B2) from your ≤60s reference — PURR's own WAV parser + 16kHz resampler, cached as a 192-d `.npy`.
+* **🗣️ Honest staging for ZONOS1**: Zyphra never published a ZONOS1 native runtime (the GGUF README's repo link 404s — verified against the GitHub API). ROM-19 stays listed but clearly says the runtime isn't published upstream; ZONOS3 is the live Zonos tier.
+* **📦 Engineering**: `purr_z3_core` + `purr_z3_audio` + `purr_z3_text` + `purr_z3_lmdb` static libs, embed-json registry generation, registry files in the sparse fetch, fail-soft stub adapter retained for hosts without the sources.
+
+### 📦 Android APK Packages (Attached Below)
+
+1. **`PURR-Engine_V2.8.0_Android.apk`** — Signed release Android APK (`com.projectmika.purrtts`).
+
+---
+
+
 # 🌌 PURR-TTS v2.7.2 // Clone Alignment
 
 ### ✨ What's New since v2.7.1

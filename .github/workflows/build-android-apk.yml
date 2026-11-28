@@ -77,6 +77,15 @@ jobs:
           git clone --depth 1 --filter=blob:none --sparse https://github.com/Zyphra/ZONOS3-Mini.git "$TP_DIR/zonos3"
           git -C "$TP_DIR/zonos3" sparse-checkout set servers/ggml model/src/zonos3/registries
           git -C "$TP_DIR/zonos3" submodule update --init --depth 1 servers/ggml/ggml
+          # z3 carries 12 ggml patches (GPU impls + the ggml_conv_1d_implicit API that
+          # zac.cpp needs to COMPILE). Apply them like upstream does (idempotent).
+          for p in "$TP_DIR/zonos3/servers/ggml/patches"/*.patch; do
+            if git -C "$TP_DIR/zonos3/servers/ggml/ggml" apply --reverse --check "$p" 2>/dev/null; then
+              echo "already applied: $(basename "$p")"
+            else
+              git -C "$TP_DIR/zonos3/servers/ggml/ggml" apply "$p"
+            fi
+          done
           ls "$TP_DIR/zonos3/servers/ggml/src/zonos3.h" "$TP_DIR/zonos3/servers/ggml/ggml/include/ggml.h"
           ls "$TP_DIR/zonos3/model/src/zonos3/registries/"
           NDK="${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}"
